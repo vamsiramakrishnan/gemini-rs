@@ -32,8 +32,11 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use gemini_adk_rs::live::{LiveEvent, LiveHandle, LiveSessionBuilder, attach_session};
+
+mod jitter;
 use gemini_genai_rs::prelude::{ModelId, SessionConfig};
 use gemini_genai_rs::transport::{ConnectBuilder, Transport, TransportConfig};
+pub use jitter::{JitterConfig, JitterReport, run_jitter};
 
 // ---------------------------------------------------------------------------
 // Scripted transport
@@ -72,6 +75,7 @@ pub struct ScriptedTransport {
     response_delay: Duration,
     reply: Arc<[u8]>,
     connected: bool,
+    probe: Option<Arc<jitter::AudioProbe>>,
 }
 
 impl ScriptedTransport {
@@ -93,7 +97,14 @@ impl ScriptedTransport {
                 .expect("static JSON encodes")
                 .into(),
             connected: false,
+            probe: None,
         }
+    }
+
+    /// Record when each realtime audio frame reaches the transport.
+    pub(crate) fn with_audio_probe(mut self, probe: Arc<jitter::AudioProbe>) -> Self {
+        self.probe = Some(probe);
+        self
     }
 }
 
@@ -117,6 +128,9 @@ impl Transport for ScriptedTransport {
     async fn send(&mut self, data: Vec<u8>) -> Result<(), Self::Error> {
         if !self.connected {
             return Err(ScriptedError::NotConnected);
+        }
+        if let Some(probe) = &self.probe {
+            probe.observe(&data);
         }
         // Only user turns get a reply; the setup frame, tool responses and
         // realtime input are accepted and dropped, as a quiet server would.

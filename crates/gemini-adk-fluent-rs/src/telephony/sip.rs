@@ -27,8 +27,9 @@
 //! RFC 4733 telephone events (DTMF) are negotiated in the SDP answer when
 //! the offer proposes them; keypresses land in session state under the
 //! shared [`super::bridge`] keys, where flow guards read them —
-//! identical to the Twilio path. What is deliberately *not* here yet: SIP
-//! registration (the agent is a directly-dialed UAS) and SRTP. Media is
+//! identical to the Twilio path. An `RTP/SAVP` offer with SDES keys is
+//! answered with SRTP ([`super::srtp`]), and [`SipAgent::register`] registers
+//! the agent with a PBX or trunk so it can be reached by address. Media is
 //! symmetric RTP: the agent sends to the offer's address but re-latches onto
 //! the source of the first arriving packet, which keeps NATted softphones
 //! working.
@@ -56,6 +57,7 @@ use super::bridge::{self, DtmfDeduper, FillerConfig};
 use super::g711;
 use super::rtp::{self, PT_PCMA, RtpSender, SAMPLES_PER_PACKET};
 use super::sdp::{self, AudioOffer};
+use super::srtp::{CryptoAttribute, MasterKey, SrtpSession};
 use crate::voice::{Playback, VoicePump, pump};
 
 /// Errors from the SIP agent.
@@ -69,6 +71,12 @@ pub enum SipError {
     NoAudioOffer,
     /// The offer had audio but no G.711 codec this agent can speak.
     NoCommonCodec,
+    /// The offer asked for SRTP with no crypto suite this agent supports.
+    NoCommonCrypto,
+    /// The registrar refused the registration (its final status code).
+    RegistrationRejected(u16),
+    /// A registrar or contact URI did not parse.
+    InvalidUri(String),
 }
 
 impl std::fmt::Display for SipError {
@@ -78,6 +86,11 @@ impl std::fmt::Display for SipError {
             Self::Sip(e) => write!(f, "sip stack error: {e:?}"),
             Self::NoAudioOffer => write!(f, "INVITE carried no answerable audio offer"),
             Self::NoCommonCodec => write!(f, "no common G.711 codec with the caller"),
+            Self::NoCommonCrypto => write!(f, "no common SRTP crypto suite with the caller"),
+            Self::RegistrationRejected(code) => {
+                write!(f, "registrar refused the registration: {code}")
+            }
+            Self::InvalidUri(uri) => write!(f, "invalid SIP URI: {uri}"),
         }
     }
 }
@@ -250,6 +263,270 @@ impl SipAgent {
     pub fn shutdown(&self) {
         self.cancel.cancel();
     }
+
+    /// Register this agent with a registrar, so calls to the account's
+    /// address reach it.
+    ///
+    /// The first REGISTER (answering a digest challenge with the account's
+    /// credentials) happens before this returns, so a wrong password or an
+    /// unreachable registrar fails here. After that, the returned
+    /// [`SipRegistration`] refreshes the binding at three quarters of the
+    /// granted lifetime, and retries after a failure, until it is
+    /// [unregistered](SipRegistration::unregister) or the agent shuts down.
+    ///
+    /// ```ignore
+    /// let agent = SipAgent::bind("0.0.0.0:5060".parse()?).await?;
+    /// let registration = agent
+    ///     .register(SipAccount::new("sip:pbx.example.com", "agent", "secret"))
+    ///     .await?;
+    /// // ... take calls with agent.next_call() ...
+    /// registration.unregister().await?;
+    /// ```
+    pub async fn register(&self, account: SipAccount) -> Result<SipRegistration, SipError> {
+        use rsipstack::dialog::authenticate::Credential;
+        use rsipstack::dialog::registration::Registration;
+
+        let registrar = rsipstack::rsip::Uri::try_from(account.registrar.as_str())
+            .map_err(|_| SipError::InvalidUri(account.registrar.clone()))?;
+        let mut registration = Registration::new(
+            self.dialog_layer.endpoint.clone(),
+            Some(Credential {
+                username: account.username.clone(),
+                password: account.password.clone(),
+                realm: account.realm.clone(),
+            }),
+        );
+        if let Some(contact) = &account.contact {
+            let uri = rsipstack::rsip::Uri::try_from(contact.as_str())
+                .map_err(|_| SipError::InvalidUri(contact.clone()))?;
+            registration.contact = Some(rsipstack::rsip::typed::Contact {
+                display_name: None,
+                uri,
+                params: vec![],
+            });
+        }
+
+        let requested = account.expires;
+        let granted = register_once(&mut registration, &registrar, requested).await?;
+        let (state_tx, state_rx) =
+            watch::channel(RegistrationState::Registered { expires: granted });
+        let cancel = self.cancel.child_token();
+        let stop = cancel.clone();
+        let task = tokio::spawn(async move {
+            let mut next = refresh_after(granted);
+            loop {
+                tokio::select! {
+                    _ = stop.cancelled() => break,
+                    _ = tokio::time::sleep(next) => {}
+                }
+                match register_once(&mut registration, &registrar, requested).await {
+                    Ok(granted) => {
+                        next = refresh_after(granted);
+                        let _ = state_tx.send(RegistrationState::Registered { expires: granted });
+                    }
+                    Err(error) => {
+                        tracing::warn!("SIP re-registration failed: {error}");
+                        next = RETRY_AFTER;
+                        let _ = state_tx.send(RegistrationState::Retrying {
+                            error: error.to_string(),
+                        });
+                    }
+                }
+            }
+            // Remove the binding, unless the endpoint itself is gone.
+            let removed = tokio::time::timeout(
+                UNREGISTER_TIMEOUT,
+                register_once(&mut registration, &registrar, Duration::ZERO),
+            )
+            .await
+            .unwrap_or_else(|_| Err(SipError::Io(std::io::ErrorKind::TimedOut.into())));
+            let _ = state_tx.send(RegistrationState::Unregistered);
+            removed.map(|_| ())
+        });
+        Ok(SipRegistration {
+            state: state_rx,
+            cancel: cancel.drop_guard(),
+            task,
+        })
+    }
+}
+
+// ── Registration ─────────────────────────────────────────────────────────────
+
+/// How long after a failed refresh to try again.
+const RETRY_AFTER: Duration = Duration::from_secs(30);
+/// How long un-registering may take before it is abandoned.
+const UNREGISTER_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// A SIP account on a registrar (a PBX or a SIP trunk provider).
+#[derive(Clone)]
+pub struct SipAccount {
+    /// The registrar's URI, e.g. `sip:pbx.example.com`.
+    pub registrar: String,
+    /// The account's user name, also the user part of the registered address.
+    pub username: String,
+    /// The account's password, for digest authentication.
+    pub password: String,
+    /// The authentication realm, when the registrar needs it named.
+    pub realm: Option<String>,
+    /// The Contact URI to register. By default it is built from the agent's
+    /// address, corrected by the address the registrar reports seeing
+    /// (`received`/`rport`), which keeps an agent behind NAT reachable.
+    pub contact: Option<String>,
+    /// The binding lifetime to ask for (the registrar may grant less).
+    pub expires: Duration,
+}
+
+impl SipAccount {
+    /// An account with a one-hour binding.
+    pub fn new(
+        registrar: impl Into<String>,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
+        Self {
+            registrar: registrar.into(),
+            username: username.into(),
+            password: password.into(),
+            realm: None,
+            contact: None,
+            expires: Duration::from_secs(3600),
+        }
+    }
+
+    /// Name the authentication realm.
+    pub fn realm(mut self, realm: impl Into<String>) -> Self {
+        self.realm = Some(realm.into());
+        self
+    }
+
+    /// Register this Contact URI instead of the derived one.
+    pub fn contact(mut self, contact: impl Into<String>) -> Self {
+        self.contact = Some(contact.into());
+        self
+    }
+
+    /// Ask for a binding lifetime (rounded down to whole seconds).
+    pub fn expires(mut self, expires: Duration) -> Self {
+        self.expires = expires;
+        self
+    }
+}
+
+impl std::fmt::Debug for SipAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SipAccount")
+            .field("registrar", &self.registrar)
+            .field("username", &self.username)
+            .field("password", &"[redacted]")
+            .field("realm", &self.realm)
+            .field("contact", &self.contact)
+            .field("expires", &self.expires)
+            .finish()
+    }
+}
+
+/// Where a [`SipRegistration`] stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RegistrationState {
+    /// The registrar holds a binding for this long from the last refresh.
+    Registered {
+        /// The lifetime the registrar granted.
+        expires: Duration,
+    },
+    /// The last refresh failed; it is retried shortly. The previous binding
+    /// may still be live until it expires.
+    Retrying {
+        /// Why the refresh failed.
+        error: String,
+    },
+    /// The binding was removed, or the agent shut down.
+    Unregistered,
+}
+
+/// A live registration, kept fresh in the background. See
+/// [`SipAgent::register`].
+pub struct SipRegistration {
+    state: watch::Receiver<RegistrationState>,
+    // Dropped without `unregister`, the registration still stops refreshing
+    // and removes its binding, in the background.
+    cancel: tokio_util::sync::DropGuard,
+    task: JoinHandle<Result<(), SipError>>,
+}
+
+impl SipRegistration {
+    /// The registration's current state.
+    pub fn state(&self) -> RegistrationState {
+        self.state.borrow().clone()
+    }
+
+    /// A receiver that sees every state change, e.g. to alert when a refresh
+    /// starts failing.
+    pub fn watch(&self) -> watch::Receiver<RegistrationState> {
+        self.state.clone()
+    }
+
+    /// Stop refreshing and remove the binding from the registrar
+    /// (a REGISTER with a zero lifetime).
+    pub async fn unregister(self) -> Result<(), SipError> {
+        drop(self.cancel);
+        match self.task.await {
+            Ok(result) => result,
+            Err(_) => Ok(()),
+        }
+    }
+}
+
+/// One REGISTER exchange; the lifetime granted on success.
+async fn register_once(
+    registration: &mut rsipstack::dialog::registration::Registration,
+    registrar: &rsipstack::rsip::Uri,
+    expires: Duration,
+) -> Result<Duration, SipError> {
+    let requested = u32::try_from(expires.as_secs()).unwrap_or(u32::MAX);
+    let response = registration
+        .register(registrar.clone(), Some(requested))
+        .await?;
+    let code = u16::from(response.status_code.clone());
+    if !(200..300).contains(&code) {
+        return Err(SipError::RegistrationRejected(code));
+    }
+    Ok(granted_expires(&response).unwrap_or(expires))
+}
+
+/// The lifetime a 2xx to REGISTER grants: the `expires` parameter of the
+/// Contact, else the `Expires` header.
+fn granted_expires(response: &rsipstack::rsip::Response) -> Option<Duration> {
+    use rsipstack::rsip::Header;
+    let mut header = None;
+    for h in response.headers.iter() {
+        match h {
+            Header::Contact(contact) => {
+                let text = contact.to_string().to_ascii_lowercase();
+                if let Some(value) = text
+                    .split(';')
+                    .find_map(|p| p.trim().strip_prefix("expires="))
+                {
+                    let digits: String = value.chars().take_while(char::is_ascii_digit).collect();
+                    if let Ok(secs) = digits.parse() {
+                        return Some(Duration::from_secs(secs));
+                    }
+                }
+            }
+            Header::Expires(expires) => {
+                header = expires.value().trim().parse().ok().map(Duration::from_secs);
+            }
+            _ => {}
+        }
+    }
+    header
+}
+
+/// When to refresh a binding granted for `expires`: at three quarters of
+/// it, but not sooner than a few seconds.
+fn refresh_after(expires: Duration) -> Duration {
+    (expires * 3 / 4).max(Duration::from_secs(5))
 }
 
 // ── Incoming call ────────────────────────────────────────────────────────────
@@ -298,13 +575,48 @@ impl IncomingCall {
             .map_err(|_| SipError::NoAudioOffer)?;
 
         let telephone_event_pt = self.offer.telephone_event_pt;
-        let answer = sdp::audio_answer(
-            seed() as u64,
-            &media_ip.to_string(),
-            rtp_port,
-            payload_type,
-            telephone_event_pt,
-        );
+        let (answer, srtp) = if self.offer.secure {
+            // SRTP (SDES): decrypt with the caller's key, encrypt with ours,
+            // answering the first offered suite we support.
+            let Some(theirs) = self
+                .offer
+                .crypto
+                .iter()
+                .find_map(|c| CryptoAttribute::parse(c))
+            else {
+                let _ = self
+                    .dialog
+                    .reject(Some(rsipstack::rsip::StatusCode::NotAcceptableHere), None);
+                return Err(SipError::NoCommonCrypto);
+            };
+            let ours = CryptoAttribute {
+                tag: theirs.tag,
+                suite: theirs.suite,
+                key: MasterKey::generate()?,
+            };
+            let answer = sdp::secure_audio_answer(
+                seed() as u64,
+                &media_ip.to_string(),
+                rtp_port,
+                payload_type,
+                telephone_event_pt,
+                &ours.to_value(),
+            );
+            let srtp = SrtpPair {
+                inbound: SrtpSession::new(theirs.suite, &theirs.key),
+                outbound: SrtpSession::new(ours.suite, &ours.key),
+            };
+            (answer, Some(srtp))
+        } else {
+            let answer = sdp::audio_answer(
+                seed() as u64,
+                &media_ip.to_string(),
+                rtp_port,
+                payload_type,
+                telephone_event_pt,
+            );
+            (answer, None)
+        };
         self.dialog
             .accept(None, Some(answer.into_bytes()))
             .map_err(SipError::Sip)?;
@@ -315,9 +627,12 @@ impl IncomingCall {
             handle,
             Arc::new(rtp_socket),
             remote,
-            payload_type,
-            telephone_event_pt,
+            MediaFormat {
+                payload_type,
+                telephone_event_pt,
+            },
             self.filler,
+            srtp,
             cancel.clone(),
         );
 
@@ -397,6 +712,23 @@ impl MediaTasks {
     }
 }
 
+/// The negotiated payload types of a call.
+#[derive(Clone, Copy)]
+struct MediaFormat {
+    /// The G.711 codec.
+    payload_type: u8,
+    /// RFC 4733 telephone events, when negotiated.
+    telephone_event_pt: Option<u8>,
+}
+
+/// The two SRTP directions of a secure call.
+struct SrtpPair {
+    /// Keyed by the caller: unprotects what arrives.
+    inbound: SrtpSession,
+    /// Keyed by us: protects what we send.
+    outbound: SrtpSession,
+}
+
 /// Wire a session's voice pump to G.711-over-RTP on a UDP socket.
 ///
 /// Symmetric RTP: packets go to `remote` until the first packet arrives,
@@ -405,11 +737,15 @@ fn rtp_media(
     handle: &LiveHandle,
     socket: Arc<UdpSocket>,
     remote: SocketAddr,
-    payload_type: u8,
-    telephone_event_pt: Option<u8>,
+    format: MediaFormat,
     filler: Option<FillerConfig>,
+    srtp: Option<SrtpPair>,
     cancel: CancellationToken,
 ) -> MediaTasks {
+    let (srtp_in, srtp_out) = match srtp {
+        Some(pair) => (Some(pair.inbound), Some(pair.outbound)),
+        None => (None, None),
+    };
     let (mic_tx, mic_rx) = mpsc::channel::<Vec<i16>>(64);
     let (speaker_tx, speaker_rx) = mpsc::channel::<Playback>(64);
     let voice_pump = pump(
@@ -425,18 +761,19 @@ fn rtp_media(
 
     let inbound = tokio::spawn(inbound_loop(
         socket.clone(),
-        payload_type,
-        telephone_event_pt,
+        format,
         handle.state().clone(),
         mic_tx,
         peer_tx,
+        srtp_in,
         cancel.clone(),
     ));
     let outbound = tokio::spawn(outbound_loop(
         socket,
-        payload_type,
+        format.payload_type,
         speaker_rx,
         peer_rx,
+        srtp_out,
         cancel,
     ));
 
@@ -450,13 +787,17 @@ fn rtp_media(
 
 async fn inbound_loop(
     socket: Arc<UdpSocket>,
-    payload_type: u8,
-    telephone_event_pt: Option<u8>,
+    format: MediaFormat,
     state: State,
     mic_tx: mpsc::Sender<Vec<i16>>,
     peer_tx: watch::Sender<SocketAddr>,
+    mut srtp: Option<SrtpSession>,
     cancel: CancellationToken,
 ) {
+    let MediaFormat {
+        payload_type,
+        telephone_event_pt,
+    } = format;
     let mut buf = [0u8; 2048];
     let mut latched = false;
     let mut dtmf = DtmfDeduper::default();
@@ -468,7 +809,20 @@ async fn inbound_loop(
                 Err(_) => break,
             },
         };
-        let Some(packet) = rtp::parse(&buf[..len]) else {
+        let decrypted;
+        let datagram = match srtp.as_mut() {
+            // A packet that fails authentication is dropped unread, and
+            // does not re-latch the peer address.
+            Some(srtp) => match srtp.unprotect(&buf[..len]) {
+                Ok(plain) => {
+                    decrypted = plain;
+                    &decrypted[..]
+                }
+                Err(_) => continue,
+            },
+            None => &buf[..len],
+        };
+        let Some(packet) = rtp::parse(datagram) else {
             continue; // stray non-RTP traffic on the media port
         };
         if telephone_event_pt == Some(packet.payload_type) {
@@ -504,6 +858,7 @@ async fn outbound_loop(
     payload_type: u8,
     mut speaker_rx: mpsc::Receiver<Playback>,
     peer_rx: watch::Receiver<SocketAddr>,
+    mut srtp: Option<SrtpSession>,
     cancel: CancellationToken,
 ) {
     let silence_byte: u8 = if payload_type == PT_PCMA { 0xD5 } else { 0xFF };
@@ -538,7 +893,13 @@ async fn outbound_loop(
                 }
                 // Constant 20 ms ptime: pad a short tail with silence.
                 payload.resize(SAMPLES_PER_PACKET, silence_byte);
-                let datagram = sender.packetize(&payload, SAMPLES_PER_PACKET as u32);
+                let mut datagram = sender.packetize(&payload, SAMPLES_PER_PACKET as u32);
+                if let Some(srtp) = srtp.as_mut() {
+                    match srtp.protect(&datagram) {
+                        Some(protected) => datagram = protected,
+                        None => continue,
+                    }
+                }
                 let target = *peer_rx.borrow();
                 if socket.send_to(&datagram, target).await.is_err() {
                     break;
@@ -586,6 +947,322 @@ mod tests {
             .lines()
             .next()
             .map(str::to_string)
+    }
+
+    /// A registrar that challenges a REGISTER without credentials (401) and
+    /// grants one with them for 60 s. Every request it sees is forwarded.
+    async fn fake_registrar() -> (SocketAddr, mpsc::UnboundedReceiver<String>) {
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = socket.local_addr().unwrap();
+        let (seen_tx, seen_rx) = mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            while let Ok((len, from)) = socket.recv_from(&mut buf).await {
+                let request = String::from_utf8_lossy(&buf[..len]).to_string();
+                let echoed: Vec<&str> = request
+                    .lines()
+                    .filter(|l| {
+                        let l = l.to_ascii_lowercase();
+                        ["via:", "from:", "call-id:", "cseq:"]
+                            .iter()
+                            .any(|h| l.starts_with(h))
+                    })
+                    .collect();
+                let to = request
+                    .lines()
+                    .find(|l| l.to_ascii_lowercase().starts_with("to:"))
+                    .unwrap_or("To: <sip:unknown@invalid>");
+                let authorized = request.to_ascii_lowercase().contains("\nauthorization:");
+                let (status, extra) = if authorized {
+                    let contact = request
+                        .lines()
+                        .find(|l| l.to_ascii_lowercase().starts_with("contact:"))
+                        .unwrap_or("Contact: <sip:alice@127.0.0.1>");
+                    ("200 OK", format!("{contact};expires=60\r\n"))
+                } else {
+                    (
+                        "401 Unauthorized",
+                        "WWW-Authenticate: Digest realm=\"test\", nonce=\"n1\", algorithm=MD5\r\n"
+                            .to_string(),
+                    )
+                };
+                let response = format!(
+                    "SIP/2.0 {status}\r\n{}\r\n{to};tag=reg\r\n{extra}Content-Length: 0\r\n\r\n",
+                    echoed.join("\r\n")
+                );
+                let _ = socket.send_to(response.as_bytes(), from).await;
+                let _ = seen_tx.send(request);
+            }
+        });
+        (addr, seen_rx)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn registers_with_digest_auth_and_unregisters() {
+        let (registrar, mut seen) = fake_registrar().await;
+        let agent = SipAgent::bind("127.0.0.1:0".parse().unwrap())
+            .await
+            .expect("bind agent");
+
+        let registration = tokio::time::timeout(
+            Duration::from_secs(5),
+            agent.register(
+                SipAccount::new(format!("sip:{registrar}"), "alice", "secret")
+                    .expires(Duration::from_secs(300)),
+            ),
+        )
+        .await
+        .expect("registration finishes")
+        .expect("registrar accepts");
+        assert_eq!(
+            registration.state(),
+            RegistrationState::Registered {
+                expires: Duration::from_secs(60)
+            },
+            "the lifetime the registrar granted, not the one asked for"
+        );
+
+        let first = seen.recv().await.unwrap();
+        assert!(first.starts_with("REGISTER "), "{first}");
+        assert!(!first.to_ascii_lowercase().contains("authorization:"));
+        let answered = loop {
+            let request = seen.recv().await.unwrap();
+            if request.to_ascii_lowercase().contains("authorization:") {
+                break request;
+            }
+        };
+        for part in [
+            "username=\"alice\"",
+            "realm=\"test\"",
+            "nonce=\"n1\"",
+            "response=",
+        ] {
+            assert!(answered.contains(part), "missing {part} in {answered}");
+        }
+        assert!(
+            !answered.contains("secret"),
+            "the password never goes on the wire"
+        );
+
+        tokio::time::timeout(Duration::from_secs(5), registration.unregister())
+            .await
+            .expect("unregister finishes")
+            .expect("registrar accepts the removal");
+        let mut removed = false;
+        while let Ok(request) = seen.try_recv() {
+            removed |= request
+                .lines()
+                .any(|l| l.eq_ignore_ascii_case("expires: 0"));
+        }
+        assert!(
+            removed,
+            "a REGISTER with a zero lifetime removes the binding"
+        );
+        agent.shutdown();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_refused_registration_fails_at_once() {
+        // A registrar that refuses everyone.
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let registrar = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            while let Ok((len, from)) = socket.recv_from(&mut buf).await {
+                let request = String::from_utf8_lossy(&buf[..len]).to_string();
+                let echoed: Vec<&str> = request
+                    .lines()
+                    .filter(|l| {
+                        let l = l.to_ascii_lowercase();
+                        ["via:", "from:", "to:", "call-id:", "cseq:"]
+                            .iter()
+                            .any(|h| l.starts_with(h))
+                    })
+                    .collect();
+                let response = format!(
+                    "SIP/2.0 403 Forbidden\r\n{}\r\nContent-Length: 0\r\n\r\n",
+                    echoed.join("\r\n")
+                );
+                let _ = socket.send_to(response.as_bytes(), from).await;
+            }
+        });
+        let agent = SipAgent::bind("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            agent.register(SipAccount::new(format!("sip:{registrar}"), "mallory", "x")),
+        )
+        .await
+        .expect("finishes");
+        assert!(
+            matches!(result, Err(SipError::RegistrationRejected(403))),
+            "{:?}",
+            result.err()
+        );
+        agent.shutdown();
+    }
+
+    /// Read datagrams until a SIP response with status `code` arrives.
+    async fn recv_response(socket: &UdpSocket, code: &str) -> String {
+        let mut buf = [0u8; 4096];
+        loop {
+            let (len, _) = tokio::time::timeout(Duration::from_secs(3), socket.recv_from(&mut buf))
+                .await
+                .expect("a response")
+                .unwrap();
+            let text = String::from_utf8_lossy(&buf[..len]).to_string();
+            if text.lines().next().is_some_and(|l| l.contains(code)) {
+                return text;
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_srtp_offer_gets_encrypted_media_both_ways() {
+        use super::super::srtp::SrtpSuite;
+        use base64::Engine as _;
+
+        // The model says 200 ms of a tone once the call is up.
+        let tone: Vec<u8> = (0..4800i16)
+            .flat_map(|i| (if i % 48 < 24 { 6000i16 } else { -6000 }).to_le_bytes())
+            .collect();
+        let (transport, control) = crate::live::scripted::ScriptedServer::new()
+            .frame(serde_json::json!({
+                "serverContent": { "modelTurn": { "parts": [{ "inlineData": {
+                    "mimeType": "audio/pcm;rate=24000",
+                    "data": base64::engine::general_purpose::STANDARD.encode(&tone),
+                } }] } }
+            }))
+            .into_transport();
+        let handle = crate::live::Live::builder()
+            .connect_with_transport(transport)
+            .await
+            .unwrap();
+
+        let mut agent = SipAgent::bind("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
+        let target = format!("127.0.0.1:{}", agent.sip_port());
+        let (call_tx, call_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            if let Some(incoming) = agent.next_call().await {
+                let _ = call_tx.send(incoming);
+            }
+            // Keep the agent (and its endpoint) alive for the call.
+            std::future::pending::<()>().await;
+        });
+
+        // The caller: a SIP socket, an RTP socket, and its own SRTP key.
+        let uac = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let uac_port = uac.local_addr().unwrap().port();
+        let media = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let media_port = media.local_addr().unwrap().port();
+        let caller_key = MasterKey::generate().unwrap();
+        let sdp_body = format!(
+            "v=0\r\no=probe 1 1 IN IP4 127.0.0.1\r\ns=call\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n\
+             m=audio {media_port} RTP/SAVP 0\r\na=rtpmap:0 PCMU/8000\r\n\
+             a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:{}\r\n",
+            caller_key.to_inline()
+        );
+        let invite = format!(
+            "INVITE sip:gemini@{target} SIP/2.0\r\n\
+             Via: SIP/2.0/UDP 127.0.0.1:{uac_port};branch=z9hG4bKsrtp1\r\n\
+             Max-Forwards: 70\r\n\
+             From: <sip:probe@127.0.0.1>;tag=srtp\r\n\
+             To: <sip:gemini@{target}>\r\n\
+             Call-ID: srtp-1@127.0.0.1\r\n\
+             CSeq: 1 INVITE\r\n\
+             Contact: <sip:probe@127.0.0.1:{uac_port}>\r\n\
+             Content-Type: application/sdp\r\n\
+             Content-Length: {}\r\n\r\n{sdp_body}",
+            sdp_body.len()
+        );
+        uac.send_to(invite.as_bytes(), &target).await.unwrap();
+        let incoming = tokio::time::timeout(Duration::from_secs(3), call_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(incoming.offer.secure);
+        let _call = incoming.answer(&handle).await.expect("answers with SRTP");
+
+        let ok = recv_response(&uac, "200").await;
+        let answer_sdp = ok.split("\r\n\r\n").nth(1).unwrap();
+        let answer = sdp::parse_audio_offer(answer_sdp).expect("an SDP answer");
+        assert!(answer.secure, "{answer_sdp}");
+        let agent_crypto = CryptoAttribute::parse(&answer.crypto[0]).unwrap();
+        assert_eq!(agent_crypto.tag, 1);
+        assert_eq!(agent_crypto.suite, SrtpSuite::AesCm128HmacSha1_80);
+        assert_ne!(
+            agent_crypto.key, caller_key,
+            "the agent sends under its own key"
+        );
+        let agent_rtp = format!("{}:{}", answer.host, answer.port);
+
+        let speak = |key: &MasterKey, first: u16| {
+            let mut session = SrtpSession::new(SrtpSuite::AesCm128HmacSha1_80, key);
+            (first..first + 15)
+                .map(|seq| {
+                    session
+                        .protect(&rtp::build(&rtp::RtpPacket {
+                            payload_type: 0,
+                            marker: seq == first,
+                            sequence: seq,
+                            timestamp: u32::from(seq) * 160,
+                            ssrc: 0xCA11_E500,
+                            payload: vec![0x10; 160],
+                        }))
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+        let heard = || {
+            control
+                .outbound_frames()
+                .iter()
+                .filter_map(|frame| serde_json::from_slice::<serde_json::Value>(frame).ok())
+                .any(|message| message.pointer("/realtimeInput/audio").is_some())
+        };
+
+        // Caller → agent under a key the agent was not given: dropped.
+        for packet in speak(&MasterKey::generate().unwrap(), 100) {
+            media.send_to(&packet, &agent_rtp).await.unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !heard(),
+            "packets that fail authentication never reach the model"
+        );
+
+        // Under the offered key: decrypted speech reaches the model.
+        for packet in speak(&caller_key, 200) {
+            media.send_to(&packet, &agent_rtp).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(heard(), "decrypted caller audio reached the model");
+
+        // Agent → caller: the model's audio arrives as SRTP under the
+        // agent's key, and decrypts to non-silent G.711.
+        control.release();
+        let mut from_agent = SrtpSession::new(agent_crypto.suite, &agent_crypto.key);
+        let mut buf = [0u8; 2048];
+        let (len, _) = tokio::time::timeout(Duration::from_secs(3), media.recv_from(&mut buf))
+            .await
+            .expect("the agent sends media")
+            .unwrap();
+        let plain = from_agent
+            .unprotect(&buf[..len])
+            .expect("authenticates under the answered key");
+        let packet = rtp::parse(&plain).unwrap();
+        assert_eq!(packet.payload_type, 0);
+        assert!(packet.payload.iter().any(|b| *b != 0xFF), "not silence");
+    }
+
+    #[test]
+    fn an_account_never_prints_its_password() {
+        let account = SipAccount::new("sip:pbx.example.com", "alice", "hunter2");
+        assert!(!format!("{account:?}").contains("hunter2"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

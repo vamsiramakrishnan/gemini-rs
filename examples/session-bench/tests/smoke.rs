@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use example_session_bench::{BenchConfig, run};
+use example_session_bench::{BenchConfig, JitterConfig, run, run_jitter};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_sessions_complete_every_turn() {
@@ -55,4 +55,26 @@ async fn concurrent_sessions_complete_every_turn() {
     assert_eq!(back.turn_ms.count, report.turn_ms.count);
     assert!((back.turn_ms.p99_ms - report.turn_ms.p99_ms).abs() < 1e-6);
     assert!((back.first_text_ms.p50_ms - report.first_text_ms.p50_ms).abs() < 1e-6);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_microphone_chunk_reaches_the_wire_in_order() {
+    let report = run_jitter(JitterConfig {
+        sessions: 3,
+        duration: Duration::from_millis(600),
+        chunk: Duration::from_millis(20),
+    })
+    .await;
+    assert_eq!(report.sessions, 3, "{}", report.summary());
+    assert!(report.chunks_sent >= 3 * 25, "{}", report.summary());
+    assert_eq!(
+        report.chunks_wired,
+        report.chunks_sent,
+        "{}",
+        report.summary()
+    );
+    assert_eq!(report.chunks_reordered, 0, "{}", report.summary());
+    assert_eq!(report.mic_to_wire_ms.count, report.chunks_sent);
+    // Spacing is measured between consecutive frames of one session.
+    assert_eq!(report.wire_jitter_ms.count, report.chunks_sent - 3);
 }

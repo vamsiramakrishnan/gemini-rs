@@ -139,12 +139,62 @@ cargo run -p example-sip-agent    # 0.0.0.0:5060/udp
 # From Linphone/Zoiper on the same network: call sip:gemini@<host>
 ```
 
-Deliberately not there yet: SIP registration (the agent is a
-directly-dialed UAS) and SRTP (the Twilio path additionally has DTMF via
-its protocol). The signalling layer is covered by an in-repo integration
-test that drives a hand-written SIP UAC against a bound agent
-(OPTIONS → 200, INVITE → ringing → surfaced call → reject → final
-failure).
+### Registering with a PBX or trunk
+
+A directly dialed agent needs a fixed address. To be reached through a PBX
+extension or a provider's SIP trunk instead, register it:
+
+```rust,ignore
+use gemini_adk_fluent_rs::telephony::sip::{SipAccount, SipAgent};
+
+let mut agent = SipAgent::bind("0.0.0.0:5060".parse()?).await?;
+let registration = agent
+    .register(SipAccount::new("sip:pbx.example.com", "agent", password))
+    .await?; // fails here on a wrong password or an unreachable registrar
+// ... agent.next_call() as above ...
+registration.unregister().await?;
+```
+
+The first REGISTER, including the digest challenge, completes before
+`register` returns. After that the binding is refreshed at three quarters of
+the lifetime the registrar granted. A failed refresh is retried every 30 s
+and shows as `RegistrationState::Retrying` on `registration.watch()`. The
+Contact is corrected by the address the registrar reports seeing, so an
+agent behind NAT stays reachable. `SipAccount::contact` overrides it.
+Dropping the registration, or calling `unregister`, removes the binding.
+`SipAccount`'s `Debug` output never shows the password.
+
+### Encrypted media (SRTP)
+
+An offer on the secure profile (`RTP/SAVP`) with SDES keys (`a=crypto`) is
+answered with SRTP (RFC 3711). The answer accepts the first offered suite
+the agent supports, `AES_CM_128_HMAC_SHA1_80` or `AES_CM_128_HMAC_SHA1_32`,
+and carries a fresh key for the agent's direction. Inbound packets that fail
+authentication, or replay an earlier packet, are dropped before decoding. A
+secure offer with no supported suite is refused with 488, and `answer`
+returns `SipError::NoCommonCrypto`. `incoming.offer.secure` tells you which
+kind of call it is before you answer, so a deployment that requires
+encryption can reject plain calls.
+
+SDES carries the keys in the SDP body, so media is only as private as the
+signalling. Use SIP over TLS on the trunk when the keys must not be readable
+on the network. SRTCP, MKIs and DTLS-SRTP are not supported.
+
+`telephony::srtp` is the packet layer on its own (`SrtpSession::protect` /
+`unprotect`, `CryptoAttribute` for the SDP line) for other RTP transports.
+It is checked against the RFC 3711 key-derivation and keystream test vectors
+and libsrtp's reference packet.
+
+The signalling layer is covered by in-repo tests that drive hand-written SIP
+peers against a bound agent:
+
+- OPTIONS → 200, then INVITE → ringing → surfaced call → reject → final
+  failure;
+- registration through a digest challenge, then removal;
+- a refused registration;
+- an SRTP call where the caller's encrypted audio reaches the model, audio
+  under a wrong key does not, and the model's audio comes back as SRTP
+  under the answered key.
 
 ## Bringing your own transport
 
@@ -189,7 +239,7 @@ shared components. A new connector should look like them.
 | | Twilio Media Streams | Raw SIP (`sip` feature) | AudioHook (example) |
 |---|---|---|---|
 | Who terminates PSTN | Twilio (also Vonage/Telnyx equivalents) | your SIP trunk / PBX | the contact-center platform |
-| Transport | WebSocket you host | UDP SIP + RTP in-process | WebSocket you host |
+| Transport | WebSocket you host | UDP SIP + RTP or SRTP in-process | WebSocket you host |
 | Barge-in | `clear` message to carrier | drop own RTP buffer | `barge_in` event to platform |
 | DTMF | ✓ (`telephony:dtmf*` state) | ✓ (RFC 4733, same state keys) | ✓ (`dtmf` message, same state keys) |
 | Extra dependency | none (any WS server) | `rsipstack` | none (any WS server) |

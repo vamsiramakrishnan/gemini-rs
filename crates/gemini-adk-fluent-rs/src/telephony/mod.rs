@@ -27,5 +27,7 @@ pub mod twilio;
 
 #[cfg(feature = "sip")]
 pub mod sip;
+#[cfg(feature = "sip")]
+pub mod srtp;
 
 pub use twilio::{Inbound, StartMeta, TWILIO_HZ, TwilioCall, TwilioError};

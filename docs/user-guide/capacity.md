@@ -92,6 +92,55 @@ the same `after_connect_kb`, and `after_disconnect_kb` does not grow with
 repeated runs. Use `--hold-secs` with a long idle period to look for the
 slow kind.
 
+## Microphone jitter
+
+A voice agent streams microphone audio in 20 ms chunks, and the model's
+voice activity detection reads their timing. A chunk held up behind a busy
+lane arrives late, and a run of late chunks reads as a pause. The jitter mode
+measures how the runtime forwards that audio:
+
+```bash
+cargo run --release -p example-session-bench -- --jitter-secs 10 --sessions 100 --json jitter.json
+```
+
+Each session gets a paced microphone task that stamps a sequence number into
+its PCM and calls `send_audio` every 20 ms. The scripted transport reads the
+number back from each `realtimeInput` frame and records when the frame
+arrived. The report has three distributions:
+
+- **mic → wire**: `send_audio` to the frame reaching the transport, through
+  L1 and the L0 encoder. This is the latency the runtime adds.
+- **wire jitter**: how far the spacing between one session's frames on the
+  wire strays from 20 ms.
+- **source jitter**: the same measure for the microphone task's own timer.
+  This is the harness's noise floor, and wire jitter cannot be measured
+  below it.
+
+It also counts chunks lost and chunks reordered. The run exits non-zero if
+either is non-zero.
+
+Release profile, the same container as above (4 shared vCPUs, Intel Xeon
+2.1 GHz), Rust 1.93.1, 10 s per run:
+
+| Sessions | Chunks | Mic → wire p50 / p99 / max | Wire jitter p99 / max | Source jitter p99 / max |
+|---|---|---|---|---|
+| 1 | 501 | 0.032 / 0.063 / 0.082 ms | 0.829 / 0.843 ms | 0.829 / 0.852 ms |
+| 10 | 5,010 | 0.005 / 0.045 / 0.301 ms | 0.809 / 0.906 ms | 0.813 / 0.896 ms |
+| 100 | 50,100 | 0.006 / 0.034 / 0.890 ms | 1.162 / 2.722 ms | 1.159 / 2.739 ms |
+| 500 | 250,500 | 0.006 / 0.029 / 1.607 ms | 2.305 / 7.164 ms | 2.302 / 7.147 ms |
+| 1,000 | 501,000 | 0.006 / 0.036 / 2.388 ms | 2.886 / 13.349 ms | 2.879 / 13.342 ms |
+
+No chunk was lost or reordered in any run. Mic → wire stays below 0.04 ms at
+p99 at every size. Wire jitter matches source jitter to within 0.01 ms, which
+means the runtime adds no jitter this harness can detect. The jitter that
+does grow with load, 2.9 ms at p99 with 1,000 sessions, comes from the
+scheduler waking the microphone tasks late. It is a property of the host
+running 1,000 timers on four vCPUs, not of the audio path.
+
+The benchmark covers what the SDK controls. It stops at the transport, so
+network jitter between the process and the Live endpoint, and the model's
+own buffering, are not included.
+
 ## Using it as a gate
 
 Keep one JSON report per release under version control and diff the

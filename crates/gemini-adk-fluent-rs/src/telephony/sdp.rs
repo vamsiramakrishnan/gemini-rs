@@ -4,9 +4,11 @@
 //! media sent and which codecs it can speak; the 200 OK carries the *answer*
 //! committing to one. This module implements exactly the slice a G.711 voice
 //! agent needs: parse the offer's audio media line and connection address,
-//! pick μ-law or A-law, and print a well-formed answer. It is deliberately
-//! not a general SDP implementation — video sections, ICE, and crypto lines
-//! are ignored on the way in and never produced on the way out.
+//! pick μ-law or A-law, and print a well-formed answer. An `RTP/SAVP` offer's
+//! SDES `a=crypto` lines are collected for the SRTP layer, and
+//! [`secure_audio_answer`] answers one. It is deliberately not a general SDP
+//! implementation: video sections and ICE are ignored on the way in and never
+//! produced on the way out.
 
 use std::fmt::Write as _;
 
@@ -25,6 +27,12 @@ pub struct AudioOffer {
     /// (RFC 4733 DTMF), when present. Echoed in the answer so the caller
     /// sends keypresses as events instead of in-band tones.
     pub telephone_event_pt: Option<u8>,
+    /// Whether the audio line's profile is secure (`RTP/SAVP`): the caller
+    /// sends SRTP and expects SRTP back.
+    pub secure: bool,
+    /// The values of the audio section's `a=crypto:` lines (SDES keys), in
+    /// preference order.
+    pub crypto: Vec<String>,
 }
 
 impl AudioOffer {
@@ -47,6 +55,8 @@ pub fn parse_audio_offer(sdp: &str) -> Option<AudioOffer> {
     let mut audio: Option<(u16, Vec<u8>)> = None;
     let mut media_host: Option<String> = None;
     let mut telephone_event_pt: Option<u8> = None;
+    let mut secure = false;
+    let mut crypto = Vec::new();
     let mut in_audio = false;
 
     for line in sdp.lines() {
@@ -58,6 +68,10 @@ pub fn parse_audio_offer(sdp: &str) -> Option<AudioOffer> {
                 media_host = Some(host);
             } else if session_host.is_none() {
                 session_host = Some(host);
+            }
+        } else if let Some(rest) = line.strip_prefix("a=crypto:") {
+            if in_audio {
+                crypto.push(rest.trim().to_string());
             }
         } else if let Some(rest) = line.strip_prefix("a=rtpmap:") {
             // a=rtpmap:101 telephone-event/8000
@@ -75,7 +89,8 @@ pub fn parse_audio_offer(sdp: &str) -> Option<AudioOffer> {
             if kind == "audio" && audio.is_none() {
                 in_audio = true;
                 let port: u16 = parts.next()?.parse().ok()?;
-                let _proto = parts.next()?; // RTP/AVP
+                // RTP/AVP, or RTP/SAVP for SRTP.
+                secure = parts.next()?.eq_ignore_ascii_case("RTP/SAVP");
                 let payload_types = parts.filter_map(|p| p.parse().ok()).collect();
                 audio = Some((port, payload_types));
             } else {
@@ -96,6 +111,8 @@ pub fn parse_audio_offer(sdp: &str) -> Option<AudioOffer> {
         port,
         payload_types,
         telephone_event_pt,
+        secure,
+        crypto,
     })
 }
 
@@ -111,6 +128,50 @@ pub fn audio_answer(
     payload_type: u8,
     telephone_event_pt: Option<u8>,
 ) -> String {
+    answer(
+        session_id,
+        host,
+        port,
+        payload_type,
+        telephone_event_pt,
+        None,
+    )
+}
+
+/// [`audio_answer`] for an `RTP/SAVP` offer: the answer uses the secure
+/// profile and carries `crypto`, the value of our `a=crypto:` line (the tag
+/// and suite of the offer line we accept, and our own key).
+pub fn secure_audio_answer(
+    session_id: u64,
+    host: &str,
+    port: u16,
+    payload_type: u8,
+    telephone_event_pt: Option<u8>,
+    crypto: &str,
+) -> String {
+    answer(
+        session_id,
+        host,
+        port,
+        payload_type,
+        telephone_event_pt,
+        Some(crypto),
+    )
+}
+
+fn answer(
+    session_id: u64,
+    host: &str,
+    port: u16,
+    payload_type: u8,
+    telephone_event_pt: Option<u8>,
+    crypto: Option<&str>,
+) -> String {
+    let profile = if crypto.is_some() {
+        "RTP/SAVP"
+    } else {
+        "RTP/AVP"
+    };
     let codec_name = if payload_type == PT_PCMA {
         "PCMA"
     } else {
@@ -124,15 +185,18 @@ pub fn audio_answer(
     let _ = writeln!(out, "t=0 0");
     match telephone_event_pt {
         Some(te) => {
-            let _ = writeln!(out, "m=audio {port} RTP/AVP {payload_type} {te}");
+            let _ = writeln!(out, "m=audio {port} {profile} {payload_type} {te}");
             let _ = writeln!(out, "a=rtpmap:{payload_type} {codec_name}/8000");
             let _ = writeln!(out, "a=rtpmap:{te} telephone-event/8000");
             let _ = writeln!(out, "a=fmtp:{te} 0-15");
         }
         None => {
-            let _ = writeln!(out, "m=audio {port} RTP/AVP {payload_type}");
+            let _ = writeln!(out, "m=audio {port} {profile} {payload_type}");
             let _ = writeln!(out, "a=rtpmap:{payload_type} {codec_name}/8000");
         }
+    }
+    if let Some(crypto) = crypto {
+        let _ = writeln!(out, "a=crypto:{crypto}");
     }
     let _ = writeln!(out, "a=ptime:20");
     let _ = writeln!(out, "a=sendrecv");
@@ -203,6 +267,36 @@ mod tests {
             None,
             "opus-only offers are not answerable by a G.711 agent"
         );
+    }
+
+    #[test]
+    fn an_savp_offer_is_secure_and_answered_securely() {
+        let sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 4000 RTP/SAVP 0\r\n\
+                   a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:AAAA\r\n\
+                   a=crypto:2 AES_CM_128_HMAC_SHA1_32 inline:BBBB\r\n";
+        let offer = parse_audio_offer(sdp).unwrap();
+        assert!(offer.secure);
+        assert_eq!(
+            offer.crypto,
+            [
+                "1 AES_CM_128_HMAC_SHA1_80 inline:AAAA",
+                "2 AES_CM_128_HMAC_SHA1_32 inline:BBBB"
+            ]
+        );
+        let plain =
+            parse_audio_offer("v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 4000 RTP/AVP 0\r\n").unwrap();
+        assert!(!plain.secure && plain.crypto.is_empty());
+
+        let answer = secure_audio_answer(
+            1,
+            "192.0.2.5",
+            40000,
+            0,
+            None,
+            "1 AES_CM_128_HMAC_SHA1_80 inline:CCCC",
+        );
+        assert!(answer.contains("m=audio 40000 RTP/SAVP 0\r\n"), "{answer}");
+        assert!(answer.contains("a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:CCCC\r\n"));
     }
 
     #[test]
