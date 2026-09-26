@@ -257,6 +257,10 @@ pub struct StageSpec {
     /// Repair policy for this stage (reprompt/escalate on stalling).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repair: Option<RepairPolicy>,
+    /// Voice pacing while this stage is active: reprompt on silence, filler
+    /// cues for slow tools, holding the floor, endpointing, context delivery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<VoiceTiming>,
     /// Named-resolver slot declarations. Bound to implementations at load via a
     /// [`ResolverRegistry`]; the data lives in the spec so it round-trips JSON.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -266,7 +270,7 @@ pub struct StageSpec {
 // The digression/repair vocabulary is owned by the runtime: the authoring layer
 // lowers into it and never reimplements it. Re-exported here so existing
 // `conversation::{Resume, RepairPolicy, FlowStack}` paths keep working.
-pub use gemini_adk_rs::flow::{FlowStack, RepairPolicy, Resume};
+pub use gemini_adk_rs::flow::{FlowStack, RepairPolicy, Resume, VoiceTiming};
 use gemini_adk_rs::flow::{Overlay, escalate_flag};
 
 /// A digression (overlay): a named sub-flow that suspends the main flow when its
@@ -412,6 +416,7 @@ pub struct CompiledConversation {
     extractors: Vec<Extract>,
     overlays: Vec<CompiledOverlay>,
     repair: BTreeMap<String, RepairPolicy>,
+    timing: BTreeMap<String, VoiceTiming>,
     policies: Vec<crate::policy::Policy>,
     spec: ConversationSpec,
 }
@@ -475,10 +480,16 @@ impl CompiledConversation {
         FlowStack::new(self.flow.clone(), mode)
             .with_overlays(self.overlays.iter().map(CompiledOverlay::to_runtime))
             .with_repairs(self.repair.clone())
+            .with_timings(self.timing.clone())
     }
     /// The per-stage repair policies the runtime applies to the main flow.
     pub fn repair_policies(&self) -> &BTreeMap<String, RepairPolicy> {
         &self.repair
+    }
+    /// The per-stage voice timing, main flow and digressions, keyed by
+    /// stage id.
+    pub fn timing_policies(&self) -> &BTreeMap<String, VoiceTiming> {
+        &self.timing
     }
     /// The authoring spec it was compiled from.
     pub fn spec(&self) -> &ConversationSpec {
@@ -753,6 +764,24 @@ impl Conversation {
         self
     }
 
+    /// Set the current stage's voice pacing; see [`VoiceTiming`].
+    ///
+    /// ```
+    /// # use gemini_adk_fluent_rs::prelude::*;
+    /// use std::time::Duration;
+    /// Conversation::new("disclosure")
+    ///     .stage("read_terms")
+    ///     .say("Read the terms word for word.")
+    ///     .timing(VoiceTiming::new().uninterruptible())
+    ///     .stage("confirm")
+    ///     .collect(["agreed"])
+    ///     .timing(VoiceTiming::new().reprompt_after(Duration::from_secs(6)));
+    /// ```
+    pub fn timing(mut self, timing: VoiceTiming) -> Self {
+        self.current().timing = Some(timing);
+        self
+    }
+
     /// Require these stages for completion (lowers to a Flow `require`). Targets
     /// the active overlay when authoring one, else the main flow.
     pub fn require<I, S>(mut self, steps: I) -> Self
@@ -891,6 +920,7 @@ impl crate::live::Live {
             .map(CompiledOverlay::to_runtime)
             .collect();
         self.repair_policies = convo.repair_policies().clone();
+        self.stage_timings = convo.timing_policies().clone();
         for extract in convo.all_extractors() {
             self = self.extract_record(extract);
         }
@@ -1185,6 +1215,14 @@ fn compile_spec(
         .filter_map(|s| s.repair.clone().map(|p| (s.id.clone(), p)))
         .collect();
 
+    // Per-stage voice timing, main flow and digressions alike.
+    let timing = spec
+        .stages
+        .iter()
+        .chain(spec.overlays.iter().flat_map(|ov| ov.stages.iter()))
+        .filter_map(|s| s.timing.clone().map(|t| (s.id.clone(), t)))
+        .collect();
+
     let policies = spec.policies.clone();
 
     Ok(CompiledConversation {
@@ -1192,6 +1230,7 @@ fn compile_spec(
         extractors,
         overlays,
         repair,
+        timing,
         policies,
         spec,
     })
@@ -1765,6 +1804,7 @@ mod tests {
             monitor,
             live.digressions().to_vec(),
             live.repair_policies().clone(),
+            std::collections::BTreeMap::new(),
             &[],
         );
 
@@ -1888,6 +1928,31 @@ mod tests {
         sim.turn();
         assert!(sim.is_complete());
         assert!(sim.active().is_empty());
+    }
+
+    #[test]
+    fn stage_timing_round_trips_and_reaches_the_stack() {
+        use std::time::Duration;
+        let convo = Conversation::new("pacing")
+            .stage("ask")
+            .collect(["name"])
+            .timing(VoiceTiming::new().reprompt_after(Duration::from_secs(6)))
+            .add_stage(crate::motifs::Motif::disclosure("terms", "terms_ack"))
+            .compile()
+            .unwrap();
+
+        let json = serde_json::to_value(convo.spec()).unwrap();
+        assert_eq!(json["stages"][0]["timing"]["reprompt_after_ms"], 6000);
+        assert_eq!(json["stages"][1]["timing"]["interruptible"], false);
+        let back: ConversationSpec = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            back.stages[0].timing,
+            Some(VoiceTiming::new().reprompt_after(Duration::from_secs(6)))
+        );
+
+        assert!(convo.timing_policies()["terms"].holds_floor());
+        let stack = convo.stack(Enforcement::Enforce);
+        assert_eq!(stack.timing_policies().len(), 2);
     }
 
     #[tokio::test]

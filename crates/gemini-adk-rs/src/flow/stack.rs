@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use super::timing::{VOICE_TIMING_KEY, VoiceTiming};
 use super::{
     CompiledFlow, Enforcement, Flow, FlowExplanation, FlowMonitor, Guard, Marking, Step, StepAction,
 };
@@ -211,6 +212,8 @@ pub struct FlowStack {
     repair: BTreeMap<String, RepairPolicy>,
     /// Consecutive turns each main step has been active without completing.
     active_turns: BTreeMap<String, u32>,
+    /// Per-step voice timing, keyed by step id in whichever layer is active.
+    timing: BTreeMap<String, VoiceTiming>,
 }
 
 impl std::fmt::Debug for FlowStack {
@@ -221,6 +224,7 @@ impl std::fmt::Debug for FlowStack {
             .field("active", &self.active.as_ref().map(|a| &a.name))
             .field("terminated", &self.terminated)
             .field("repair", &self.repair)
+            .field("timing", &self.timing)
             .finish()
     }
 }
@@ -243,6 +247,7 @@ impl FlowStack {
             terminated: None,
             repair: BTreeMap::new(),
             active_turns: BTreeMap::new(),
+            timing: BTreeMap::new(),
         }
     }
 
@@ -271,6 +276,59 @@ impl FlowStack {
     ) -> Self {
         self.repair.extend(policies);
         self
+    }
+
+    /// Attach voice timing to a step (main flow or digression).
+    pub fn with_timing(mut self, step: impl Into<String>, timing: VoiceTiming) -> Self {
+        self.timing.insert(step.into(), timing);
+        self
+    }
+
+    /// Attach voice timing keyed by step.
+    pub fn with_timings(
+        mut self,
+        timings: impl IntoIterator<Item = (String, VoiceTiming)>,
+    ) -> Self {
+        self.timing.extend(timings);
+        self
+    }
+
+    /// The voice timing keyed by step.
+    pub fn timing_policies(&self) -> &BTreeMap<String, VoiceTiming> {
+        &self.timing
+    }
+
+    /// The merged timing of the steps active right now in the driving layer
+    /// (empty when none of them has timing, or the conversation is over).
+    pub fn active_timing(&self, state: &State) -> VoiceTiming {
+        if self.timing.is_empty() || self.terminated.is_some() {
+            return VoiceTiming::default();
+        }
+        self.current()
+            .active_steps(state)
+            .iter()
+            .filter_map(|step| self.timing.get(&step.id))
+            .fold(VoiceTiming::default(), |acc, t| acc.merge(t))
+    }
+
+    /// Publish [`active_timing`](Self::active_timing) to
+    /// [`VOICE_TIMING_KEY`] in state, where the runtime's audio path, timers
+    /// and turn lifecycle read it. Writes only on change; removes the key
+    /// when no timing applies. The stack calls this itself after every turn
+    /// and tool call; call it once when installing the stack.
+    pub fn publish_timing(&self, state: &State) {
+        if self.timing.is_empty() {
+            return;
+        }
+        let timing = self.active_timing(state);
+        let current = state.get::<VoiceTiming>(VOICE_TIMING_KEY);
+        if timing.is_empty() {
+            if current.is_some() {
+                state.remove(VOICE_TIMING_KEY);
+            }
+        } else if current.as_ref() != Some(&timing) {
+            let _ = state.set(VOICE_TIMING_KEY, &timing);
+        }
     }
 
     /// Wrap in a [`SharedFlowStack`] for shared ownership between the control
@@ -448,6 +506,11 @@ impl FlowStack {
     /// the active digression, enter a triggered one (suspending the main
     /// flow), or advance the main flow.
     pub fn on_turn(&mut self, state: &State) {
+        self.advance_turn(state);
+        self.publish_timing(state);
+    }
+
+    fn advance_turn(&mut self, state: &State) {
         if self.terminated.is_some() {
             return;
         }
@@ -498,6 +561,11 @@ impl FlowStack {
     /// as the main layer does at a turn boundary. Repair
     /// is tracked for the main flow only, so a digression just delegates.
     pub fn on_tool_ok(&mut self, tool: &str, state: &State) {
+        self.advance_tool_ok(tool, state);
+        self.publish_timing(state);
+    }
+
+    fn advance_tool_ok(&mut self, tool: &str, state: &State) {
         if self.terminated.is_some() {
             return;
         }
@@ -677,6 +745,36 @@ mod tests {
             .compile()
             .expect("compiles");
         Overlay::new("faq", Guard::is_true("intent:faq"), flow, Resume::Previous)
+    }
+
+    #[test]
+    fn timing_follows_the_active_step_and_digression() {
+        use std::time::Duration;
+        let state = State::new();
+        let a = VoiceTiming::new().reprompt_after(Duration::from_secs(6));
+        let answer = VoiceTiming::new().uninterruptible();
+        let mut stack = FlowStack::new(main_flow(), Enforcement::Enforce)
+            .with_overlay(faq_overlay())
+            .with_timing("a", a.clone())
+            .with_timing("answer", answer.clone());
+
+        stack.publish_timing(&state);
+        assert_eq!(state.get::<VoiceTiming>(VOICE_TIMING_KEY), Some(a.clone()));
+
+        // A digression takes over: its step's timing applies.
+        let _ = state.set("intent:faq", true);
+        stack.on_turn(&state);
+        assert_eq!(state.get::<VoiceTiming>(VOICE_TIMING_KEY), Some(answer));
+
+        // Back in the main flow, past `a`: `b` has no timing, so none applies.
+        let _ = state.set("intent:faq", false);
+        let _ = state.set("faq_answered", true);
+        stack.on_turn(&state);
+        stack.on_turn(&state);
+        assert_eq!(state.get::<VoiceTiming>(VOICE_TIMING_KEY), Some(a));
+        let _ = state.set("a_done", true);
+        stack.on_turn(&state);
+        assert_eq!(state.get::<VoiceTiming>(VOICE_TIMING_KEY), None);
     }
 
     #[test]

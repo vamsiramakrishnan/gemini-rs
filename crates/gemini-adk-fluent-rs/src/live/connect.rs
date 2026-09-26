@@ -25,6 +25,7 @@ pub(crate) fn assemble_stack(
     main: gemini_adk_rs::flow::FlowMonitor,
     digressions: Vec<gemini_adk_rs::flow::Overlay>,
     repair: std::collections::BTreeMap<String, gemini_adk_rs::flow::RepairPolicy>,
+    timing: std::collections::BTreeMap<String, gemini_adk_rs::flow::VoiceTiming>,
     ambient: &[String],
 ) -> gemini_adk_rs::flow::FlowStack {
     let overlays = digressions.into_iter().map(|mut ov| {
@@ -34,6 +35,7 @@ pub(crate) fn assemble_stack(
     gemini_adk_rs::flow::FlowStack::from_monitor(main)
         .with_overlays(overlays)
         .with_repairs(repair)
+        .with_timings(timing)
 }
 
 impl Live {
@@ -332,6 +334,7 @@ impl Live {
                 monitor,
                 self.digressions,
                 self.repair_policies,
+                self.stage_timings,
                 &self.ambient_tools,
             ));
         }

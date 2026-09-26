@@ -52,6 +52,7 @@ pub(crate) mod processor;
 pub mod reactor;
 pub mod redaction;
 pub mod replay;
+mod reprompt;
 pub mod session_signals;
 pub mod soft_turn;
 pub mod steering;

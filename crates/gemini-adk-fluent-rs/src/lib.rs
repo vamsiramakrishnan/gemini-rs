@@ -219,7 +219,9 @@ pub mod prelude {
     // the same import line as `Live`; the compiler internals stay in
     // `crate::conversation` and the serializable `Scenario` in
     // `crate::simulation`.
-    pub use crate::conversation::{CompiledConversation, Conversation, ConversationSpec};
+    pub use crate::conversation::{
+        CompiledConversation, Conversation, ConversationSpec, RepairPolicy, VoiceTiming,
+    };
     pub use crate::simulation::Sim;
 
     // ── State (prefix scopes + `SlotEvidence` in `crate::state`) ──

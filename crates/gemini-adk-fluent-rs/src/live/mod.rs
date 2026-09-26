@@ -209,6 +209,8 @@ pub struct Live {
     /// connect. Same lifecycle as `digressions`.
     pub(crate) repair_policies:
         std::collections::BTreeMap<String, gemini_adk_rs::flow::RepairPolicy>,
+    /// Per-step voice timing, installed on the session's flow stack.
+    pub(crate) stage_timings: std::collections::BTreeMap<String, gemini_adk_rs::flow::VoiceTiming>,
     /// Caller-supplied session `State`, so tools and flow guards can share one.
     pub(crate) state: Option<State>,
     /// Input audio hardening: mic-chain stages, client input-VAD tuning, and
@@ -312,12 +314,28 @@ impl Live {
             flow_precompiled: false,
             digressions: Vec::new(),
             repair_policies: std::collections::BTreeMap::new(),
+            stage_timings: std::collections::BTreeMap::new(),
             state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,
             config_errors: Vec::new(),
             input_audio: crate::live::config::InputAudioConfig::default(),
         }
+    }
+
+    /// Pace step `step` of the governed flow (or of a digression): reprompt
+    /// on silence, filler cues for slow tools, holding the floor, endpointing
+    /// and context delivery. See [`VoiceTiming`](gemini_adk_rs::flow::VoiceTiming).
+    ///
+    /// A [`Conversation`](crate::conversation::Conversation) carries its own
+    /// per-stage timing; [`converse`](Self::converse) installs it.
+    pub fn stage_timing(
+        mut self,
+        step: impl Into<String>,
+        timing: gemini_adk_rs::flow::VoiceTiming,
+    ) -> Self {
+        self.stage_timings.insert(step.into(), timing);
+        self
     }
 
     /// Govern the session with a [`Flow`](gemini_adk_rs::flow::Flow) DAG and

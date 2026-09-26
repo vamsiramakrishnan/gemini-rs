@@ -479,6 +479,15 @@ pub(crate) fn spawn_event_processor(
 
     // Clone for the timer task (before moving into ctrl spawn)
     let timer_temporal = temporal.clone();
+    // Reprompt-on-silence runs only when some stage asks for it.
+    let reprompt = control_plane.flow.as_ref().is_some_and(|stack| {
+        stack
+            .lock()
+            .timing_policies()
+            .values()
+            .any(|t| t.reprompt_after_ms.is_some())
+    });
+    let reprompt_inputs = reprompt.then(|| (state.clone(), writer.clone(), live_event_tx.clone()));
     let timer_state = state.clone();
     let timer_writer = writer.clone();
 
@@ -533,6 +542,15 @@ pub(crate) fn spawn_event_processor(
                 }
             }
         });
+    }
+
+    if let Some((state, writer, events)) = reprompt_inputs {
+        tokio::spawn(super::reprompt::run_reprompt_timer(
+            state,
+            writer,
+            events,
+            timer_cancel.clone(),
+        ));
     }
 
     // Handed to `LiveHandle` so `send_text` can record a typed turn on the

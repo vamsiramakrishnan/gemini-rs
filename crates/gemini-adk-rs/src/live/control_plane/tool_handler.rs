@@ -198,12 +198,24 @@ pub(in crate::live) async fn handle_tool_calls(
                             // `biased` makes an already-cancelled token win
                             // without polling the tool future at all.
                             let started = std::time::Instant::now();
+                            let filler_after = state
+                                .get::<crate::flow::VoiceTiming>(crate::flow::VOICE_TIMING_KEY)
+                                .and_then(|t| t.filler_after_ms)
+                                .map(std::time::Duration::from_millis);
+                            let run = with_filler_cue(
+                                disp.call_function(&call.name, call.args.clone()),
+                                filler_after,
+                                || {
+                                    let _ = event_tx.send(LiveEvent::FillerCue {
+                                        tool: call.name.clone(),
+                                        elapsed_ms: started.elapsed().as_millis() as u64,
+                                    });
+                                },
+                            );
                             let dispatched = tokio::select! {
                                 biased;
                                 _ = barge_in.cancelled() => None,
-                                result = disp.call_function(&call.name, call.args.clone()) => {
-                                    Some(result)
-                                }
+                                result = run => Some(result),
                             };
                             let Some(call_result) = dispatched else {
                                 // Cancelled: the tool future was dropped at its
@@ -404,6 +416,25 @@ pub(in crate::live) async fn handle_tool_calls(
         event_tx,
     )
     .await;
+}
+
+/// Await `run`; if it is still pending after `after`, call `cue` once and
+/// keep waiting. The tool is never cancelled or delayed by the cue.
+async fn with_filler_cue<F: std::future::Future>(
+    run: F,
+    after: Option<std::time::Duration>,
+    cue: impl FnOnce(),
+) -> F::Output {
+    let Some(after) = after else {
+        return run.await;
+    };
+    tokio::pin!(run);
+    tokio::select! {
+        biased;
+        out = &mut run => return out,
+        () = tokio::time::sleep(after) => cue(),
+    }
+    run.await
 }
 
 #[cfg(test)]

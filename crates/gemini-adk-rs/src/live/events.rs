@@ -117,6 +117,20 @@ pub enum LiveEvent {
     TurnComplete,
     /// Model output interrupted by user speech.
     Interrupted,
+    /// A tool call in a stage with a filler timing has run longer than the
+    /// stage allows: play an earcon or a holding line now.
+    FillerCue {
+        /// The tool still running.
+        tool: String,
+        /// How long it has run, in milliseconds.
+        elapsed_ms: u64,
+    },
+    /// The user stayed silent past the active stage's reprompt timing, and
+    /// the model was asked to repeat its question.
+    Reprompted {
+        /// How long the user had been silent, in milliseconds.
+        silence_ms: u64,
+    },
     /// Session connected to Gemini.
     Connected,
     /// Session disconnected.

@@ -553,6 +553,9 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
     if let Some(clock) = plan.clock {
         state.set_clock(clock);
     }
+    if let Some(stack) = &flow_monitor {
+        stack.lock().publish_timing(&state);
+    }
 
     // Subscribe twice: one for router → fast/ctrl, one for telemetry lane
     let event_rx = session.subscribe();
@@ -606,7 +609,16 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
     // The SAME Arc is given to both the DeferredWriter (which drains it before
     // user sends) and the ControlPlaneConfig (which the processor uses to push
     // context turns from the control lane).
-    let pending_context = if plan.context_delivery == ContextDelivery::Deferred {
+    // A stage whose voice timing defers context needs the queue even when the
+    // session as a whole delivers immediately.
+    let stage_defers = flow_monitor.as_ref().is_some_and(|stack| {
+        stack
+            .lock()
+            .timing_policies()
+            .values()
+            .any(|t| t.context_delivery == Some(ContextDelivery::Deferred))
+    });
+    let pending_context = if plan.context_delivery == ContextDelivery::Deferred || stage_defers {
         Some(Arc::new(PendingContext::new()))
     } else {
         None

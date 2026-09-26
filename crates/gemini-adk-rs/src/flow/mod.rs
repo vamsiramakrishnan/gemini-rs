@@ -30,10 +30,12 @@ use crate::state::State;
 use crate::text::TextAgent;
 
 pub mod stack;
+pub mod timing;
 pub use stack::{
     FlowStack, OVERLAY_STATE_KEY, Overlay, RepairPolicy, Resume, SharedFlowStack,
     TERMINATED_STATE_KEY, escalate_flag, reprompt_flag,
 };
+pub use timing::{DEFAULT_REPROMPT, VOICE_TIMING_KEY, VoiceTiming};
 
 /// Evaluation context handed to a [`Guard`]: the session state plus the
 /// current flow marking.

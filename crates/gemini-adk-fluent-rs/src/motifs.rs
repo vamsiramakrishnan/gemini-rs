@@ -54,12 +54,18 @@ impl Motif {
     }
 
     /// A stage that requires a disclosure acknowledgement before advancing.
+    ///
+    /// The model holds the floor while it reads (see
+    /// [`VoiceTiming::uninterruptible`](gemini_adk_rs::flow::VoiceTiming::uninterruptible)),
+    /// so the user cannot cut a required disclosure short. Override the
+    /// stage's `timing` to allow barge-in.
     pub fn disclosure(id: impl Into<String>, ack_key: impl Into<String>) -> StageSpec {
         let ack = ack_key.into();
         StageSpec {
             id: id.into(),
             say: Some("Read the required disclosure, then continue.".into()),
             done: Some(Guard::is_true(ack)),
+            timing: Some(gemini_adk_rs::flow::VoiceTiming::new().uninterruptible()),
             ..Default::default()
         }
     }
