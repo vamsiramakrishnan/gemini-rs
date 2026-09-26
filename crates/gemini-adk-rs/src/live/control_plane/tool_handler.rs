@@ -214,8 +214,13 @@ pub(in crate::live) async fn handle_tool_calls(
                                 .get::<crate::flow::VoiceTiming>(crate::flow::VOICE_TIMING_KEY)
                                 .and_then(|t| t.filler_after_ms)
                                 .map(std::time::Duration::from_millis);
+                            let mut tool_ctx = crate::tool::ToolContext::new(state.clone())
+                                .with_cancel(barge_in.clone());
+                            if let Some(id) = &call.id {
+                                tool_ctx = tool_ctx.with_call_id(id.clone());
+                            }
                             let run = with_filler_cue(
-                                disp.call_function(&call.name, call.args.clone()),
+                                disp.call_function_in(&call.name, call.args.clone(), tool_ctx),
                                 filler_after,
                                 || {
                                     let _ = event_tx.send(LiveEvent::FillerCue {
@@ -336,6 +341,10 @@ pub(in crate::live) async fn handle_tool_calls(
         let call_id = call.id.clone().unwrap_or_default();
         let completion_tx = completion_tx.clone();
         let cancel = CancellationToken::new();
+        let mut bg_ctx = crate::tool::ToolContext::new(state.clone()).with_cancel(cancel.clone());
+        if let Some(id) = &call.id {
+            bg_ctx = bg_ctx.with_call_id(id.clone());
+        }
 
         let handle = tokio::spawn(async move {
             // A `before_tool` veto blocks execution for background tools too,
@@ -358,7 +367,7 @@ pub(in crate::live) async fn handle_tool_calls(
                 return;
             }
             let result = if let Some(ref d) = disp {
-                d.call_function(&call.name, call.args.clone())
+                d.call_function_in(&call.name, call.args.clone(), bg_ctx)
                     .await
                     .map_err(|e| crate::error::ToolError::ExecutionFailed(e.to_string()))
             } else {

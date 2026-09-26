@@ -1,6 +1,7 @@
 //! Tool dispatch — regular, streaming, and input-streaming tools.
 
 pub mod commit;
+pub mod context;
 pub mod dispatcher;
 pub mod policy;
 pub mod schema;
@@ -8,6 +9,7 @@ pub mod simple;
 pub mod typed;
 
 pub use commit::CommitGuard;
+pub use context::{ContextTool, ToolContext};
 pub use dispatcher::*;
 pub use policy::*;
 pub use schema::wire_schema;
@@ -59,6 +61,25 @@ pub trait ToolFunction: Send + Sync + 'static {
     /// Execute the tool with the given arguments and return the result.
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError>;
 
+    /// Execute the tool knowing the session it runs in: its [`State`], the
+    /// call's id, and a cancellation token (see [`ToolContext`]).
+    ///
+    /// The runtime always calls this. The default ignores the context and
+    /// runs [`call`](Self::call), so a tool that needs no context implements
+    /// only `call`. A tool that does overrides this, and implements `call` as
+    /// `self.call_with_context(args, ToolContext::detached())`. A wrapper
+    /// must forward it, or the context is lost.
+    ///
+    /// [`State`]: crate::state::State
+    async fn call_with_context(
+        &self,
+        args: serde_json::Value,
+        ctx: ToolContext,
+    ) -> Result<serde_json::Value, ToolError> {
+        let _ = ctx;
+        self.call(args).await
+    }
+
     /// Whether this tool must be confirmed before it runs. Defaults to `false`.
     ///
     /// Tools built with `T::confirm(..)` (a [`PolicyTool`] with a confirm
@@ -90,6 +111,13 @@ impl<T: ToolFunction + ?Sized> ToolFunction for Arc<T> {
     }
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError> {
         (**self).call(args).await
+    }
+    async fn call_with_context(
+        &self,
+        args: serde_json::Value,
+        ctx: ToolContext,
+    ) -> Result<serde_json::Value, ToolError> {
+        (**self).call_with_context(args, ctx).await
     }
     fn requires_confirmation(&self) -> bool {
         (**self).requires_confirmation()

@@ -232,7 +232,7 @@ pub mod prelude {
 
     // ── Tools ──
     pub use gemini_adk_rs::tool::{
-        SimpleTool, ToolDispatcher, ToolFunction, ToolPolicy, TypedTool,
+        SimpleTool, ToolContext, ToolDispatcher, ToolFunction, ToolPolicy, TypedTool,
     };
     // The `#[tool]` attribute macro — turns an `async fn` into a registrable tool.
     pub use gemini_adk_rs::tool;
@@ -242,7 +242,10 @@ pub mod prelude {
     pub use gemini_adk_rs::Frame;
 
     // ── Callback contexts (used in `M::` hooks) ──
-    pub use gemini_adk_rs::context::{CallbackContext, ToolContext};
+    // `ToolContext` in the prelude is what a tool receives
+    // (`gemini_adk_rs::tool::ToolContext`); the `InvocationContext` wrapper of
+    // the same name stays at `gemini_adk_rs::context::ToolContext`.
+    pub use gemini_adk_rs::context::CallbackContext;
 
     // ── Common Live session types (full control plane in `crate::live`) ──
     pub use gemini_adk_rs::live::{

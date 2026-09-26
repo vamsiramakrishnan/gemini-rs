@@ -277,6 +277,19 @@ fn parse_argument_item(item: &str) -> Option<(String, String)> {
 }
 
 /// Whether a return type is spelled `Result<..>` under any path.
+/// Whether `ty` is the runtime's `ToolContext` (by its last path segment),
+/// which `#[tool]` injects rather than asks the model for.
+fn is_tool_context(ty: &Type) -> bool {
+    match ty {
+        Type::Path(path) => path
+            .path
+            .segments
+            .last()
+            .is_some_and(|seg| seg.ident == "ToolContext" && seg.arguments.is_empty()),
+        _ => false,
+    }
+}
+
 fn is_result(ty: &Type) -> bool {
     let Type::Path(TypePath { qself: None, path }) = ty else {
         return false;
@@ -316,6 +329,11 @@ fn expand(description: Option<LitStr>, func: ItemFn) -> syn::Result<proc_macro2:
     // patterns and borrowed types.
     let mut field_idents = Vec::new();
     let mut field_types = Vec::new();
+    // Every parameter in declaration order (for the preserved body), and the
+    // one typed `ToolContext`, which the runtime fills instead of the model.
+    let mut param_idents = Vec::new();
+    let mut param_types = Vec::new();
+    let mut context_ident: Option<syn::Ident> = None;
     for input in &sig.inputs {
         match input {
             FnArg::Receiver(r) => {
@@ -334,6 +352,18 @@ fn expand(description: Option<LitStr>, func: ItemFn) -> syn::Result<proc_macro2:
                         ));
                     }
                 };
+                param_idents.push(ident.clone());
+                param_types.push((*ty).clone());
+                if is_tool_context(ty) {
+                    if context_ident.is_some() {
+                        return Err(syn::Error::new_spanned(
+                            ty,
+                            "#[tool] takes at most one `ToolContext` parameter",
+                        ));
+                    }
+                    context_ident = Some(ident);
+                    continue;
+                }
                 if let Type::Reference(reference) = ty.as_ref() {
                     return Err(syn::Error::new_spanned(
                         reference,
@@ -437,6 +467,12 @@ fn expand(description: Option<LitStr>, func: ItemFn) -> syn::Result<proc_macro2:
     let serde_crate = LitStr::new(&format!("{rt_str}::__macros::serde"), Span::call_site());
     let schemars_crate = LitStr::new(&format!("{rt_str}::__macros::schemars"), Span::call_site());
 
+    // Bind the runtime's context to the parameter that asked for it.
+    let bind_context = match &context_ident {
+        Some(ident) => quote! { let #ident = ctx; },
+        None => quote! { let _ = ctx; },
+    };
+
     let expanded = quote! {
         // Hidden args struct: drives both deserialization and schema generation.
         #(#cfg_attrs)*
@@ -452,7 +488,7 @@ fn expand(description: Option<LitStr>, func: ItemFn) -> syn::Result<proc_macro2:
         #(#cfg_attrs)*
         #(#body_attrs)*
         #[allow(non_snake_case)]
-        async fn #inner_fn ( #(#field_idents : #field_types),* ) -> #return_type #body
+        async fn #inner_fn ( #(#param_idents : #param_types),* ) -> #return_type #body
 
         // Hidden tool type implementing `ToolFunction`.
         #(#cfg_attrs)*
@@ -479,13 +515,22 @@ fn expand(description: Option<LitStr>, func: ItemFn) -> syn::Result<proc_macro2:
                 &self,
                 args: #serde_json::Value,
             ) -> ::core::result::Result<#serde_json::Value, #rt::error::ToolError> {
+                self.call_with_context(args, #rt::tool::ToolContext::detached()).await
+            }
+
+            async fn call_with_context(
+                &self,
+                args: #serde_json::Value,
+                ctx: #rt::tool::ToolContext,
+            ) -> ::core::result::Result<#serde_json::Value, #rt::error::ToolError> {
                 let #args_struct { #(#field_idents),* } =
                     #serde_json::from_value(args).map_err(|e| {
                         #rt::error::ToolError::InvalidArgs(
                             ::std::format!("Failed to deserialize arguments: {e}"),
                         )
                     })?;
-                #rt::__macros::#adapt(#inner_fn ( #(#field_idents),* ).await)
+                #bind_context
+                #rt::__macros::#adapt(#inner_fn ( #(#param_idents),* ).await)
             }
         }
 

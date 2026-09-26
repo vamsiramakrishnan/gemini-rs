@@ -127,6 +127,15 @@ impl ToolFunction for CommitGuard {
     }
 
     async fn call(&self, args: Value) -> Result<Value, ToolError> {
+        self.call_with_context(args, super::ToolContext::new(self.state.clone()))
+            .await
+    }
+
+    async fn call_with_context(
+        &self,
+        args: Value,
+        ctx: super::ToolContext,
+    ) -> Result<Value, ToolError> {
         let tool = self.inner.name();
         let key = self
             .render_key(&args)
@@ -137,7 +146,11 @@ impl ToolFunction for CommitGuard {
             tracing::info!(tool, "commit already made; returning its result");
             return Ok(previous);
         }
-        match self.inner.call(args.clone()).await {
+        match self
+            .inner
+            .call_with_context(args.clone(), ctx.clone())
+            .await
+        {
             Ok(result) => {
                 if let Some(key) = key {
                     let _ = self.state.set(key, &result);
@@ -146,7 +159,7 @@ impl ToolFunction for CommitGuard {
             }
             Err(error) => {
                 if let Some(compensate) = &self.compensate {
-                    match compensate.call(args).await {
+                    match compensate.call_with_context(args, ctx).await {
                         Ok(_) => {
                             let _ = self.state.set(compensated_key(tool), true);
                         }

@@ -88,3 +88,29 @@ async fn the_setup_message_reflects_the_builder() {
     assert_eq!(setup["systemInstruction"]["parts"][0]["text"], "Be brief.");
     run.disconnect().await;
 }
+
+/// A tool reads the session it runs in: the account captured earlier, and
+/// the model's call id.
+#[tokio::test]
+async fn a_tool_gets_the_session_context() {
+    let state = State::new();
+    state.set("account_id", "A-17").unwrap();
+    let run = ScriptedServer::new()
+        .calls("balance", json!({}))
+        .says("Your balance is twelve dollars.")
+        .play(Live::builder().state(state).tools(T::contextual(
+            "balance",
+            "The caller's balance",
+            |_args, ctx| async move {
+                let account: String = ctx.state.get("account_id").unwrap_or_default();
+                Ok(json!({ "account": account, "call": ctx.call_id }))
+            },
+        )))
+        .await
+        .unwrap();
+    assert_eq!(
+        run.tool_responses()[0]["response"],
+        json!({ "account": "A-17", "call": "call-1" })
+    );
+    run.disconnect().await;
+}

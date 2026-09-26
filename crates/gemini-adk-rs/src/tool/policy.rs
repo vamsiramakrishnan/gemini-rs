@@ -188,6 +188,15 @@ impl ToolFunction for PolicyTool {
     }
 
     async fn call(&self, args: serde_json::Value) -> Result<serde_json::Value, ToolError> {
+        self.call_with_context(args, super::ToolContext::detached())
+            .await
+    }
+
+    async fn call_with_context(
+        &self,
+        args: serde_json::Value,
+        ctx: super::ToolContext,
+    ) -> Result<serde_json::Value, ToolError> {
         // Cache lookup (only for cacheable tools).
         let key = if self.policy.cache {
             let key = self.cache_key(&args);
@@ -201,12 +210,12 @@ impl ToolFunction for PolicyTool {
 
         // Execute with optional timeout enforcement.
         let result = if let Some(timeout) = self.policy.timeout {
-            match tokio::time::timeout(timeout, self.inner.call(args)).await {
+            match tokio::time::timeout(timeout, self.inner.call_with_context(args, ctx)).await {
                 Ok(r) => r,
                 Err(_elapsed) => Err(ToolError::Timeout(timeout)),
             }
         } else {
-            self.inner.call(args).await
+            self.inner.call_with_context(args, ctx).await
         };
 
         // Memoize successful results.

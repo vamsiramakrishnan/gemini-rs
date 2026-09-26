@@ -261,6 +261,7 @@ impl LlmTextAgent {
         &self,
         calls: &[FunctionCall],
         records: &mut Vec<ToolCallRecord>,
+        state: &State,
     ) -> Vec<FunctionResponse> {
         let mut responses = Vec::with_capacity(calls.len());
         for call in calls {
@@ -296,8 +297,12 @@ impl LlmTextAgent {
             }
 
             let span = spans::execute_tool_span(&call.name, call.id.as_deref());
+            let mut tool_ctx = crate::tool::ToolContext::new(state.clone());
+            if let Some(id) = &call.id {
+                tool_ctx = tool_ctx.with_call_id(id.clone());
+            }
             let result = dispatcher
-                .call_function(&call.name, call.args.clone())
+                .call_function_in(&call.name, call.args.clone(), tool_ctx)
                 .instrument(span.clone())
                 .await;
             if let Err(e) = &result {
@@ -411,7 +416,7 @@ impl LlmTextAgent {
             Some(limit) => {
                 match tokio::time::timeout(
                     limit,
-                    self.run_inner(request, &instruction, &llm, events),
+                    self.run_inner(request, &instruction, &llm, events, state),
                 )
                 .await
                 {
@@ -425,7 +430,10 @@ impl LlmTextAgent {
                     }
                 }
             }
-            None => self.run_inner(request, &instruction, &llm, events).await,
+            None => {
+                self.run_inner(request, &instruction, &llm, events, state)
+                    .await
+            }
         };
 
         match &result {
@@ -456,6 +464,7 @@ impl LlmTextAgent {
         instruction: &Option<String>,
         llm: &Arc<dyn BaseLlm>,
         events: Option<&EventSender>,
+        state: &State,
     ) -> Result<RunResult, AgentError> {
         let emit = |event: RunEvent| {
             if let Some(tx) = events {
@@ -568,7 +577,9 @@ impl LlmTextAgent {
                 });
             }
             let already = result.tool_calls.len();
-            let tool_responses = self.dispatch_tools(&calls, &mut result.tool_calls).await;
+            let tool_responses = self
+                .dispatch_tools(&calls, &mut result.tool_calls, state)
+                .await;
             for record in &result.tool_calls[already..] {
                 emit(RunEvent::ToolResult(record.clone()));
             }

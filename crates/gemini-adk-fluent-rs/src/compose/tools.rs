@@ -189,6 +189,31 @@ impl T {
         ToolComposite::from_function(Arc::new(tool))
     }
 
+    /// A tool from a closure that also receives the call's
+    /// [`ToolContext`](gemini_adk_rs::tool::ToolContext): the session state,
+    /// the call id, and a cancellation token that fires on barge-in.
+    ///
+    /// ```
+    /// use gemini_adk_fluent_rs::prelude::*;
+    ///
+    /// let balance = T::contextual("balance", "The caller's balance", |_args, ctx| async move {
+    ///     let account: String = ctx.state.get("account_id").unwrap_or_default();
+    ///     Ok(serde_json::json!({ "account": account, "cents": 1200 }))
+    /// });
+    /// ```
+    pub fn contextual<F, Fut>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        f: F,
+    ) -> ToolComposite
+    where
+        F: Fn(serde_json::Value, gemini_adk_rs::tool::ToolContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<serde_json::Value, gemini_adk_rs::ToolError>> + Send + 'static,
+    {
+        let tool = gemini_adk_rs::tool::ContextTool::new(name, description, None, f);
+        ToolComposite::from_function(Arc::new(tool))
+    }
+
     /// A tool whose arguments are the type `A`, from a closure.
     ///
     /// `A`'s JSON Schema (through [`wire_schema`](gemini_adk_rs::tool::wire_schema))
@@ -512,6 +537,15 @@ impl ToolFunction for TransformTool {
         args: serde_json::Value,
     ) -> Result<serde_json::Value, gemini_adk_rs::error::ToolError> {
         let result = self.inner.call(args).await?;
+        Ok((self.transformer)(result).await)
+    }
+
+    async fn call_with_context(
+        &self,
+        args: serde_json::Value,
+        ctx: gemini_adk_rs::tool::ToolContext,
+    ) -> Result<serde_json::Value, gemini_adk_rs::error::ToolError> {
+        let result = self.inner.call_with_context(args, ctx).await?;
         Ok((self.transformer)(result).await)
     }
 }
