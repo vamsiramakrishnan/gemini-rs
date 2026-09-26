@@ -283,5 +283,5 @@ state.clear_prefix("turn:");
 
 - [State Watchers](./watchers.md) — reactive triggers and computed variables built on `State`
 - [Extraction Pipeline](./extraction.md) — how extracted values land in `derived:` prefix
-- [S.C.T.P.M.A Operator Algebra](./composition.md) — `S::` state transforms used in agent pipelines
+- [Composition](./composition.md) — `S::` state transforms used in agent pipelines
 - [cookbook 07 — state transforms](../../examples/cookbook/src/03_composition.rs)

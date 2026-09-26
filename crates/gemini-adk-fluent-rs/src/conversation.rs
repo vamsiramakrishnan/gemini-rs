@@ -949,17 +949,26 @@ impl crate::live::Live {
             .map(CompiledOverlay::to_runtime)
             .collect();
         self.repair_policies = convo.repair_policies().clone();
-        self.stage_timings = convo.timing_policies().clone();
+        // A timing set on the builder with `stage_timing` wins over the
+        // conversation's, whichever was called first.
+        for (step, timing) in convo.timing_policies() {
+            self.stage_timings
+                .entry(step.clone())
+                .or_insert_with(|| timing.clone());
+        }
         self.corrections = convo.correction_policies().clone();
         self.verbatims = convo.verbatim_policies().clone();
         // A safety hand-off is already lowered into the digressions above;
-        // redaction and commit governance are enforced at connect.
-        self.policies = convo
+        // redaction and commit governance are enforced at connect. Policies
+        // added with `Live::policy` are kept alongside.
+        let mut policies: Vec<_> = convo
             .policies()
             .iter()
             .filter(|p| !matches!(p, crate::policy::Policy::SafetyHandoff { .. }))
             .cloned()
             .collect();
+        policies.append(&mut self.policies);
+        self.policies = policies;
         for extract in convo.all_extractors() {
             self = self.extract_record(extract);
         }
@@ -2224,6 +2233,37 @@ mod tests {
         assert!(convo.timing_policies()["terms"].holds_floor());
         let stack = convo.stack(Enforcement::Enforce);
         assert_eq!(stack.timing_policies().len(), 2);
+    }
+
+    #[test]
+    fn converse_keeps_timings_and_policies_set_on_the_builder() {
+        use std::time::Duration;
+        let convo = Conversation::new("pacing")
+            .stage("ask")
+            .collect(["name"])
+            .timing(VoiceTiming::new().reprompt_after(Duration::from_secs(6)))
+            .stage("done")
+            .after("ask")
+            .terminal()
+            .policy(crate::policy::Policy::redact(["card"]))
+            .compile()
+            .unwrap();
+        let mine = VoiceTiming::new().reprompt_after(Duration::from_secs(3));
+
+        // Before and after `converse`, the builder's own settings survive.
+        for live in [
+            crate::live::Live::builder()
+                .stage_timing("ask", mine.clone())
+                .policy(crate::policy::Policy::redact(["ssn"]))
+                .converse(&convo),
+            crate::live::Live::builder()
+                .converse(&convo)
+                .stage_timing("ask", mine.clone())
+                .policy(crate::policy::Policy::redact(["ssn"])),
+        ] {
+            assert_eq!(live.stage_timings["ask"], mine);
+            assert_eq!(live.policies.len(), 2, "{:?}", live.policies);
+        }
     }
 
     #[tokio::test]

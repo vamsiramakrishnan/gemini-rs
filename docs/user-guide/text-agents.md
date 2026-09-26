@@ -50,6 +50,34 @@ When an agent has middleware — which may rewrite a reply, for example to
 redact it — each model turn is streamed only after the middleware has seen it.
 Without middleware, text streams as the model writes.
 
+### One error type for application code
+
+Each layer returns its own precise error: `AgentError` for agents and Live
+sessions, `LlmError` for a model call, `ConversationError` from the
+conversation compiler, `PersistenceError` for snapshots. A function that
+uses several of them can return `gemini_adk::Result` from the `gemini-adk`
+facade crate. Its `Error` converts from each layer's error with `?` and
+keeps the original as its `source()`:
+
+```rust,ignore
+use gemini_adk::prelude::*;
+
+async fn run() -> gemini_adk::Result<()> {
+    let agent = AgentBuilder::new("assistant")
+        .instruction("Answer in one sentence.")
+        .build(GeminiLlm::from_env()?)?; // an LlmError, then an AgentError
+    println!("{}", agent.ask("Hello").await?);
+    let notes = std::fs::read_to_string("notes.txt")?; // an io::Error
+    let _ = notes;
+    Ok(())
+}
+```
+
+`Error::is_retryable()` is true for a rate limit, a transient provider or
+transport failure, or a timeout, and false for configuration, spec or input
+errors. `Error::llm()` returns the model call's `LlmError` when that was the
+failure.
+
 ## The TextAgent Trait
 
 ```rust,ignore
@@ -432,7 +460,7 @@ let approved = supervised(
 
 ## See also
 
-- [S.C.T.P.M.A Operator Algebra](./composition.md) — operator syntax (`>>`, `|`, `*`, `/`) for building pipelines with `AgentBuilder`
+- [Composition](./composition.md) — operator syntax (`>>`, `|`, `*`, `/`) for building pipelines with `AgentBuilder`
 - [Tools](./tools.md) — equipping text agents with tools via `ToolDispatcher`
 - [cookbook 04 — sequential pipeline](../../examples/cookbook/src/02_combinators.rs)
 - [cookbook 05 — parallel fan-out](../../examples/cookbook/src/02_combinators.rs)

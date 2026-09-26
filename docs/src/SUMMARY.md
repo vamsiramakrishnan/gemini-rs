@@ -41,10 +41,12 @@
 - [Governed Flows (conversation/tool DAGs)](./user-guide/flow.md)
 - [Flows as JSON (SessionSpec)](./user-guide/flow-json.md)
 - [The Flow Studio](./flow-studio.md)
+- [Voice Behavior in the Conversation Graph](./user-guide/voice-behavior.md)
+- [Testing Conversations Offline](./user-guide/testing.md)
 - [Conversation CI](./user-guide/conversation-ci.md)
 - [Agent Orchestration](./user-guide/orchestration.md)
 - [Text Agent Combinators](./user-guide/text-agents.md)
-- [S·C·T·P·M·A Operator Algebra](./user-guide/composition.md)
+- [Composition: S, C, T, P, M, G, E, A](./user-guide/composition.md)
 - [Middleware & Processors](./user-guide/middleware.md)
 
 # Memory

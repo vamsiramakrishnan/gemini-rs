@@ -553,4 +553,4 @@ When migrating from L0 to L2:
 ## See also
 
 - [Architecture Overview](./architecture.md) — the three-crate stack explained, with a guide on choosing your layer
-- [S.C.T.P.M.A Operator Algebra](./composition.md) — fluent composition operators available at L2
+- [Composition](./composition.md) — fluent composition operators available at L2
