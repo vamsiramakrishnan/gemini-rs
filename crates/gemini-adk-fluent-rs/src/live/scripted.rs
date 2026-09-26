@@ -1,43 +1,5 @@
-//! A scripted Gemini Live server, for testing a [`Live`] session offline.
-//!
-//! [`ScriptedServer`] is a script of what the server says: model text, what
-//! it heard, tool calls, interruptions. [`play`](ScriptedServer::play)
-//! connects your fully configured [`Live`] builder to it over an in-memory
-//! transport and runs the script. Your tools, phases, extractors, watchers,
-//! governance and callbacks all run for real. What comes back is a
-//! [`ScriptedRun`]: the events the session emitted, what it sent to the
-//! "server" (setup, tool responses, context), and its state.
-//!
-//! No network or credential is used, and the model is not involved. The
-//! script is its stand-in.
-//!
-//! ```
-//! # tokio_test::block_on(async {
-//! use gemini_adk_fluent_rs::prelude::*;
-//! use gemini_adk_fluent_rs::testing::ScriptedServer;
-//! use serde_json::json;
-//!
-//! let run = ScriptedServer::new()
-//!     .hears("What's the weather in Paris?")
-//!     .calls("get_weather", json!({ "city": "Paris" }))
-//!     .says("It is sunny in Paris.")
-//!     .play(
-//!         Live::builder()
-//!             .instruction("You are a weather assistant.")
-//!             .tools(T::simple("get_weather", "Weather for a city", |args| async move {
-//!                 Ok(json!({ "city": args["city"], "sky": "sunny" }))
-//!             })),
-//!     )
-//!     .await
-//!     .unwrap();
-//!
-//! let responses = run.tool_responses();
-//! assert_eq!(responses[0]["name"], "get_weather");
-//! assert_eq!(responses[0]["response"]["sky"], "sunny");
-//! assert!(run.transcript_text().contains("It is sunny"));
-//! run.disconnect().await;
-//! # });
-//! ```
+//! A scripted Gemini Live server for offline session tests; see
+//! [`ScriptedServer`].
 
 use std::time::Duration;
 
@@ -50,7 +12,46 @@ use serde_json::{Value, json};
 
 use super::Live;
 
-/// A script of what a Gemini Live server says. See the [module docs](self).
+/// A scripted Gemini Live server, for testing a [`Live`] session offline.
+///
+/// [`ScriptedServer`] is a script of what the server says: model text, what
+/// it heard, tool calls, interruptions. [`play`](ScriptedServer::play)
+/// connects your fully configured [`Live`] builder to it over an in-memory
+/// transport and runs the script. Your tools, phases, extractors, watchers,
+/// governance and callbacks all run for real. What comes back is a
+/// [`ScriptedRun`]: the events the session emitted, what it sent to the
+/// "server" (setup, tool responses, context), and its state.
+///
+/// No network or credential is used, and the model is not involved. The
+/// script is its stand-in.
+///
+/// ```
+/// # tokio_test::block_on(async {
+/// use gemini_adk_fluent_rs::prelude::*;
+/// use gemini_adk_fluent_rs::testing::ScriptedServer;
+/// use serde_json::json;
+///
+/// let run = ScriptedServer::new()
+///     .hears("What's the weather in Paris?")
+///     .calls("get_weather", json!({ "city": "Paris" }))
+///     .says("It is sunny in Paris.")
+///     .play(
+///         Live::builder()
+///             .instruction("You are a weather assistant.")
+///             .tools(T::simple("get_weather", "Weather for a city", |args| async move {
+///                 Ok(json!({ "city": args["city"], "sky": "sunny" }))
+///             })),
+///     )
+///     .await
+///     .unwrap();
+///
+/// let responses = run.tool_responses();
+/// assert_eq!(responses[0]["name"], "get_weather");
+/// assert_eq!(responses[0]["response"]["sky"], "sunny");
+/// assert!(run.transcript_text().contains("It is sunny"));
+/// run.disconnect().await;
+/// # });
+/// ```
 #[derive(Debug, Clone)]
 pub struct ScriptedServer {
     frames: Vec<Value>,

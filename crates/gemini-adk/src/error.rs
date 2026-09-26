@@ -1,33 +1,4 @@
-//! One error type for application code.
-//!
-//! Each layer keeps its own precise error: [`AgentError`] for agents and
-//! Live sessions, [`ConversationError`] for the conversation compiler,
-//! [`PersistenceError`] for snapshots, and so on. An application that uses
-//! several of them in one function wants one error to `?` into. [`Error`]
-//! converts from each of them, keeps the original inside so nothing is
-//! lost, and answers the questions a caller usually has
-//! ([`is_retryable`](Error::is_retryable), [`llm`](Error::llm)).
-//!
-//! ```no_run
-//! use gemini_adk::prelude::*;
-//! use gemini_adk::conversation::Conversation;
-//!
-//! async fn run() -> gemini_adk::Result<()> {
-//!     let convo = Conversation::new("booking")
-//!         .stage("collect").collect(["party_size"])
-//!         .stage("done").after("collect").terminal()
-//!         .compile()?; // a ConversationError
-//!
-//!     let agent = AgentBuilder::new("assistant")
-//!         .instruction("Answer in one sentence.")
-//!         .build(GeminiLlm::from_env()?)?; // an LlmError, then an AgentError
-//!     println!("{}", agent.ask("Hello").await?);
-//!
-//!     let spec = std::fs::read_to_string("booking.json")?; // an io::Error
-//!     let _ = (convo, spec);
-//!     Ok(())
-//! }
-//! ```
+//! The facade's error type; see [`Error`].
 
 use gemini_adk_fluent_rs::conversation::ConversationError;
 use gemini_adk_fluent_rs::gemini_adk_rs::error::{AgentError, ConfigError, ToolError};
@@ -38,7 +9,36 @@ use gemini_adk_fluent_rs::gemini_adk_rs::state::StateError;
 use gemini_adk_fluent_rs::gemini_genai_rs::session::SessionError;
 use gemini_adk_fluent_rs::gemini_genai_rs::transport::WireLogError;
 
-/// Any error the SDK returns. See the [module docs](self).
+/// One error type for application code.
+///
+/// Each layer keeps its own precise error: [`AgentError`] for agents and
+/// Live sessions, [`ConversationError`] for the conversation compiler,
+/// [`PersistenceError`] for snapshots, and so on. An application that uses
+/// several of them in one function wants one error to `?` into. [`Error`]
+/// converts from each of them, keeps the original inside so nothing is
+/// lost, and answers the questions a caller usually has
+/// ([`is_retryable`](Error::is_retryable), [`llm`](Error::llm)).
+///
+/// ```no_run
+/// use gemini_adk::prelude::*;
+/// use gemini_adk::conversation::Conversation;
+///
+/// async fn run() -> gemini_adk::Result<()> {
+///     let convo = Conversation::new("booking")
+///         .stage("collect").collect(["party_size"])
+///         .stage("done").after("collect").terminal()
+///         .compile()?; // a ConversationError
+///
+///     let agent = AgentBuilder::new("assistant")
+///         .instruction("Answer in one sentence.")
+///         .build(GeminiLlm::from_env()?)?; // an LlmError, then an AgentError
+///     println!("{}", agent.ask("Hello").await?);
+///
+///     let spec = std::fs::read_to_string("booking.json")?; // an io::Error
+///     let _ = (convo, spec);
+///     Ok(())
+/// }
+/// ```
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
