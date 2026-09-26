@@ -859,6 +859,56 @@ pub trait MemoryBinding: Send + Sync {
     fn remember(&self, note: String);
 }
 
+/// What a spec written by someone else may reach when it runs.
+///
+/// A spec can bind tools to the outside world: `mcp` entries start a local
+/// command (or connect to a URL) and an `http` binding sends a request to any
+/// URL. That is fine for a spec you wrote and deploy. It is not fine for a
+/// spec a browser posts to a shared server: running it would let the author
+/// execute commands on the host or reach internal addresses. Pass such a spec
+/// through [`SessionSpec::sandboxed`] with an allowlist the *operator*
+/// configured.
+///
+/// The default allows nothing: every binding becomes a mock.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BindingAllowlist {
+    http_prefixes: Vec<String>,
+    mcp: Vec<String>,
+}
+
+impl BindingAllowlist {
+    /// Allow HTTP bindings whose URL template starts with `prefix`, e.g.
+    /// `https://api.example.com/`. A prefix without a path gets a trailing
+    /// `/`, so interpolated arguments can never change the host.
+    pub fn allow_http_prefix(mut self, prefix: impl Into<String>) -> Self {
+        let mut prefix = prefix.into();
+        let after_scheme = prefix.split_once("://").map_or("", |(_, rest)| rest);
+        if !after_scheme.contains('/') {
+            prefix.push('/');
+        }
+        self.http_prefixes.push(prefix);
+        self
+    }
+
+    /// Allow one `mcp` entry, matched exactly.
+    pub fn allow_mcp(mut self, params: impl Into<String>) -> Self {
+        self.mcp.push(params.into());
+        self
+    }
+
+    fn allows_http(&self, url: &str) -> bool {
+        // Only a literal scheme and host can match: a template that puts an
+        // interpolation before the first path `/` never does.
+        self.http_prefixes
+            .iter()
+            .any(|p| url.starts_with(p.as_str()))
+    }
+
+    fn allows_mcp(&self, params: &str) -> bool {
+        self.mcp.iter().any(|m| m.trim() == params.trim())
+    }
+}
+
 /// Tool names a [`MemoryBinding`] installs (ambient on the flow).
 pub const MEMORY_TOOL_NAMES: [&str; 2] = ["recall_context", "manage_memory"];
 
@@ -1442,6 +1492,40 @@ impl SessionSpec {
         simulate::run_tests(self)
     }
 
+    /// A copy of this spec that reaches only what `allow` permits, and one
+    /// note per binding it disabled.
+    ///
+    /// `mcp` entries not in the allowlist are removed. A tool whose `http`
+    /// binding is not allowed becomes a mock: it returns its canned
+    /// `response` and still writes `set_state`, so the flow behaves the same
+    /// way offline. Use this before [`apply`](Self::apply) on any spec you did
+    /// not write, such as one posted by a browser.
+    pub fn sandboxed(&self, allow: &BindingAllowlist) -> (SessionSpec, Vec<String>) {
+        let mut spec = self.clone();
+        let mut notes = Vec::new();
+        spec.mcp.retain(|params| {
+            let keep = allow.allows_mcp(params);
+            if !keep {
+                notes.push(format!(
+                    "mcp entry `{params}` is not allowed on this server; removed"
+                ));
+            }
+            keep
+        });
+        for tool in &mut spec.tools {
+            if let Some(binding) = &tool.http
+                && !allow.allows_http(&binding.url)
+            {
+                notes.push(format!(
+                    "tool `{}`: HTTP binding to `{}` is not allowed on this server; it runs as a mock",
+                    tool.name, binding.url
+                ));
+                tool.http = None;
+            }
+        }
+        (spec, notes)
+    }
+
     /// Configure a [`Live`] builder from this spec.
     ///
     /// `state` is the session state the declared tools bind to — pass the
@@ -1449,6 +1533,9 @@ impl SessionSpec {
     /// the spec fails validation or requires a resource `resources` lacks.
     /// Everything code-only (callbacks, custom guards, middleware) is added on
     /// the returned builder afterwards.
+    ///
+    /// Tool bindings run as written. For a spec you did not write, call
+    /// [`sandboxed`](Self::sandboxed) first.
     pub fn apply(
         &self,
         live: Live,
@@ -2766,6 +2853,44 @@ mod tests {
             spec.apply(Live::builder(), &State::new(), &SpecResources::default())
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn a_sandboxed_spec_reaches_only_what_the_operator_allows() {
+        let spec = SessionSpec::from_value(json!({
+            "name": "posted",
+            "mcp": ["rm -rf /", "https://mcp.example.com/sse"],
+            "tools": [
+                { "name": "ok", "http": { "url": "https://api.example.com/v1/{args.id}" } },
+                { "name": "internal", "http": { "url": "http://169.254.169.254/latest/meta-data" } },
+                { "name": "host_from_args", "http": { "url": "https://{args.host}/x" } },
+                { "name": "mock", "response": { "ok": true } }
+            ]
+        }))
+        .unwrap();
+
+        let (nothing, notes) = spec.sandboxed(&BindingAllowlist::default());
+        assert!(nothing.mcp.is_empty());
+        assert!(nothing.tools.iter().all(|t| t.http.is_none()));
+        assert_eq!(notes.len(), 5, "{notes:?}");
+
+        let allow = BindingAllowlist::default()
+            .allow_http_prefix("https://api.example.com")
+            .allow_mcp("https://mcp.example.com/sse");
+        let (some, notes) = spec.sandboxed(&allow);
+        assert_eq!(some.mcp, ["https://mcp.example.com/sse"]);
+        let bound: Vec<&str> = some
+            .tools
+            .iter()
+            .filter(|t| t.http.is_some())
+            .map(|t| t.name.as_str())
+            .collect();
+        assert_eq!(bound, ["ok"]);
+        assert_eq!(notes.len(), 3, "{notes:?}");
+
+        // A prefix without a path cannot be stretched to another host.
+        let tricky = BindingAllowlist::default().allow_http_prefix("https://api.example.com");
+        assert!(!tricky.allows_http("https://api.example.com.evil.net/x"));
     }
 
     #[test]

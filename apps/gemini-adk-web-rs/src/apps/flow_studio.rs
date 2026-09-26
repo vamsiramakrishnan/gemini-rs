@@ -16,7 +16,7 @@ use tracing::info;
 
 use gemini_adk_fluent_rs::live::LiveEvent;
 use gemini_adk_fluent_rs::prelude::*;
-use gemini_adk_fluent_rs::spec::{SessionSpec, SpecResources};
+use gemini_adk_fluent_rs::spec::{BindingAllowlist, SessionSpec, SpecResources};
 
 use crate::app::{AppError, ClientMessage, DemoApp, ServerMessage, WsSender};
 use crate::bridge::SessionBridge;
@@ -26,6 +26,29 @@ use crate::demo_meta;
 pub struct FlowStudio;
 
 /// Snapshot the governed flow's status into a `FlowStatus` message.
+/// What a spec posted by the browser may reach, as the operator configured
+/// it. Nothing by default: MCP entries are dropped and HTTP bindings run as
+/// mocks.
+///
+/// - `FLOW_STUDIO_ALLOW_HTTP`: comma-separated URL prefixes, e.g.
+///   `https://api.example.com/,https://staging.example.com/v2/`.
+/// - `FLOW_STUDIO_ALLOW_MCP`: semicolon-separated `mcp` entries, matched
+///   exactly.
+fn studio_allowlist() -> BindingAllowlist {
+    let mut allow = BindingAllowlist::default();
+    if let Ok(prefixes) = std::env::var("FLOW_STUDIO_ALLOW_HTTP") {
+        for prefix in prefixes.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+            allow = allow.allow_http_prefix(prefix);
+        }
+    }
+    if let Ok(entries) = std::env::var("FLOW_STUDIO_ALLOW_MCP") {
+        for entry in entries.split(';').map(str::trim).filter(|e| !e.is_empty()) {
+            allow = allow.allow_mcp(entry);
+        }
+    }
+    allow
+}
+
 fn send_flow_status(tx: &WsSender, handle: &LiveHandle) {
     let Some(explanation) = handle.explain() else {
         return;
@@ -68,6 +91,7 @@ impl DemoApp for FlowStudio {
         info!("FlowStudio session starting");
         let bridge = SessionBridge::new(tx.clone());
         let status_tx = tx.clone();
+        let notice_tx = tx.clone();
         bridge
             .run_with(
                 self,
@@ -78,7 +102,17 @@ impl DemoApp for FlowStudio {
                             "flow-studio requires a session spec in Start.config".into(),
                         )
                     })?;
-                    let spec = SessionSpec::from_value(config).map_err(AppError::Session)?;
+                    let posted = SessionSpec::from_value(config).map_err(AppError::Session)?;
+                    // The spec comes from the browser: it may only reach what
+                    // the operator allowed (see `studio_allowlist`).
+                    let (spec, disabled) = posted.sandboxed(&studio_allowlist());
+                    if !disabled.is_empty() {
+                        tracing::warn!(?disabled, "Studio spec bindings disabled");
+                        let _ = notice_tx.send(ServerMessage::StateUpdate {
+                            key: "studio:disabled_bindings".into(),
+                            value: serde_json::json!(disabled),
+                        });
+                    }
 
                     let resources = SpecResources {
                         extraction_llm: (!spec.extract.is_empty())

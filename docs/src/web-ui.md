@@ -10,6 +10,10 @@ cargo run -p gemini-adk-web-rs
 # → http://127.0.0.1:25125/flows   (Flow Studio)
 ```
 
+The server has no authentication, so it listens on `127.0.0.1` only. To
+reach it from another machine, set `ADK_WEB_ADDR` (for example
+`ADK_WEB_ADDR=0.0.0.0:25125`), and only do so on a network you trust.
+
 ---
 
 ## Design System

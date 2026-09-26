@@ -72,9 +72,11 @@ async fn main() {
         .layer(middleware::from_fn(no_cache_static))
         .layer(middleware::from_fn(cross_origin_isolation));
 
-    let addr = "0.0.0.0:25125";
-    tracing::info!("ADK Web UI at http://localhost:25125");
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    // Local only unless the operator says otherwise: the server has no
+    // authentication of its own.
+    let addr = std::env::var("ADK_WEB_ADDR").unwrap_or_else(|_| "127.0.0.1:25125".to_string());
+    tracing::info!("ADK Web UI at http://{addr}");
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 

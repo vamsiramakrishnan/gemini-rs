@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Flow Studio ran commands from a posted spec.** A live run on
+  `gemini-adk-web-rs` applied the spec the browser sent, which listed `mcp`
+  entries to launch as local commands and HTTP bindings to call. The server
+  listened on `0.0.0.0` with no authentication, so anyone who could reach the
+  port could run commands on the host or reach internal addresses. The
+  server now:
+  - runs posted specs through `SessionSpec::sandboxed`, which drops `mcp`
+    entries and turns HTTP bindings into mocks unless the operator allows
+    them (`FLOW_STUDIO_ALLOW_HTTP`, `FLOW_STUDIO_ALLOW_MCP`);
+  - binds to `127.0.0.1` unless `ADK_WEB_ADDR` says otherwise.
+
+### Added
+
+- `SessionSpec::sandboxed` and `BindingAllowlist`, for applying a spec you
+  did not write.
+
 ## [3.0.0] - 2026-09-25
 
 ### Highlights

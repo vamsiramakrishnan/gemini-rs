@@ -77,6 +77,27 @@ tree** — exactly which atom a stuck step is waiting on. Posture and ground
 edits made while connected apply on the next turn boundary
 (`LiveHandle::update_step_posture`).
 
+The spec a live run uses comes from the browser, so the server runs it
+sandboxed (`SessionSpec::sandboxed`):
+- `mcp` entries are dropped.
+- Tools with an `http` binding run as mocks: they return their canned
+  `response` and still write `set_state`, so the flow behaves as it would
+  offline.
+- The Run pane shows which bindings were disabled.
+
+To let live runs call real services, the operator lists what is allowed when
+starting the server:
+
+```bash
+FLOW_STUDIO_ALLOW_HTTP="https://api.example.com/,https://staging.example.com/v2/" \
+FLOW_STUDIO_ALLOW_MCP="https://mcp.example.com/sse" \
+cargo run -p gemini-adk-web-rs
+```
+
+HTTP bindings are matched by URL prefix. A prefix given without a path gets
+a trailing `/`, so arguments interpolated into the URL cannot change the
+host. MCP entries are matched exactly.
+
 ## The cookbook gallery
 
 Six industry scenarios ship in the **Examples** menu, each a complete
