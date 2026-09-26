@@ -17,8 +17,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
+# otel-otlp / otel-gcp: trace and metric export, off until the environment
+# sets OTEL_EXPORTER_OTLP_ENDPOINT or ADK_TELEMETRY=gcp.
 RUN cargo build --release --locked \
       -p gemini-adk-server-rs --bin adk-runtime \
+      --features gemini-adk-server-rs/otel-otlp,gemini-adk-server-rs/otel-gcp \
       -p gemini-adk-cli-rs --bin adk \
  && cp target/release/adk-runtime target/release/adk /usr/local/bin/
 

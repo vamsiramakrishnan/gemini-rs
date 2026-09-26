@@ -183,7 +183,15 @@ firewall.
   connection.
 - `/metrics` reports `adk_runtime_sessions_active`,
   `adk_runtime_sessions_total`, `adk_runtime_sessions_refused_total` by
-  reason, `adk_runtime_draining` and `adk_runtime_bundle_info`.
+  reason, `adk_runtime_draining` and `adk_runtime_bundle_info`. It also
+  serves the SDK's Live metrics (`gemini_genai_rs_*`: reconnections, wire
+  bytes, response latency, tool calls, tokens by modality).
+- The image is built with trace and metric export. Set
+  `OTEL_EXPORTER_OTLP_ENDPOINT` to send them to an OTLP collector, or
+  `ADK_TELEMETRY=gcp` to send them to Cloud Trace and Cloud Monitoring (the
+  service account then needs `roles/cloudtrace.agent` and
+  `roles/monitoring.metricWriter`). Each session is one trace, keyed by
+  `gen_ai.conversation.id`. See [Observability](./observability.md).
 
 On `SIGTERM` (or Ctrl-C) the runtime drains. `/readyz` fails, new sessions
 get 503, and running sessions continue for up to `ADK_DRAIN_SECS`. Sessions

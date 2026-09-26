@@ -11,6 +11,10 @@ pub mod logging;
 pub mod metrics;
 pub mod spans;
 
+/// The Prometheus exporter crate, for [`TelemetryConfig::prometheus_recorder`]'s handle.
+#[cfg(feature = "metrics")]
+pub use metrics_exporter_prometheus as metrics_exporter;
+
 /// Telemetry configuration.
 #[derive(Debug, Clone)]
 pub struct TelemetryConfig {
@@ -155,6 +159,17 @@ impl TelemetryConfig {
             .with_http_listener(addr)
             .install()?;
         Ok(())
+    }
+
+    /// Record the SDK's metrics in process and return a handle that renders
+    /// them as Prometheus text, for a server that serves its own
+    /// `/metrics`. Installs the global `metrics` recorder, so call it once.
+    #[cfg(feature = "metrics")]
+    pub fn prometheus_recorder() -> Result<
+        metrics_exporter_prometheus::PrometheusHandle,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        Ok(metrics_exporter_prometheus::PrometheusBuilder::new().install_recorder()?)
     }
 
     /// Build the OTLP exporters this config asks for, without installing a

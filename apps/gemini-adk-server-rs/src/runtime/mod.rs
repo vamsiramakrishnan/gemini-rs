@@ -390,6 +390,11 @@ impl Runtime {
     fn metrics_text(&self) -> String {
         let g = &self.gauge;
         let mut out = String::new();
+        // The SDK's own metrics (Live sessions, bytes, latency, tool calls,
+        // tokens by modality), when the recorder is installed.
+        if let Some(sdk) = SDK_METRICS.get() {
+            out.push_str(&sdk.render());
+        }
         let mut metric = |name: &str, kind: &str, help: &str, lines: Vec<String>| {
             out.push_str(&format!("# HELP {name} {help}\n# TYPE {name} {kind}\n"));
             for line in lines {
@@ -501,6 +506,21 @@ fn unauthorized() -> Response {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+static SDK_METRICS: std::sync::OnceLock<metrics_exporter::PrometheusHandle> =
+    std::sync::OnceLock::new();
+
+use gemini_genai_rs::telemetry::metrics_exporter;
+
+/// Record the SDK's metrics in process so `/metrics` serves them too. Call
+/// once at startup, before sessions start; later calls do nothing.
+pub fn install_sdk_metrics() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if SDK_METRICS.get().is_none() {
+        let handle = gemini_genai_rs::telemetry::TelemetryConfig::prometheus_recorder()?;
+        let _ = SDK_METRICS.set(handle);
+    }
+    Ok(())
 }
 
 async fn readyz(AxumState(runtime): AxumState<Arc<Runtime>>) -> Response {

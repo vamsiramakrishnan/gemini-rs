@@ -11,6 +11,8 @@ categories = ["api-bindings", "asynchronous", "web-programming::http-server"]
 
 [dependencies]
 gemini-adk-rs = { workspace = true, default-features = true, features = ["gemini-llm"] }
+# The Live metrics, rendered on adk-runtime's /metrics.
+gemini-genai-rs = { workspace = true, default-features = true, features = ["metrics"] }
 gemini-adk-fluent-rs = { workspace = true, default-features = true, features = ["http-tools", "denoise", "gcs-store"] }
 axum = { version = "0.8", features = ["macros", "ws"] }
 tower-http = { version = "0.5", features = ["cors"] }
@@ -45,3 +47,9 @@ path = "src/bin/adk-runtime.rs"
 
 [lints]
 workspace = true
+
+[features]
+# Trace and metric export from adk-runtime: OTLP (OTEL_EXPORTER_OTLP_ENDPOINT)
+# or Cloud Trace and Cloud Monitoring (ADK_TELEMETRY=gcp).
+otel-otlp = ["gemini-genai-rs/otel-otlp"]
+otel-gcp = ["gemini-genai-rs/otel-gcp"]

@@ -1558,6 +1558,7 @@ dependencies = [
  "futures",
  "gemini-adk-fluent-rs",
  "gemini-adk-rs",
+ "gemini-genai-rs",
  "hmac 0.12.1",
  "parking_lot",
  "serde",
