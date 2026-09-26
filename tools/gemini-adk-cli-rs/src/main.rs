@@ -159,34 +159,61 @@ enum Command {
         action: SessionAction,
     },
 
-    /// Deploy an agent to a cloud target.
+    /// Deploy adk-runtime, serving bundles from a bundle store.
+    ///
+    /// Builds deploy/Dockerfile with Cloud Build (unless --image is given)
+    /// and deploys it. Every command is printed before it runs.
     Deploy {
-        /// Deployment target: cloud_run, gke, or agent_engine.
+        /// Deployment target: cloud-run, gke, or agent-engine.
         target: DeployTarget,
-        /// Path to the agent directory containing agent.toml.
-        agent_dir: String,
         /// Google Cloud project ID.
         #[arg(long)]
         project: Option<String>,
         /// Google Cloud region.
         #[arg(long, default_value = "us-central1")]
         region: String,
-        /// Cloud Run / GKE service name override.
+        /// Cloud Run service name, and the image name when building.
+        #[arg(long, default_value = "adk-runtime")]
+        service_name: String,
+        /// Bundle store the runtime reads (gs://bucket/prefix); default $ADK_BUNDLES.
         #[arg(long)]
-        service_name: Option<String>,
-        /// Bundle the web UI with the deployment.
+        bundles: Option<String>,
+        /// Bundles to serve, comma-separated (e.g. booking:prod,clinic:prod).
         #[arg(long)]
-        with_ui: bool,
-        /// Export traces to Google Cloud Trace.
+        serve: Option<String>,
+        /// Deploy this image instead of building one.
         #[arg(long)]
-        trace_to_cloud: bool,
+        image: Option<String>,
+        /// The gemini-rs checkout that holds deploy/Dockerfile.
+        #[arg(long, default_value = ".")]
+        source: String,
+        /// Secret Manager secret holding ADK_RUNTIME_TOKENS.
+        #[arg(long, default_value = "adk-runtime-tokens")]
+        tokens_secret: String,
+        /// Secret Manager secret holding TWILIO_AUTH_TOKEN (enables phone calls).
+        #[arg(long)]
+        twilio_secret: Option<String>,
+        /// Service account to run as; default adk-runtime@PROJECT.iam.gserviceaccount.com.
+        #[arg(long)]
+        service_account: Option<String>,
+        /// Concurrent sessions per instance.
+        #[arg(long, default_value_t = 50)]
+        max_sessions: u32,
+        /// Instances kept warm.
+        #[arg(long, default_value_t = 1)]
+        min_instances: u32,
+        /// Print the commands without running them.
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
 #[derive(Clone, Debug, clap::ValueEnum)]
 enum DeployTarget {
+    #[value(alias = "cloud_run")]
     CloudRun,
     Gke,
+    #[value(alias = "agent_engine")]
     AgentEngine,
 }
 
@@ -541,24 +568,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         Command::Deploy {
             target,
-            agent_dir,
             project,
             region,
             service_name,
-            with_ui,
-            trace_to_cloud,
+            bundles,
+            serve,
+            image,
+            source,
+            tokens_secret,
+            twilio_secret,
+            service_account,
+            max_sessions,
+            min_instances,
+            dry_run,
         } => commands::deploy::run(commands::deploy::DeployConfig {
             target: match target {
                 DeployTarget::CloudRun => commands::deploy::Target::CloudRun,
                 DeployTarget::Gke => commands::deploy::Target::Gke,
                 DeployTarget::AgentEngine => commands::deploy::Target::AgentEngine,
             },
-            agent_dir,
             project,
             region,
             service_name,
-            with_ui,
-            trace_to_cloud,
+            bundles: bundles.or_else(|| std::env::var("ADK_BUNDLES").ok()),
+            serve,
+            image,
+            source,
+            tokens_secret,
+            twilio_secret,
+            service_account,
+            max_sessions,
+            min_instances,
+            dry_run,
         })?,
     }
 
