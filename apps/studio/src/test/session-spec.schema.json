@@ -2993,7 +2993,7 @@
           "type": "string"
         },
         {
-          "description": "On generation complete — before interruption truncation.",
+          "description": "On generation complete, before the turn completes.",
           "enum": [
             "on_generation_complete"
           ],

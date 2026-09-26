@@ -99,6 +99,10 @@ impl VoicePump {
 ///   `speaker_hz`, resampled from [`SESSION_OUTPUT_HZ`]. An interruption
 ///   arrives as [`Playback::Flush`].
 ///
+/// The pump reports what it plays to the session's
+/// [`PlaybackClock`](gemini_adk_rs::live::PlaybackClock), so an interruption
+/// cuts the model's transcript to what the listener heard.
+///
 /// The pump owns no devices: pair it with `cpal` streams
 /// (`Talk::talk` does exactly that), a WebSocket bridge, a test harness —
 /// anything that can fill and drain a channel.
@@ -152,12 +156,23 @@ pub fn pump_processed(
     });
 
     let mut events = handle.events();
+    let clock = handle.playback().clone();
     let downlink = tokio::spawn(async move {
         let mut to_speaker = StreamResampler::new(SESSION_OUTPUT_HZ, speaker_hz);
         loop {
             match events.recv().await {
                 Ok(event) => match playback_of(&event, &mut to_speaker) {
                     Some(playback) => {
+                        // Report playback, so an interruption cuts the
+                        // model's transcript to what the listener heard.
+                        match &playback {
+                            Playback::Chunk(samples) => {
+                                clock.queued(std::time::Duration::from_secs_f64(
+                                    samples.len() as f64 / f64::from(speaker_hz.max(1)),
+                                ));
+                            }
+                            Playback::Flush => clock.flushed(),
+                        }
                         if speaker.send(playback).await.is_err() {
                             break;
                         }
@@ -316,6 +331,50 @@ mod tests {
             Some(Playback::Chunk(chunk)) => assert_eq!(chunk.len(), 480),
             other => panic!("expected a chunk, got {other:?}"),
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_pump_reports_what_it_plays() {
+        use base64::Engine as _;
+        use std::time::Duration;
+        // One second of model audio, twice, then the caller barges in.
+        let second = serde_json::json!({ "serverContent": { "modelTurn": { "parts": [{
+            "inlineData": {
+                "mimeType": "audio/pcm;rate=24000",
+                "data": base64::engine::general_purpose::STANDARD.encode(vec![0u8; 48_000]),
+            }
+        }] } } });
+        let (transport, control) = crate::live::scripted::ScriptedServer::new()
+            .frame(second.clone())
+            .frame(second)
+            .interrupts()
+            .into_transport();
+        let handle = crate::live::Live::builder()
+            .connect_with_transport(transport)
+            .await
+            .unwrap();
+        let (_mic_tx, mic_rx) = mpsc::channel(4);
+        let (speaker_tx, mut speaker_rx) = mpsc::channel(16);
+        let _pump = pump(&handle, mic_rx, 16_000, speaker_tx, 8_000);
+        assert_eq!(handle.playback().heard(), None);
+        control.release();
+
+        let mut got = Vec::new();
+        while got.len() < 3 {
+            match tokio::time::timeout(Duration::from_secs(3), speaker_rx.recv()).await {
+                Ok(Some(Playback::Chunk(c))) if c.is_empty() => {}
+                Ok(Some(p)) => got.push(p),
+                other => panic!("pump stopped early: {other:?}"),
+            }
+        }
+        assert!(matches!(got[2], Playback::Flush));
+        // Two seconds were queued; the flush came almost at once, so little
+        // was heard, and nothing more is heard after it.
+        let heard = handle.playback().heard().expect("the pump reports");
+        assert!(heard < Duration::from_millis(500), "{heard:?}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(handle.playback().heard(), Some(heard));
+        handle.disconnect().await.ok();
     }
 
     #[test]

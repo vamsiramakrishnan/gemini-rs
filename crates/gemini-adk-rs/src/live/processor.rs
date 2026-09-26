@@ -258,7 +258,11 @@ pub(crate) enum ControlEvent {
         /// Whether the tool completed successfully.
         ok: bool,
     },
-    Interrupted,
+    /// The model was interrupted. `heard_chars`: how many of the turn's
+    /// output transcript characters the listener heard, when it can be told.
+    Interrupted {
+        heard_chars: Option<usize>,
+    },
     TurnComplete,
     /// Model finished generating (even if interrupted). Fires before TurnComplete.
     GenerationComplete,
@@ -306,6 +310,11 @@ pub(crate) struct SharedState {
     /// Transcript redaction, applied at the router before either lane sees
     /// the text. `None` = pass through untouched.
     pub redactor: Option<Arc<crate::live::redaction::TranscriptRedactor>>,
+    /// Where the listener's playback is reported.
+    pub playback: super::playback::PlaybackClock,
+    /// The current model turn's audio and transcript, for cutting the
+    /// transcript to what was heard on an interruption.
+    pub speech: parking_lot::Mutex<super::playback::TurnSpeech>,
 }
 
 /// Runs the three-lane event processor.
@@ -364,6 +373,9 @@ pub(crate) struct ControlPlaneConfig {
     /// Replay only: the router waits for both lanes to finish each event and
     /// counts it here. See [`Lockstep`].
     pub lockstep: Option<Arc<Lockstep>>,
+    /// The session's playback clock, shared with its
+    /// [`LiveHandle`](super::handle::LiveHandle).
+    pub playback: super::playback::PlaybackClock,
 }
 
 /// Counts the session events the lanes have fully handled, for an offline
@@ -419,6 +431,7 @@ impl Default for ControlPlaneConfig {
             delivery: DeliveryConfig::default(),
             redactor: None,
             lockstep: None,
+            playback: super::playback::PlaybackClock::new(crate::clock::system_clock()),
         }
     }
 }
@@ -457,6 +470,8 @@ pub(crate) fn spawn_event_processor(
         delivery: control_plane.delivery,
         dropped: DroppedFrames::default(),
         redactor: control_plane.redactor.clone(),
+        playback: control_plane.playback.clone(),
+        speech: parking_lot::Mutex::default(),
     });
 
     let timer_cancel = CancellationToken::new();
@@ -742,6 +757,7 @@ async fn route_event(
     match event {
         // Fast lane events
         SessionEvent::AudioData(data) => {
+            shared.speech.lock().on_audio(data.len(), &shared.playback);
             deliver_fast(
                 fast_tx,
                 FastEvent::Audio(data),
@@ -796,6 +812,7 @@ async fn route_event(
                 Some(redactor) => redactor.redact(text),
                 None => text,
             };
+            shared.speech.lock().on_text(&text);
             deliver_fast(
                 fast_tx,
                 FastEvent::OutputTranscript(text.clone()),
@@ -854,10 +871,16 @@ async fn route_event(
             // control lane may be blocked awaiting a slow tool and would
             // otherwise not see this interruption until the tool finished.
             shared.barge_in.lock().cancel();
+            // Read the playback clock now, while the listener's speaker is
+            // where the interruption found it.
+            let heard_chars = shared.speech.lock().on_interrupted(&shared.playback);
             let _ = fast_tx.send(FastEvent::Interrupted).await;
-            let _ = ctrl_tx.send(ControlEvent::Interrupted).await;
+            let _ = ctrl_tx
+                .send(ControlEvent::Interrupted { heard_chars })
+                .await;
         }
         SessionEvent::TurnComplete => {
+            shared.speech.lock().on_turn_complete();
             let _ = ctrl_tx.send(ControlEvent::TurnComplete).await;
         }
         // Usage metadata is handled by the telemetry lane (SessionSignals)
@@ -1297,6 +1320,66 @@ mod tests {
         // Turn count should have been incremented
         let tc: u32 = state.session().get("turn_count").unwrap_or(0);
         assert_eq!(tc, 1);
+
+        drop(event_tx);
+        let _ = fast_handle.await;
+        let _ = ctrl_handle.await;
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_turn_keeps_only_what_was_heard() {
+        let finals = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+        let sink = finals.clone();
+        let callbacks = Arc::new(EventCallbacks {
+            on_output_transcript: Some(Box::new(move |text: &str, is_final: bool| {
+                if is_final {
+                    sink.lock().push(text.to_string());
+                }
+            })),
+            ..EventCallbacks::default()
+        });
+        let (event_tx, _) = broadcast::channel(64);
+        let event_rx = event_tx.subscribe();
+        let writer: Arc<dyn SessionWriter> = Arc::new(crate::agent_session::NoOpSessionWriter);
+        let clock = Arc::new(crate::clock::ManualClock::new());
+        let control_plane = ControlPlaneConfig {
+            playback: crate::live::playback::PlaybackClock::new(clock.clone()),
+            ..ControlPlaneConfig::default()
+        };
+        let playback = control_plane.playback.clone();
+        let (fast_handle, ctrl_handle, _ctrl_tx) = spawn_event_processor(
+            event_rx,
+            callbacks,
+            None,
+            writer,
+            vec![],
+            State::new(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::collections::HashMap::new(),
+            control_plane,
+            dummy_event_tx(),
+        );
+
+        // The model streams 4 s of audio (24 kHz PCM16) and its whole
+        // sentence at once; the speaker starts playing it.
+        let _ = event_tx.send(SessionEvent::AudioData(Bytes::from(vec![0u8; 4 * 48_000])));
+        let _ = event_tx.send(SessionEvent::OutputTranscription(
+            "Your table for four is booked for Friday at eight, and I have noted the allergy."
+                .to_string(),
+        ));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        playback.queued(Duration::from_secs(4));
+        // The caller cuts in after 1.5 s: 24 characters at 16 a second.
+        clock.advance(Duration::from_millis(1_500));
+        let _ = event_tx.send(SessionEvent::Interrupted);
+        let _ = event_tx.send(SessionEvent::TurnComplete);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert_eq!(*finals.lock(), ["Your table for four is"]);
 
         drop(event_tx);
         let _ = fast_handle.await;

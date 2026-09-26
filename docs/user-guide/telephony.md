@@ -252,10 +252,14 @@ let call = TwilioCall::attach_with(&session, CallOptions { recorder: Some(record
 recorder.finish()?;
 ```
 
-**What the caller heard.** On barge-in the Twilio bridge sets
-`telephony:unplayed_ms`: how much of the reply had been sent but not yet
-played. Agent audio goes out in 20 ms frames, and the last partial frame is
-padded once the model pauses.
+**What the caller heard.** Every bridge reports its playback to the
+session, so on barge-in the model's side of the turn is cut to what the
+caller heard: in the transcript, the final output transcript callback and
+the verbatim check (see
+[what the listener heard](./live-callbacks.md#what-the-listener-heard)).
+The Twilio bridge also sets `telephony:unplayed_ms`: how much of the reply
+had been sent but not yet played. Agent audio goes out in 20 ms frames, and
+the last partial frame is padded once the model pauses.
 
 **Audio quality.** Audio moving between 8 kHz on the line and 16 or 24 kHz
 in the session is resampled by `voice::StreamResampler`.

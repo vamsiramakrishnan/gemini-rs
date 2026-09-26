@@ -141,15 +141,48 @@ blocking callback in sequence; concurrent variants are spawned as detached tasks
 These two callbacks mark different points in the generation lifecycle:
 
 - **`on_generation_complete`** fires on the wire `GenerationComplete` event,
-  which arrives **before** interruption truncation is applied. If the user
-  interrupts mid-response, `on_generation_complete` still delivers a
-  notification about the complete intended output. Pair this with
+  when the model has finished generating a turn. Pair it with
   `.extract_on_generation::<T>(llm, "...")` to run a structured extractor
-  against the model's full text before truncation.
+  on the model's full text as soon as it is generated. An interrupted turn
+  has no `GenerationComplete` on current Live models: probed on Gemini 2.5
+  native audio and Gemini 3.8 Live, the server sends `interrupted` and then
+  `turnComplete`. To see everything the model produced, including what the
+  listener never heard, read the partial `on_output_transcript` chunks
+  (`is_final = false`).
 
-- **`on_turn_complete`** fires at the turn boundary after any truncation.
-  Use this for turn-level bookkeeping: transcript commits, phase evaluation,
-  extractor runs triggered by `.extract_turns()`, and downstream signals.
+- **`on_turn_complete`** fires at the turn boundary. After an interruption
+  the turn holds only what the listener heard (see
+  [what the listener heard](#what-the-listener-heard)). Use this for
+  turn-level bookkeeping: transcript commits, phase evaluation, extractor
+  runs triggered by `.extract_turns()`, and downstream signals.
+
+#### What the listener heard
+
+The model streams audio faster than it plays, and its transcript runs
+further ahead still: measured on the Live API, output transcription arrives
+up to twice as far into the answer as the audio delivered with it. So when
+the listener barges in, the model's transcript holds words they never
+heard.
+
+On an interruption the runtime cuts the model's side of the turn to what
+was heard. The cut applies to the transcript buffer, the final
+`on_output_transcript(text, true)` and the verbatim check. What was heard
+comes from the session's `PlaybackClock` (`LiveHandle::playback()`), which
+whatever plays the audio reports to:
+
+- The voice pump, `talk()` and the Twilio and SIP bridges report on their
+  own.
+- A custom player calls `playback().queued(duration)` as it hands audio to
+  the speaker, and `playback().flushed()` when it drops audio on barge-in.
+- With no reporter, the cut is at the audio received, which bounds what
+  could have been heard.
+
+Heard audio becomes text through the session's speaking rate. The rate is
+calibrated on the session's uninterrupted turns and is 16 characters a
+second until then, which matches English on current Live models. The cut
+ends at the last whole word. A turn with no audio (a text session) is not
+cut. The model's own context is unchanged: the Live API keeps what it sent,
+so the model may believe it finished its sentence.
 
 ```rust,ignore
 Live::builder()

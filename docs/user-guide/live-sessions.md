@@ -179,15 +179,15 @@ detached task instead.
     playback_buffer.flush().await;
 })
 
-// Turn complete: model finished its (possibly truncated) response
+// Turn complete: after an interruption, the turn holds what was heard
 .on_turn_complete(|| async {
     println!("--- turn complete ---");
 })
 
-// GenerationComplete: a provider lifecycle event
-// Use with .extract_on_generation::<T>() for pre-interruption extraction
+// GenerationComplete: the model finished generating (not sent for an
+// interrupted turn). Use with .extract_on_generation::<T>()
 .on_generation_complete(|| async {
-    println!("--- generation complete (pre-truncation) ---");
+    println!("--- generation complete ---");
 })
 
 // Tool calls: return None for auto-dispatch, Some to override

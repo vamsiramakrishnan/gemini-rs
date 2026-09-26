@@ -224,7 +224,7 @@ pub enum TriggerSpec {
     EveryTurn,
     /// After tool calls complete.
     AfterToolCall,
-    /// On generation complete — before interruption truncation.
+    /// On generation complete, before the turn completes.
     OnGenerationComplete,
     /// When a phase transition occurs.
     OnPhaseChange,

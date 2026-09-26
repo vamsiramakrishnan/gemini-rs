@@ -48,6 +48,7 @@ pub mod input_vad;
 pub mod needs;
 pub mod persistence;
 pub mod phase;
+pub mod playback;
 pub(crate) mod processor;
 pub mod reactor;
 pub mod redaction;
@@ -89,6 +90,7 @@ pub use phase::{
     EnterContextFn, InstructionModifier, Phase, PhaseInstruction, PhaseMachine, PhasePreparation,
     Transition, TransitionEvaluation, TransitionRecord, TransitionResult, TransitionTrigger,
 };
+pub use playback::PlaybackClock;
 pub use processor::{Delivery, DeliveryConfig};
 pub use reactor::{
     EffectPolicy, LiveEffect, LiveReactor, Reaction, ReactorEvent, ReactorRule, VoiceRuntimeState,

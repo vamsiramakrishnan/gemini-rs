@@ -615,6 +615,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         flow: flow_monitor.clone(),
         redactor: plan.redactor,
         lockstep: plan.lockstep,
+        playback: super::playback::PlaybackClock::new(state.clock()),
     };
 
     // Create shared PendingContext for deferred delivery.
@@ -753,6 +754,7 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
 
     // Spawn fast + control lanes (no session_signals, no transcript mutex)
     let greeting_writer = rt.user_writer.clone();
+    let playback = rt.control_plane.playback.clone();
     let (fast_handle, ctrl_handle, ctrl_tx) = spawn_event_processor(
         rt.event_rx,
         rt.callbacks,
@@ -837,7 +839,8 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
         rt.background_tracker,
         rt.telem_cancel,
     )
-    .with_control_sender(ctrl_tx))
+    .with_control_sender(ctrl_tx)
+    .with_playback(playback))
 }
 
 #[cfg(test)]

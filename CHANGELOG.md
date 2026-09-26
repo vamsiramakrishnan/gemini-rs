@@ -55,6 +55,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Dockerfile that built a binary named after the service, set `PORT` for a
   program that did not read it, and printed a `gcloud` command without
   running it. It now deploys `adk-runtime` (see Changed).
+- **An interrupted turn recorded words the listener never heard.** The
+  model streams audio faster than it plays, and its transcript runs further
+  ahead still. Measured on the Live API, transcription arrives up to twice
+  as far into the answer as the audio delivered with it. On a barge-in the
+  runtime cleared the model's text from the transcript buffer, but the
+  final `on_output_transcript` and the verbatim check kept all of it. Now
+  all three hold what was heard, cut at the last whole word:
+  - Whatever plays the audio reports to the session's `PlaybackClock`
+    (`LiveHandle::playback()`). The voice pump, `talk()` and the Twilio and
+    SIP bridges report on their own.
+  - Heard audio becomes text through a speaking rate the session calibrates
+    on its uninterrupted turns.
+  - With no reporter, the cut is at the audio received.
+
+  The docs also said `on_generation_complete` fires for an interrupted
+  turn. Probed on Gemini 2.5 native audio and Gemini 3.8 Live, it does not:
+  the server sends `interrupted` and then `turnComplete`.
 
 ### Added
 

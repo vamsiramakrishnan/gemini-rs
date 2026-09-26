@@ -116,8 +116,9 @@ pub struct EventCallbacks {
     pub on_tool_cancelled: Option<AsyncCallbackWith<Vec<String>>>,
     /// Called when the model completes its turn.
     pub on_turn_complete: Option<AsyncCallback>,
-    /// Called when the model finishes generating its full intended response,
-    /// before any interruption truncation (the wire `GenerationComplete`).
+    /// Called when the model finishes generating a response (the wire
+    /// `GenerationComplete`). Current Live models do not send it for an
+    /// interrupted turn.
     pub on_generation_complete: Option<AsyncCallback>,
     /// Called when server sends GoAway (session ending soon).
     pub on_go_away: Option<AsyncCallbackWith<Duration>>,
