@@ -13,7 +13,7 @@ repository.workspace = true
 # Internal workspace crates
 gemini-genai-rs       = { workspace = true, default-features = true }
 gemini-adk-rs        = { workspace = true, default-features = true, features = ["gemini-llm"] }
-gemini-adk-fluent-rs = { workspace = true, default-features = true, features = ["gemini-llm", "denoise"] }
+gemini-adk-fluent-rs = { workspace = true, default-features = true, features = ["gemini-llm", "denoise", "http-tools"] }
 gemini-adk-server-rs = { workspace = true }
 
 # CLI
@@ -51,3 +51,8 @@ path = "src/main.rs"
 [[example]]
 name = "scaffold-agent"
 path = "templates/agent/main.rs"
+
+[features]
+# Microphone and speakers for `adk spec run` on audio specs (needs system
+# audio headers).
+voice = ["gemini-adk-fluent-rs/voice-io"]

@@ -131,6 +131,12 @@ enum Command {
     /// Check environment setup (API keys, toolchain, credentials).
     Doctor,
 
+    /// Session specs (`agent.json`): generate a project, test, call a tool, run.
+    Spec {
+        #[command(subcommand)]
+        action: SpecAction,
+    },
+
     /// Conversation-compiler devtools: inspect, graph, and simulate a spec.
     Flow {
         #[command(subcommand)]
@@ -172,6 +178,50 @@ enum DeployTarget {
     CloudRun,
     Gke,
     AgentEngine,
+}
+
+#[derive(Subcommand)]
+enum SpecAction {
+    /// Generate a project around the spec: one typed stub per mock tool.
+    ///
+    /// Rust projects run the session with the stubs in process. Python and
+    /// Go projects serve them as an MCP tool server, and their agent.json
+    /// binds those tools to it.
+    Codegen {
+        /// Path to the spec (agent.json).
+        spec: String,
+        /// Project language: rust, python or go.
+        #[arg(long, default_value = "rust")]
+        lang: String,
+        /// Directory to write the project into.
+        #[arg(long)]
+        out: String,
+        /// Rust only: depend on a local checkout of this repository.
+        #[arg(long)]
+        sdk_path: Option<String>,
+        /// Overwrite files that already exist.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Validate the spec and run its tests and scenarios offline.
+    Test {
+        /// Path to the spec (agent.json).
+        spec: String,
+    },
+    /// Call one tool through its binding and print the result.
+    Call {
+        /// Path to the spec (agent.json).
+        spec: String,
+        /// Tool name.
+        tool: String,
+        /// Arguments as a JSON object.
+        args: Option<String>,
+    },
+    /// Run the spec as a live session.
+    Run {
+        /// Path to the spec (agent.json).
+        spec: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -369,6 +419,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SessionAction::Scenario { journal, name } => {
                 commands::session::scenario(&journal, name.as_deref())?
             }
+        },
+
+        Command::Spec { action } => match action {
+            SpecAction::Codegen {
+                spec,
+                lang,
+                out,
+                sdk_path,
+                force,
+            } => commands::spec::codegen(&spec, &lang, &out, sdk_path.as_deref(), force)?,
+            SpecAction::Test { spec } => commands::spec::test(&spec).await?,
+            SpecAction::Call { spec, tool, args } => {
+                commands::spec::call(&spec, &tool, args.as_deref()).await?
+            }
+            SpecAction::Run { spec } => commands::spec::run(&spec).await?,
         },
 
         Command::Flow { action } => match action {

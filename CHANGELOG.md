@@ -30,9 +30,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conversation. When the session has resumption enabled, a reconnect now
   presents the latest handle. The session-persistence guide said there was no
   automatic reconnect; it now describes what happens.
+- `SessionSpec::to_cargo_toml` (the Studio's Code tab) pinned the SDK at
+  0.8. It now pins the current version.
 
 ### Added
 
+- `adk spec codegen` generates a Rust, Python or Go project around a session
+  spec, with one typed stub per mock tool. Rust registers the stubs in
+  process. Python and Go serve them as MCP tool servers (official SDKs),
+  and the project's `agent.json` binds those tools to them. Each project
+  has tests, and CI builds and tests all three for every gallery spec.
+  `adk spec test`, `adk spec call` and `adk spec run` test, call and run a
+  spec. `POST /api/flows/project` returns the generated files to the
+  Studio. See [From a spec to a project](docs/user-guide/spec-projects.md).
 - A spec's tools can be implemented in code or on an MCP server. A tool's
   `mcp` field calls the tool of the same name on that server, and
   `SpecResources::implement` supplies an in-process implementation. The

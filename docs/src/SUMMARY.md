@@ -41,6 +41,7 @@
 - [Governed Flows (conversation/tool DAGs)](./user-guide/flow.md)
 - [Flows as JSON (SessionSpec)](./user-guide/flow-json.md)
 - [The Flow Studio](./flow-studio.md)
+- [From a Spec to a Project](./user-guide/spec-projects.md)
 - [Voice Behavior in the Conversation Graph](./user-guide/voice-behavior.md)
 - [Testing Conversations Offline](./user-guide/testing.md)
 - [Conversation CI](./user-guide/conversation-ci.md)

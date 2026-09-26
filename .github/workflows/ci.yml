@@ -148,6 +148,30 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo run -p gemini-adk-cli-rs --locked -- flow ci conversations
 
+  # `adk spec codegen` output: a Rust, Python and Go project per gallery spec,
+  # format-checked, linted, built and tested, plus a tool call through each
+  # kind of generated MCP server.
+  generated-projects:
+    name: Generated projects
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: false
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: python -m pip install "mcp>=2.2,<3"
+      - run: scripts/check-generated-projects.sh "$RUNNER_TEMP/generated"
+
   # The Python binding is excluded from the workspace (it links libpython and
   # maturin builds it), so no job above compiles it. Build it against its own
   # lockfile and run the model-free smoke suite.

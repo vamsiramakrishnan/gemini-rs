@@ -21,7 +21,10 @@
 //!   before; the spec never pretends to serialize them.
 
 mod codegen;
+pub mod project;
 mod simulate;
+
+pub use project::{ProjectFile, ProjectLanguage, ProjectOptions, SdkSource};
 
 pub use simulate::{
     SimEvent, SimSnapshot, SpecTest, TestExpectation, TestReport, TestStepResult, trace_test,
@@ -1131,7 +1134,10 @@ impl SessionSpec {
 
     /// Resolvers for the conversation's `resolve` slots, each bound to the
     /// declared tool of the same name (the resolver name, or the slot).
-    fn resolver_registry(&self, state: &State) -> crate::conversation::ResolverRegistry {
+    fn resolver_registry(
+        &self,
+        tools: &[Arc<SimpleTool>],
+    ) -> crate::conversation::ResolverRegistry {
         let mut registry = crate::conversation::ResolverRegistry::new();
         for stage in self.conversation_stages() {
             for resolve in &stage.resolve {
@@ -1139,8 +1145,11 @@ impl SessionSpec {
                     .resolver
                     .clone()
                     .unwrap_or_else(|| resolve.slot.clone());
-                if let Some(tool) = self.tools.iter().find(|t| t.name == name) {
-                    let tool = Arc::new(build_tool(tool, state));
+                if let Some(tool) = tools
+                    .iter()
+                    .find(|t| ToolFunction::name(t.as_ref()) == name)
+                {
+                    let tool = tool.clone();
                     registry.add(name, move |args| {
                         let tool = tool.clone();
                         async move {
@@ -1666,9 +1675,19 @@ impl SessionSpec {
         state: &State,
         resources: &SpecResources,
     ) -> ToolDispatcher {
+        let mut dispatcher = ToolDispatcher::new();
+        for tool in self.bound_tools(state, resources) {
+            dispatcher.register(tool);
+        }
+        dispatcher
+    }
+
+    /// Every declared tool, bound to its call: the in-process implementation
+    /// in `resources`, else its MCP server, else its HTTP binding or mock.
+    fn bound_tools(&self, state: &State, resources: &SpecResources) -> Vec<Arc<SimpleTool>> {
         let mut servers: BTreeMap<String, Arc<gemini_adk_rs::tools::mcp::McpSessionManager>> =
             BTreeMap::new();
-        let mut dispatcher = ToolDispatcher::new();
+        let mut tools = Vec::new();
         for tool in &self.tools {
             let call = match (resources.tools.get(&tool.name), &tool.mcp) {
                 (Some(implementation), _) => ToolCall::Code(implementation.clone()),
@@ -1684,9 +1703,9 @@ impl SessionSpec {
                 ),
                 (None, None) => ToolCall::Declared,
             };
-            dispatcher.register(build_tool_calling(tool, state, call));
+            tools.push(Arc::new(build_tool(tool, state, call)));
         }
-        dispatcher
+        tools
     }
 
     /// Apply the mock semantics of a declared tool to `state` (its
@@ -1814,8 +1833,14 @@ impl SessionSpec {
         };
 
         // Tools: declared (mock/HTTP) via the dispatcher, MCP merged on top.
-        if !self.tools.is_empty() {
-            live = live.dispatcher(self.build_dispatcher_with(state, resources));
+        // A conversation's resolvers call the same bound tools.
+        let tools = self.bound_tools(state, resources);
+        if !tools.is_empty() {
+            let mut dispatcher = ToolDispatcher::new();
+            for tool in &tools {
+                dispatcher.register(tool.clone());
+            }
+            live = live.dispatcher(dispatcher);
         }
         for params in &self.mcp {
             live = live.tools(T::mcp(params.clone()));
@@ -1826,7 +1851,7 @@ impl SessionSpec {
         if let Some(conversation) = &self.conversation {
             let compiled = crate::conversation::Conversation::from_spec_with_resolvers(
                 conversation.clone(),
-                &self.resolver_registry(state),
+                &self.resolver_registry(&tools),
             )
             .map_err(|e| format!("conversation: {e}"))?;
             live = live.converse(&compiled);
@@ -2142,11 +2167,6 @@ enum ToolCall {
     Mcp(Arc<gemini_adk_rs::tools::mcp::McpSessionManager>),
 }
 
-/// Build one declared tool as a [`SimpleTool`] bound to `state`.
-fn build_tool(tool: &ToolSpec, state: &State) -> SimpleTool {
-    build_tool_calling(tool, state, ToolCall::Declared)
-}
-
 /// The value of an MCP `tools/call` result: its structured content, else
 /// its single text part parsed as JSON, else the text itself.
 fn mcp_value(result: Value) -> Value {
@@ -2168,7 +2188,7 @@ fn mcp_value(result: Value) -> Value {
 
 /// Build one declared tool, carrying out calls with `call`. Whatever carries
 /// it out, the declaration and the state effects are the spec's.
-fn build_tool_calling(tool: &ToolSpec, state: &State, call: ToolCall) -> SimpleTool {
+fn build_tool(tool: &ToolSpec, state: &State, call: ToolCall) -> SimpleTool {
     let description = if tool.description.is_empty() {
         format!("Tool '{}'", tool.name)
     } else {

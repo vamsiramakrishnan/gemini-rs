@@ -62,6 +62,7 @@ async fn main() {
         .route("/api/flows/test", post(test_flow))
         .route("/api/flows/simulate", post(simulate_flow))
         .route("/api/flows/codegen", post(codegen_flow))
+        .route("/api/flows/project", post(project_flow))
         .route("/api/flows/schema", get(flow_schema))
         .route("/api/apps", get(list_apps))
         .route("/ws/{name}", get(ws_upgrade))
@@ -244,6 +245,29 @@ async fn codegen_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::
             "cargo_toml": spec.to_cargo_toml(),
         }),
         Err(message) => serde_json::json!({"valid": false, "errors": [message]}),
+    };
+    Json(result)
+}
+
+/// Generate a project around a spec: `{"spec": …, "lang": "rust" | "python"
+/// | "go"}`. Returns the files; nothing is written on the server.
+async fn project_flow(Json(body): Json<serde_json::Value>) -> Json<serde_json::Value> {
+    use gemini_adk_fluent_rs::spec::{ProjectLanguage, SessionSpec};
+    let language = body
+        .get("lang")
+        .and_then(|l| l.as_str())
+        .unwrap_or("rust")
+        .parse::<ProjectLanguage>();
+    let spec = SessionSpec::from_value(body.get("spec").cloned().unwrap_or_default());
+    let result = match (spec, language) {
+        (Ok(spec), Ok(language)) => serde_json::json!({
+            "valid": true,
+            "errors": [],
+            "files": spec.to_project(language),
+        }),
+        (Err(message), _) | (_, Err(message)) => {
+            serde_json::json!({"valid": false, "errors": [message], "files": []})
+        }
     };
     Json(result)
 }
