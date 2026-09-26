@@ -108,16 +108,29 @@ A final snapshot is also written **synchronously** when the control lane shuts
 down (disconnect or server close), so state accumulated since the last turn
 boundary is captured even if the process exits immediately afterwards.
 
-### Manual resume after GoAway (server-side handles)
+### Resuming after GoAway (server-side handles)
 
 Independent of snapshots, the Gemini server itself supports session
 resumption: with resumption enabled it periodically issues opaque handles, and
 presenting the latest handle on the next connect continues the **server-side**
 conversation (model context included).
 
-`LiveHandle::resume_handle()` exposes the latest handle at any time — most
-usefully inside `on_go_away`, which fires when the server announces it will
-close the connection soon:
+When the server sends GoAway or the connection drops, the transport
+reconnects on its own (up to `TransportConfig::max_reconnect_attempts`, with
+exponential backoff):
+- If the session was opened with resumption enabled (`.session_resume()` or
+  `.session_resume_from(handle)`), the reconnect presents the latest handle,
+  so the same conversation continues.
+- Without resumption, a reconnect starts a new server-side conversation.
+
+Client messages the server had not consumed before the connection closed are
+not sent again yet. In transparent mode, the server's last consumed index is
+kept in session state under `session:last_consumed_client_index`.
+
+To resume across a process restart, or in a new session you open yourself,
+take the handle from `LiveHandle::resume_handle()`. It is most useful inside
+`on_go_away`, which fires when the server announces it will close the
+connection soon:
 
 ```rust,ignore
 // Session 1: enable resumption and capture the handle.
@@ -142,10 +155,9 @@ if let Some(h) = resume {
 let handle = builder.connect_from_env().await?;
 ```
 
-The SDK performs **no automatic reconnect** — when and whether to resume is an
-explicit application decision. The same handle is also captured in every
-persistence snapshot (`SessionSnapshot::resume_handle`), so a process restart
-can resume from storage instead of memory.
+The same handle is also captured in every persistence snapshot
+(`SessionSnapshot::resume_handle`), so a process restart can resume from
+storage instead of memory.
 
 ### Custom persistence backends
 

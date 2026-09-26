@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     them (`FLOW_STUDIO_ALLOW_HTTP`, `FLOW_STUDIO_ALLOW_MCP`);
   - binds to `127.0.0.1` unless `ADK_WEB_ADDR` says otherwise.
 
+### Fixed
+
+- **A reconnect after GoAway started a new conversation.** The transport
+  reconnected on its own but re-sent the original setup, without the
+  resumption handle the server had issued, so the server started a fresh
+  conversation. When the session has resumption enabled, a reconnect now
+  presents the latest handle. The session-persistence guide said there was no
+  automatic reconnect; it now describes what happens.
+
 ### Added
 
 - `SessionSpec::sandboxed` and `BindingAllowlist`, for applying a spec you

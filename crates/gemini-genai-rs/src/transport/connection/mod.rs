@@ -115,6 +115,100 @@ mod tests {
         }
     }
 
+    /// A transport that plays one script per connection and records every
+    /// setup message it is sent.
+    struct Reconnecting {
+        scripts: std::collections::VecDeque<Vec<Vec<u8>>>,
+        current: std::collections::VecDeque<Vec<u8>>,
+        setups: std::sync::Arc<parking_lot::Mutex<Vec<serde_json::Value>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::transport::ws::Transport for Reconnecting {
+        type Error = std::io::Error;
+
+        async fn connect(
+            &mut self,
+            _url: &str,
+            _headers: Vec<(String, String)>,
+        ) -> Result<(), Self::Error> {
+            self.current = self.scripts.pop_front().unwrap_or_default().into();
+            Ok(())
+        }
+
+        async fn send(&mut self, data: Vec<u8>) -> Result<(), Self::Error> {
+            if let Ok(message) = serde_json::from_slice::<serde_json::Value>(&data)
+                && message.get("setup").is_some()
+            {
+                self.setups.lock().push(message);
+            }
+            Ok(())
+        }
+
+        async fn recv(&mut self) -> Result<Option<Vec<u8>>, Self::Error> {
+            match self.current.pop_front() {
+                Some(frame) => Ok(Some(frame)),
+                // Out of script: stay open and quiet.
+                None => std::future::pending().await,
+            }
+        }
+
+        async fn close(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reconnect_after_go_away_resumes_with_the_latest_handle() {
+        let setups = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let transport = Reconnecting {
+            scripts: vec![
+                vec![
+                    br#"{"setupComplete":{}}"#.to_vec(),
+                    br#"{"sessionResumptionUpdate":{"newHandle":"h-1","resumable":true}}"#.to_vec(),
+                    br#"{"goAway":{"timeLeft":"0s"}}"#.to_vec(),
+                ],
+                vec![br#"{"setupComplete":{}}"#.to_vec()],
+            ]
+            .into(),
+            current: Default::default(),
+            setups: setups.clone(),
+        };
+        let mut config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
+        config.session_resumption = Some(SessionResumptionConfig {
+            handle: None,
+            transparent: None,
+        });
+        let transport_config = TransportConfig {
+            max_reconnect_attempts: 1,
+            reconnect_base_delay_ms: 10,
+            reconnect_max_delay_ms: 10,
+            ..no_reconnect_config()
+        };
+        let _handle = connect_with(config, transport_config, transport, JsonCodec)
+            .await
+            .unwrap();
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while setups.lock().len() < 2 && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let setups = setups.lock();
+        assert_eq!(setups.len(), 2, "one setup per connection");
+        let resumption = |i: usize| setups[i].pointer("/setup/sessionResumption").cloned();
+        assert_eq!(
+            resumption(0),
+            Some(serde_json::json!({})),
+            "first connect: no handle yet"
+        );
+        assert_eq!(
+            resumption(1),
+            Some(serde_json::json!({ "handle": "h-1" })),
+            "the reconnect presents the handle the server issued"
+        );
+    }
+
     #[tokio::test]
     async fn connect_with_mock_transport() {
         let mut transport = MockTransport::new();

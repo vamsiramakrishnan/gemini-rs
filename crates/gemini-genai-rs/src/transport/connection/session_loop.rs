@@ -79,7 +79,28 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
             Ok(Ok(())) => {
                 // Send setup message
                 let _ = state.transition_to(SessionPhase::SetupSent);
-                let setup_bytes = match codec.encode_setup(&config) {
+                // After a GoAway or a dropped connection, resume the same
+                // server-side session: present the latest handle the server
+                // issued. Without it the server starts a new conversation.
+                let resumed;
+                let setup_config = match (
+                    config.session_resumption.as_ref(),
+                    state.resume_handle.lock().clone(),
+                ) {
+                    (Some(resumption), Some(handle))
+                        if resumption.handle.as_deref() != Some(handle.as_str()) =>
+                    {
+                        let mut next = config.clone();
+                        next.session_resumption = Some(SessionResumptionConfig {
+                            handle: Some(handle),
+                            ..resumption.clone()
+                        });
+                        resumed = next;
+                        &resumed
+                    }
+                    _ => &config,
+                };
+                let setup_bytes = match codec.encode_setup(setup_config) {
                     Ok(b) => b,
                     Err(e) => {
                         let _ = event_tx.send(SessionEvent::Error(SessionError::Codec(e)));
