@@ -121,7 +121,9 @@ impl CallRecorder {
         let rate = inner.rate;
         if let Some(mut writer) = inner.writer.take() {
             writer.flush()?;
-            let mut file = writer.into_inner().map_err(std::io::IntoInnerError::into_error)?;
+            let mut file = writer
+                .into_inner()
+                .map_err(std::io::IntoInnerError::into_error)?;
             file.seek(SeekFrom::Start(0))?;
             file.write_all(&wav_header(rate, frames))?;
             file.sync_all()?;
