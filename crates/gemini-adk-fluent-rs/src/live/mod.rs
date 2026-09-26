@@ -211,6 +211,8 @@ pub struct Live {
         std::collections::BTreeMap<String, gemini_adk_rs::flow::RepairPolicy>,
     /// Per-step voice timing, installed on the session's flow stack.
     pub(crate) stage_timings: std::collections::BTreeMap<String, gemini_adk_rs::flow::VoiceTiming>,
+    /// Slots whose correction re-opens later stages, with the keys to clear.
+    pub(crate) corrections: std::collections::BTreeMap<String, Vec<String>>,
     /// Caller-supplied session `State`, so tools and flow guards can share one.
     pub(crate) state: Option<State>,
     /// Input audio hardening: mic-chain stages, client input-VAD tuning, and
@@ -315,6 +317,7 @@ impl Live {
             digressions: Vec::new(),
             repair_policies: std::collections::BTreeMap::new(),
             stage_timings: std::collections::BTreeMap::new(),
+            corrections: std::collections::BTreeMap::new(),
             state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,

@@ -130,6 +130,20 @@ impl Sim {
         self
     }
 
+    /// A tool fails or times out. Counts toward the active stage's
+    /// `escalate_after_tool_failures`; does not advance a turn.
+    pub fn tool_failed(&mut self, tool: &str) -> &mut Self {
+        self.stack.observe_tool(tool, false, &self.state);
+        self
+    }
+
+    /// The user barges in on the model. Counts toward the active stage's
+    /// `escalate_after_interruptions`; does not advance a turn.
+    pub fn interrupt(&mut self) -> &mut Self {
+        self.stack.on_interrupted(&self.state);
+        self
+    }
+
     /// Schedule a tool to succeed `after` turns — models tool latency.
     pub fn schedule_tool(&mut self, tool: impl Into<String>, after: u32) -> &mut Self {
         self.pending_tools
@@ -151,6 +165,67 @@ impl Sim {
             self.stack.on_tool_ok(&tool, &self.state);
         }
         self.stack.on_turn(&self.state);
+    }
+
+    /// Apply one scripted step: drive the conversation, or check an
+    /// expectation. `Err` carries why an expectation did not hold. This is
+    /// what [`Scenario::run`] does for each step, exposed so another driver
+    /// (an interactive session, a binding) shares the exact semantics.
+    pub async fn apply(&mut self, step: &SimStep) -> Result<(), String> {
+        match step {
+            SimStep::User(text) => {
+                self.user(text).await;
+            }
+            SimStep::Set { key, value } => {
+                self.set(key.clone(), value.clone());
+            }
+            SimStep::ToolOk(tool) => {
+                self.tool_ok(tool);
+            }
+            SimStep::ToolFailed(tool) => {
+                self.tool_failed(tool);
+            }
+            SimStep::Interrupt => {
+                self.interrupt();
+            }
+            SimStep::ScheduleTool { tool, after } => {
+                self.schedule_tool(tool.clone(), *after);
+            }
+            SimStep::Turn => {
+                self.turn();
+            }
+            SimStep::ExpectActive(expected) => {
+                let active = self.active();
+                for e in expected {
+                    if !active.contains(e) {
+                        return Err(format!("expected active '{e}', got {active:?}"));
+                    }
+                }
+            }
+            SimStep::ExpectDenied(tool) => {
+                if self.allowed(tool) {
+                    return Err(format!("expected '{tool}' denied, but it was admitted"));
+                }
+            }
+            SimStep::ExpectAllowed(tool) => {
+                if !self.allowed(tool) {
+                    let why = self.denied().get(tool).cloned().unwrap_or_default();
+                    return Err(format!("expected '{tool}' allowed, but denied: {why}"));
+                }
+            }
+            SimStep::ExpectSlot { key, value } => {
+                let got = self.state().get_raw(key);
+                if got.as_ref() != Some(value) {
+                    return Err(format!("expected slot '{key}' = {value}, got {got:?}"));
+                }
+            }
+            SimStep::ExpectComplete => {
+                if !self.is_complete() {
+                    return Err("expected conversation complete".into());
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Active step ids in the currently-driving layer.
@@ -225,6 +300,12 @@ pub enum SimStep {
     },
     /// A tool succeeds now.
     ToolOk(String),
+    /// A tool fails (or times out) now; counts toward the active stage's
+    /// repair policy. Does not advance a turn.
+    ToolFailed(String),
+    /// The user barges in on the model; counts toward the active stage's
+    /// repair policy. Does not advance a turn.
+    Interrupt,
     /// Schedule a tool to succeed after N turns (latency).
     ScheduleTool {
         /// Tool name.
@@ -267,54 +348,9 @@ impl Scenario {
     pub async fn run(&self, convo: &CompiledConversation, mode: Enforcement) -> Result<(), String> {
         let mut sim = Sim::new(convo, mode);
         for (i, step) in self.steps.iter().enumerate() {
-            let fail = |msg: String| Err(format!("[{}] step {i} ({step:?}): {msg}", self.name));
-            match step {
-                SimStep::User(text) => {
-                    sim.user(text).await;
-                }
-                SimStep::Set { key, value } => {
-                    sim.set(key.clone(), value.clone());
-                }
-                SimStep::ToolOk(tool) => {
-                    sim.tool_ok(tool);
-                }
-                SimStep::ScheduleTool { tool, after } => {
-                    sim.schedule_tool(tool.clone(), *after);
-                }
-                SimStep::Turn => {
-                    sim.turn();
-                }
-                SimStep::ExpectActive(expected) => {
-                    let active = sim.active();
-                    for e in expected {
-                        if !active.contains(e) {
-                            return fail(format!("expected active '{e}', got {active:?}"));
-                        }
-                    }
-                }
-                SimStep::ExpectDenied(tool) => {
-                    if sim.allowed(tool) {
-                        return fail(format!("expected '{tool}' denied, but it was admitted"));
-                    }
-                }
-                SimStep::ExpectAllowed(tool) => {
-                    if !sim.allowed(tool) {
-                        let why = sim.denied().get(tool).cloned().unwrap_or_default();
-                        return fail(format!("expected '{tool}' allowed, but denied: {why}"));
-                    }
-                }
-                SimStep::ExpectSlot { key, value } => {
-                    let got = sim.state().get_raw(key);
-                    if got.as_ref() != Some(value) {
-                        return fail(format!("expected slot '{key}' = {value}, got {got:?}"));
-                    }
-                }
-                SimStep::ExpectComplete => {
-                    if !sim.is_complete() {
-                        return fail("expected conversation complete".into());
-                    }
-                }
-            }
+            sim.apply(step)
+                .await
+                .map_err(|msg| format!("[{}] step {i} ({step:?}): {msg}", self.name))?;
         }
         Ok(())
     }

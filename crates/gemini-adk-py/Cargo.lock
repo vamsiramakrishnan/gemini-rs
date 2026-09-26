@@ -309,11 +309,12 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-fluent-rs"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "async-trait",
  "base64",
  "bytes",
+ "futures-util",
  "gemini-adk-rs",
  "gemini-genai-rs",
  "parking_lot",
@@ -326,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-macros-rs"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -347,7 +348,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-rs"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -372,7 +373,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-genai-rs"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "async-trait",
  "base64",

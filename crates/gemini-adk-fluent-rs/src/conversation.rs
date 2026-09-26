@@ -271,7 +271,7 @@ pub struct StageSpec {
 // lowers into it and never reimplements it. Re-exported here so existing
 // `conversation::{Resume, RepairPolicy, FlowStack}` paths keep working.
 pub use gemini_adk_rs::flow::{FlowStack, RepairPolicy, Resume, VoiceTiming};
-use gemini_adk_rs::flow::{Overlay, escalate_flag};
+use gemini_adk_rs::flow::{Overlay, correction_flag, escalate_flag};
 
 /// A digression (overlay): a named sub-flow that suspends the main flow when its
 /// `trigger` holds, runs to completion, then resumes per `resume`.
@@ -417,6 +417,7 @@ pub struct CompiledConversation {
     overlays: Vec<CompiledOverlay>,
     repair: BTreeMap<String, RepairPolicy>,
     timing: BTreeMap<String, VoiceTiming>,
+    corrections: BTreeMap<String, Vec<String>>,
     policies: Vec<crate::policy::Policy>,
     spec: ConversationSpec,
 }
@@ -481,10 +482,17 @@ impl CompiledConversation {
             .with_overlays(self.overlays.iter().map(CompiledOverlay::to_runtime))
             .with_repairs(self.repair.clone())
             .with_timings(self.timing.clone())
+            .with_corrections(self.corrections.clone())
     }
     /// The per-stage repair policies the runtime applies to the main flow.
     pub fn repair_policies(&self) -> &BTreeMap<String, RepairPolicy> {
         &self.repair
+    }
+    /// The slots whose correction re-opens later stages, each with the state
+    /// keys the correction clears (see
+    /// [`FlowStack::with_correction`](gemini_adk_rs::flow::FlowStack::with_correction)).
+    pub fn correction_policies(&self) -> &BTreeMap<String, Vec<String>> {
+        &self.corrections
     }
     /// The per-stage voice timing, main flow and digressions, keyed by
     /// stage id.
@@ -921,6 +929,7 @@ impl crate::live::Live {
             .collect();
         self.repair_policies = convo.repair_policies().clone();
         self.stage_timings = convo.timing_policies().clone();
+        self.corrections = convo.correction_policies().clone();
         for extract in convo.all_extractors() {
             self = self.extract_record(extract);
         }
@@ -1058,6 +1067,18 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
                 ))
             })?;
             fb = fb.done(done);
+        }
+    }
+
+    // A corrected slot re-opens the stages downstream of it.
+    for rule in reopen_rules(stages) {
+        if let Some(when) = any_of(
+            rule.slots
+                .iter()
+                .map(|slot| Guard::is_true(correction_flag(slot)))
+                .collect(),
+        ) {
+            fb = fb.reset(rule.steps).when(when);
         }
     }
 
@@ -1223,6 +1244,20 @@ fn compile_spec(
         .filter_map(|s| s.timing.clone().map(|t| (s.id.clone(), t)))
         .collect();
 
+    // Slots whose correction re-opens downstream stages (lowered as resets
+    // in the main flow above); the stack watches them.
+    let mut corrections: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for rule in reopen_rules(&spec.stages) {
+        for slot in rule.slots {
+            let clear = corrections.entry(slot).or_default();
+            for key in &rule.clear {
+                if !clear.contains(key) {
+                    clear.push(key.clone());
+                }
+            }
+        }
+    }
+
     let policies = spec.policies.clone();
 
     Ok(CompiledConversation {
@@ -1231,6 +1266,7 @@ fn compile_spec(
         overlays,
         repair,
         timing,
+        corrections,
         policies,
         spec,
     })
@@ -1240,6 +1276,79 @@ fn compile_spec(
 /// explicit `done` → `captured(collect)` → disjunction of `next` conditions.
 /// When repair escalation is configured, the stage may also complete by escalating
 /// (so a stalled stage can hand off even though its normal completion never fired).
+/// How a correction to each collected slot re-opens the conversation: the
+/// stages downstream of the stage that collected it, and the state keys to
+/// clear so those stages run again (their commit confirmations).
+struct Reopen {
+    slots: Vec<String>,
+    steps: Vec<String>,
+    clear: Vec<String>,
+}
+
+/// For every stage that collects slots, the stages that depend on it
+/// (through `after`, `next` or repair escalation, transitively) and would
+/// have to run again if one of those slots were corrected.
+fn reopen_rules(stages: &[StageSpec]) -> Vec<Reopen> {
+    // Direct dependents: source -> stages that come after it.
+    let mut dependents: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for s in stages {
+        for d in &s.after {
+            dependents
+                .entry(d.as_str())
+                .or_default()
+                .insert(s.id.as_str());
+        }
+        for t in &s.next {
+            dependents
+                .entry(s.id.as_str())
+                .or_default()
+                .insert(t.to.as_str());
+        }
+        if let Some(target) = s.repair.as_ref().and_then(|r| r.escalate_to.as_ref()) {
+            dependents
+                .entry(s.id.as_str())
+                .or_default()
+                .insert(target.as_str());
+        }
+    }
+    let collected: BTreeSet<&str> = stages
+        .iter()
+        .flat_map(|s| s.collect.iter().map(String::as_str))
+        .collect();
+    stages
+        .iter()
+        .filter(|s| !s.collect.is_empty())
+        .filter_map(|s| {
+            let mut downstream: BTreeSet<&str> = BTreeSet::new();
+            let mut queue = vec![s.id.as_str()];
+            while let Some(id) = queue.pop() {
+                for next in dependents.get(id).into_iter().flatten() {
+                    if *next != s.id && downstream.insert(next) {
+                        queue.push(next);
+                    }
+                }
+            }
+            if downstream.is_empty() {
+                return None;
+            }
+            let clear = stages
+                .iter()
+                .filter(|st| downstream.contains(st.id.as_str()))
+                .filter_map(|st| st.commit.as_ref())
+                .flat_map(|c| c.when.state_keys())
+                .filter(|k| !collected.contains(k.as_str()))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            Some(Reopen {
+                slots: s.collect.clone(),
+                steps: downstream.into_iter().map(str::to_string).collect(),
+                clear,
+            })
+        })
+        .collect()
+}
+
 fn stage_completion(s: &StageSpec) -> Option<Guard> {
     let base = if let Some(g) = &s.done {
         Some(g.clone())
@@ -1805,6 +1914,7 @@ mod tests {
             live.digressions().to_vec(),
             live.repair_policies().clone(),
             std::collections::BTreeMap::new(),
+            std::collections::BTreeMap::new(),
             &[],
         );
 
@@ -1928,6 +2038,95 @@ mod tests {
         sim.turn();
         assert!(sim.is_complete());
         assert!(sim.active().is_empty());
+    }
+
+    /// The user changes a detail after confirming: the confirmation is
+    /// withdrawn and the commit is blocked until they confirm again.
+    #[tokio::test]
+    async fn a_corrected_slot_reopens_the_confirmation() {
+        use crate::simulation::{Scenario, SimStep};
+        use serde_json::json;
+        let convo = Conversation::new("booking")
+            .stage("collect")
+            .collect(["party_size"])
+            .stage("book")
+            .after("collect")
+            .commit("book_table", Guard::is_true("confirmed"))
+            .complete_when(Guard::called_ok("book_table"))
+            .stage("end")
+            .after("book")
+            .terminal()
+            .compile()
+            .unwrap();
+        assert_eq!(
+            convo.correction_policies()["party_size"],
+            ["confirmed"],
+            "a correction to party_size clears the booking confirmation"
+        );
+
+        let set = |key: &str, value: serde_json::Value| SimStep::Set {
+            key: key.into(),
+            value,
+        };
+        let scenario = Scenario {
+            name: "correction".into(),
+            steps: vec![
+                set("party_size", json!(4)),
+                SimStep::Turn,
+                SimStep::ExpectActive(vec!["book".into()]),
+                set("confirmed", json!(true)),
+                SimStep::Turn,
+                SimStep::ExpectAllowed("book_table".into()),
+                // "Actually, make it five."
+                set("party_size", json!(5)),
+                SimStep::Turn,
+                SimStep::ExpectDenied("book_table".into()),
+                SimStep::ExpectActive(vec!["book".into()]),
+                set("confirmed", json!(true)),
+                SimStep::Turn,
+                SimStep::ExpectAllowed("book_table".into()),
+                SimStep::ToolOk("book_table".into()),
+                SimStep::ExpectComplete,
+            ],
+        };
+        scenario.run(&convo, Enforcement::Enforce).await.unwrap();
+    }
+
+    /// Repeated barge-ins escalate a stage to its hand-off.
+    #[tokio::test]
+    async fn repeated_barge_ins_escalate_to_the_handoff() {
+        use crate::simulation::{Scenario, SimStep};
+        let convo = Conversation::new("support")
+            .stage("collect")
+            .collect(["issue"])
+            .repair(
+                RepairPolicy::new(10, 10)
+                    .escalate_after_interruptions(2)
+                    .escalate_to("handoff"),
+            )
+            .stage("handoff")
+            .terminal()
+            .compile()
+            .unwrap();
+        let scenario = Scenario {
+            name: "barge-ins".into(),
+            steps: vec![
+                SimStep::Turn,
+                SimStep::ExpectActive(vec!["collect".into()]),
+                SimStep::Interrupt,
+                SimStep::Turn,
+                SimStep::ExpectActive(vec!["collect".into()]),
+                SimStep::Interrupt,
+                SimStep::ExpectSlot {
+                    key: escalate_flag("collect"),
+                    value: serde_json::json!(true),
+                },
+                SimStep::Turn,
+                // The terminal hand-off completes the conversation.
+                SimStep::ExpectComplete,
+            ],
+        };
+        scenario.run(&convo, Enforcement::Enforce).await.unwrap();
     }
 
     #[test]
