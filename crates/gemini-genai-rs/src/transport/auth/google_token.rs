@@ -9,10 +9,13 @@
 
 use std::time::{Duration, Instant};
 
+use crate::protocol::types::AccessToken;
 use crate::session::AuthError;
 
 /// Refresh this long before a token's reported expiry.
 const EARLY: Duration = Duration::from_secs(300);
+/// How often [`GoogleAccessToken::into_access_token`] checks its token.
+const REFRESH_CHECK: Duration = Duration::from_secs(60);
 /// How long a `gcloud` token is trusted (it does not report its expiry;
 /// user tokens last an hour).
 const GCLOUD_LIFETIME: Duration = Duration::from_secs(45 * 60);
@@ -105,6 +108,40 @@ impl GoogleAccessToken {
     /// Forget the cached token, e.g. after a request was rejected with 401.
     pub async fn invalidate(&self) {
         *self.cached.lock().await = None;
+    }
+
+    /// An [`AccessToken`] that stays valid for as long as it is held.
+    ///
+    /// [`AccessToken`] is read synchronously on every connection attempt,
+    /// and fetching a token is asynchronous, so the token is fetched here
+    /// once (an error means there are no usable credentials) and then kept
+    /// fresh by a background task. The task checks every minute and fetches
+    /// a new token shortly before the current one expires. It stops once
+    /// every clone of the returned `AccessToken` is dropped. If a refresh
+    /// fails, the previous token is kept and the next check retries.
+    ///
+    /// Must be called inside a Tokio runtime.
+    pub async fn into_access_token(self) -> Result<AccessToken, AuthError> {
+        self.into_access_token_every(REFRESH_CHECK).await
+    }
+
+    async fn into_access_token_every(self, every: Duration) -> Result<AccessToken, AuthError> {
+        let first = self.token().await?;
+        let current = std::sync::Arc::new(parking_lot::RwLock::new(first));
+        let weak = std::sync::Arc::downgrade(&current);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(every).await;
+                let Some(current) = weak.upgrade() else {
+                    break;
+                };
+                match self.token().await {
+                    Ok(token) => *current.write() = token,
+                    Err(e) => tracing::warn!("access token refresh failed: {e}"),
+                }
+            }
+        });
+        Ok(AccessToken::from_fn(move || current.read().clone()))
     }
 
     async fn fetch_metadata(&self, host: &str) -> Result<(String, Duration), AuthError> {
@@ -218,6 +255,43 @@ mod tests {
         let source = GoogleAccessToken::metadata_server(host);
         assert_eq!(source.token().await.unwrap(), "tok-0");
         assert_eq!(source.token().await.unwrap(), "tok-1");
+    }
+
+    #[tokio::test]
+    async fn an_access_token_is_refreshed_in_the_background_until_dropped() {
+        // Every fetch is inside the early-refresh window, so each check
+        // fetches a new token.
+        let (host, hits) = fake_metadata(60).await;
+        let token = GoogleAccessToken::metadata_server(host)
+            .into_access_token_every(Duration::from_millis(20))
+            .await
+            .unwrap();
+        assert_eq!(token.get(), "tok-0");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_ne!(token.get(), "tok-0", "the background task refreshed it");
+
+        drop(token);
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let after_drop = hits.load(std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            hits.load(std::sync::atomic::Ordering::SeqCst),
+            after_drop,
+            "the refresher stops once the token is dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_access_token_needs_credentials_up_front() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let host = listener.local_addr().unwrap().to_string();
+        drop(listener);
+        assert!(
+            GoogleAccessToken::metadata_server(host)
+                .into_access_token()
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

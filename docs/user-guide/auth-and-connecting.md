@@ -74,10 +74,13 @@ When `GOOGLE_GENAI_USE_VERTEXAI=true`, the SDK reads:
 |----------|----------|---------|
 | `GOOGLE_CLOUD_PROJECT` | Yes | — |
 | `GOOGLE_CLOUD_LOCATION` | No | `us-central1` |
-| `GOOGLE_ACCESS_TOKEN` | No (see below) | gcloud fallback |
+| `GOOGLE_ACCESS_TOKEN` | No (see below) | metadata server, then gcloud |
 
-If `GOOGLE_ACCESS_TOKEN` is unset or empty, `connect_from_env()` automatically
-falls back to running `gcloud auth print-access-token`. This means the only
+If `GOOGLE_ACCESS_TOKEN` is unset or empty, `connect_from_env()` gets a token
+from the metadata server when one answers (Cloud Run, GKE with Workload
+Identity, Compute Engine), else by running `gcloud auth print-access-token`.
+The token is refreshed in the background before it expires, so a reconnect
+late in a long session still carries a valid one. This means the only
 Vertex setup for local development is:
 
 ```sh
@@ -87,9 +90,13 @@ export GOOGLE_CLOUD_PROJECT=my-gcp-project
 gcloud auth login   # once
 ```
 
-In production (Cloud Run, GKE Workload Identity, etc.) set
-`GOOGLE_ACCESS_TOKEN` from a service-account token exchange. The gcloud
-fallback is not available in containers without the CLI installed.
+On Cloud Run and GKE, attach a service account with `roles/aiplatform.user`
+and set nothing else. A fixed `GOOGLE_ACCESS_TOKEN` is not refreshed, so
+avoid it in long-running services.
+
+The metadata server needs an HTTP client, which the `gemini-llm` (default)
+and `gcs-store` features provide. A build with neither uses the gcloud CLI
+only.
 
 ## Explicit Connection Methods
 
@@ -188,7 +195,7 @@ let config = SessionConfig::from_endpoint(endpoint)
 `from_env()` returns `Err(EndpointEnvError::Missing(var_name))` naming the
 missing variable so the failure is immediately actionable. The `connect_from_env()`
 Vertex AI path intercepts the `Missing("GOOGLE_ACCESS_TOKEN")` error specifically
-and attempts the gcloud fallback before propagating. Any other `EndpointEnvError`
+and fetches a token from the metadata server or gcloud before propagating. Any other `EndpointEnvError`
 is converted to an `AgentError::Config` with a diagnostic message.
 
 ## Troubleshooting Credential Errors
@@ -212,24 +219,19 @@ Error: GOOGLE_CLOUD_PROJECT is required for Vertex AI
 Set `GOOGLE_CLOUD_PROJECT` to your GCP project ID and ensure
 `GOOGLE_GENAI_USE_VERTEXAI=true`.
 
-### Vertex AI: gcloud not installed
+### Vertex AI: no credentials
 
 ```
-Error: Vertex AI needs an access token: set GOOGLE_ACCESS_TOKEN, or install
-       the gcloud CLI (failed to run `gcloud auth print-access-token`: ...)
+Error: Vertex AI needs an access token: set GOOGLE_ACCESS_TOKEN, run on Google
+       Cloud with a service account, or install the gcloud CLI (...)
 ```
 
-Either install and authenticate the gcloud CLI (`gcloud auth login`), or set
-`GOOGLE_ACCESS_TOKEN` directly from a service-account token.
-
-### Vertex AI: gcloud not authenticated
-
-```
-Error: `gcloud auth print-access-token` failed: ...
-```
-
-Run `gcloud auth login` (or `gcloud auth application-default login` for ADC)
-before starting the application.
+Neither the metadata server nor gcloud answered. On a workstation, install
+and authenticate the gcloud CLI (`gcloud auth login`). On Google Cloud, check
+that the workload has a service account (on GKE, that Workload Identity is
+set up for its Kubernetes service account). The part in parentheses says
+what each source reported, including gcloud's own error when it is
+installed but not logged in.
 
 ## Platform Differences Relevant to Auth
 

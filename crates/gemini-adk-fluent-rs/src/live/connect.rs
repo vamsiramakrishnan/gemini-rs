@@ -74,8 +74,13 @@ impl Live {
     /// - `GOOGLE_GENAI_USE_VERTEXAI=true` → Vertex AI using
     ///   `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION` (default
     ///   `us-central1`), and a token from `GOOGLE_ACCESS_TOKEN`. If that
-    ///   token is unset, this falls back to running
-    ///   `gcloud auth print-access-token`.
+    ///   token is unset, the token comes from the metadata server on Cloud
+    ///   Run, GKE or Compute Engine, else from `gcloud auth
+    ///   print-access-token`, and is refreshed before it expires, so a
+    ///   reconnect late in a long session is still authenticated (see
+    ///   [`GoogleAccessToken`](gemini_genai_rs::transport::auth::GoogleAccessToken)).
+    ///   Builds without the `gemini-llm` or `gcs-store` feature have no HTTP
+    ///   client and use the `gcloud` CLI only.
     /// - otherwise → Google AI using `GEMINI_API_KEY` (or
     ///   `GOOGLE_GENAI_API_KEY` / `GOOGLE_API_KEY`).
     ///
@@ -97,7 +102,7 @@ impl Live {
     pub async fn connect_from_env(
         mut self,
     ) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
-        self.config.endpoint = resolve_endpoint_from_env()?;
+        self.config.endpoint = resolve_endpoint_from_env().await?;
         self.build_and_connect().await
     }
 
@@ -445,32 +450,54 @@ fn apply_policies(
 
 /// Resolve an [`ApiEndpoint`] from the environment, with a `gcloud` token
 /// fallback for Vertex AI when `GOOGLE_ACCESS_TOKEN` is not set.
-fn resolve_endpoint_from_env() -> Result<ApiEndpoint, gemini_adk_rs::error::AgentError> {
+async fn resolve_endpoint_from_env() -> Result<ApiEndpoint, gemini_adk_rs::error::AgentError> {
     use gemini_adk_rs::error::AgentError;
     use gemini_genai_rs::protocol::types::EndpointEnvError;
 
     match ApiEndpoint::from_env() {
         Ok(endpoint) => Ok(endpoint),
-        // Vertex was selected but no token was in the environment — fall back
-        // to Application Default Credentials via the gcloud CLI.
+        // Vertex was selected but no token was in the environment: use the
+        // service's own credentials (metadata server), else the gcloud CLI.
         Err(EndpointEnvError::Missing("GOOGLE_ACCESS_TOKEN")) => {
             let project = std::env::var("GOOGLE_CLOUD_PROJECT").map_err(|_| {
                 AgentError::Config("GOOGLE_CLOUD_PROJECT is required for Vertex AI".into())
             })?;
             let location = std::env::var("GOOGLE_CLOUD_LOCATION")
                 .unwrap_or_else(|_| "us-central1".to_string());
-            let token = gcloud_access_token()?;
+            let token = vertex_access_token().await?;
             Ok(ApiEndpoint::vertex(project, location, token))
         }
         Err(e) => Err(AgentError::Config(format!(
             "connect_from_env: {e}. For Google AI set GEMINI_API_KEY; for Vertex AI set \
              GOOGLE_GENAI_USE_VERTEXAI=true and GOOGLE_CLOUD_PROJECT (token via \
-             GOOGLE_ACCESS_TOKEN or the gcloud CLI)."
+             GOOGLE_ACCESS_TOKEN, the metadata server, or the gcloud CLI)."
         ))),
     }
 }
 
+/// A Vertex token that keeps itself fresh: from the metadata server when one
+/// answers (Cloud Run, GKE, Compute Engine), else from the gcloud CLI.
+#[cfg(any(feature = "gemini-llm", feature = "gcs-store"))]
+async fn vertex_access_token() -> Result<AccessToken, gemini_adk_rs::error::AgentError> {
+    gemini_genai_rs::transport::auth::GoogleAccessToken::from_env()
+        .into_access_token()
+        .await
+        .map_err(|e| {
+            gemini_adk_rs::error::AgentError::Config(format!(
+                "Vertex AI needs an access token: set GOOGLE_ACCESS_TOKEN, run on Google \
+                 Cloud with a service account, or install the gcloud CLI ({e})"
+            ))
+        })
+}
+
+/// Without an HTTP client, only the gcloud CLI can supply a token.
+#[cfg(not(any(feature = "gemini-llm", feature = "gcs-store")))]
+async fn vertex_access_token() -> Result<AccessToken, gemini_adk_rs::error::AgentError> {
+    gcloud_access_token().map(AccessToken::from)
+}
+
 /// Fetch an OAuth2 access token via `gcloud auth print-access-token`.
+#[cfg(not(any(feature = "gemini-llm", feature = "gcs-store")))]
 fn gcloud_access_token() -> Result<String, gemini_adk_rs::error::AgentError> {
     use gemini_adk_rs::error::AgentError;
 

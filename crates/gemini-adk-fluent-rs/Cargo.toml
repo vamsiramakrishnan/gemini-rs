@@ -88,7 +88,8 @@ templates = ["gemini-adk-rs/templates"]
 # question. Swap the TLS backend with `--no-default-features --features
 # tls-rustls,gemini-llm`.
 default = ["tls-native", "gemini-llm"]
-gemini-llm = ["gemini-adk-rs/gemini-llm"]
+# Also the HTTP client that fetches Vertex tokens from the metadata server.
+gemini-llm = ["gemini-adk-rs/gemini-llm", "gemini-genai-rs/http"]
 # HTTP tool bindings in `spec` (SessionSpec `tools[].http`).
 http-tools = ["dep:reqwest"]
 # Cloud Storage backend for `spec::store` (`gs://` bundle stores).
