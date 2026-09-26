@@ -19,6 +19,7 @@ name = "gemini_adk"
 # decide the fluent crate's.
 gemini-adk-fluent-rs = { workspace = true }
 gemini-memory-rs = { workspace = true, optional = true }
+serde_json = "1"
 
 # Every feature is the fluent crate's feature of the same name, plus `memory`.
 [features]

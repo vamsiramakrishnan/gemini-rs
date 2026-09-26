@@ -90,12 +90,28 @@
 //! conversations that enforce which tools a step admits ([`conversation`],
 //! [`flow`]), and model-free conversation tests ([`simulation`]).
 //!
+//! **One error type.** Every SDK error converts into [`Error`], so a function
+//! that compiles a conversation, calls a model and reads a file can return
+//! [`gemini_adk::Result`](Result) and use `?` throughout.
+//!
 //! This crate re-exports [`gemini-adk-fluent-rs`](gemini_adk_fluent_rs); its
 //! features have the same names here, plus `memory`, which adds
 //! `gemini_adk::memory` (contextual memory for Live sessions).
 
 #[doc(inline)]
 pub use gemini_adk_fluent_rs::*;
+
+mod error;
+pub use error::{Error, Result};
+
+/// Everything most applications import: the fluent prelude, plus the
+/// facade's [`Error`], which every SDK error converts into.
+pub mod prelude {
+    #[doc(inline)]
+    pub use gemini_adk_fluent_rs::prelude::*;
+
+    pub use crate::Error;
+}
 
 /// Contextual memory for Live sessions (feature `memory`).
 #[cfg(feature = "memory")]
