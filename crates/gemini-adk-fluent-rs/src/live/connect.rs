@@ -492,6 +492,10 @@ async fn vertex_access_token() -> Result<AccessToken, gemini_adk_rs::error::Agen
 
 /// Without an HTTP client, only the gcloud CLI can supply a token.
 #[cfg(not(any(feature = "gemini-llm", feature = "gcs-store")))]
+#[allow(
+    clippy::unused_async,
+    reason = "same signature as the metadata-server variant it replaces"
+)]
 async fn vertex_access_token() -> Result<AccessToken, gemini_adk_rs::error::AgentError> {
     gcloud_access_token().map(AccessToken::from)
 }
