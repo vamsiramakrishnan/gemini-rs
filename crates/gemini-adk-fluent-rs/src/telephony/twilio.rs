@@ -254,6 +254,72 @@ pub fn mark_frame(stream_sid: &str, name: &str) -> String {
 
 // ── Call bridge ──────────────────────────────────────────────────────────────
 
+/// 20 ms of audio at Twilio's 8 kHz: the frame size the network expects.
+const FRAME_SAMPLES: usize = 160;
+const FRAME_DURATION: std::time::Duration = std::time::Duration::from_millis(20);
+/// How long to wait for more audio before padding a partial frame.
+const TAIL_WAIT: std::time::Duration = std::time::Duration::from_millis(40);
+
+/// State key set on barge-in: how many milliseconds of agent audio had been
+/// sent but not yet played when the caller interrupted. The caller never
+/// heard that part of the reply.
+pub const KEY_UNPLAYED_MS: &str = "telephony:unplayed_ms";
+
+/// Cuts agent audio into 20 ms frames and keeps the line's playout clock.
+#[derive(Debug, Default)]
+struct Framer {
+    /// A partial frame waiting for the rest of its 20 ms.
+    pending: Vec<i16>,
+    /// When the audio sent so far finishes playing on the line.
+    plays_until: Option<std::time::Instant>,
+}
+
+impl Framer {
+    fn is_idle(&self) -> bool {
+        self.pending.is_empty()
+    }
+
+    /// Queue audio; returns the whole frames now ready to send.
+    fn push(&mut self, samples: &[i16], now: std::time::Instant) -> Vec<Vec<i16>> {
+        self.pending.extend_from_slice(samples);
+        let mut frames = Vec::new();
+        while self.pending.len() >= FRAME_SAMPLES {
+            frames.push(self.pending.drain(..FRAME_SAMPLES).collect());
+            let from = self.plays_until.map_or(now, |t| t.max(now));
+            self.plays_until = Some(from + FRAME_DURATION);
+        }
+        frames
+    }
+
+    /// Pad the partial frame with silence, so the next `push` sends it.
+    fn pad_tail(&mut self) {
+        if !self.pending.is_empty() {
+            self.pending.resize(FRAME_SAMPLES, 0);
+        }
+    }
+
+    /// Barge-in: drop what is queued; returns how much sent audio had not
+    /// played yet.
+    fn flush(&mut self, now: std::time::Instant) -> std::time::Duration {
+        self.pending.clear();
+        let unplayed = self.plays_until.map_or(std::time::Duration::ZERO, |t| {
+            t.saturating_duration_since(now)
+        });
+        self.plays_until = Some(now);
+        unplayed
+    }
+}
+
+/// Options for [`TwilioCall::attach_with`].
+#[derive(Clone, Default)]
+pub struct CallOptions {
+    /// Record the call in stereo (caller left, agent right), as heard.
+    pub recorder: Option<std::sync::Arc<super::recorder::CallRecorder>>,
+    /// Also detect keypresses in the audio. Twilio reports keypresses as
+    /// `dtmf` events, so this is off by default to avoid counting twice.
+    pub in_band_dtmf: bool,
+}
+
 /// A live phone call attached to a session — the telephone counterpart of
 /// `Talk::talk`.
 ///
@@ -289,13 +355,30 @@ pub struct TwilioCall {
 }
 
 impl TwilioCall {
-    /// Attach a Twilio Media Stream to a connected session.
+    /// Attach a Twilio Media Stream to a connected session, with the
+    /// default [`CallOptions`].
     ///
     /// Audio starts flowing once Twilio's `start` frame arrives (outbound
     /// frames need its stream SID; audio generated before it is dropped —
     /// there is no call to play it into yet). Stream metadata and DTMF
     /// digits are written into session state under the `telephony:` keys.
     pub fn attach(handle: &LiveHandle) -> TwilioCall {
+        Self::attach_with(handle, CallOptions::default())
+    }
+
+    /// Attach a Twilio Media Stream to a connected session.
+    ///
+    /// Beyond [`attach`](Self::attach):
+    /// - the caller's audio passes through a
+    ///   [`KeypadGuard`](super::bridge::KeypadGuard), so keypad tones never
+    ///   reach the model and a masked keypad silences the caller;
+    /// - the agent's audio goes out in 20 ms frames, as the network expects,
+    ///   with the last partial frame padded once the model pauses;
+    /// - on barge-in, [`KEY_UNPLAYED_MS`] records how much queued agent
+    ///   audio the caller never heard;
+    /// - with [`CallOptions::recorder`], the call is recorded in stereo as
+    ///   heard.
+    pub fn attach_with(handle: &LiveHandle, options: CallOptions) -> TwilioCall {
         let (from_tx, mut from_rx) = mpsc::channel::<String>(64);
         let (to_tx, to_rx) = mpsc::channel::<String>(64);
         let (mic_tx, mic_rx) = mpsc::channel::<Vec<i16>>(64);
@@ -305,10 +388,18 @@ impl TwilioCall {
         let voice_pump = pump(handle, mic_rx, TWILIO_HZ, speaker_tx, TWILIO_HZ);
 
         let state = handle.state().clone();
+        let mut guard = super::bridge::KeypadGuard::new(state.clone(), TWILIO_HZ)
+            .record_in_band(options.in_band_dtmf);
+        let inbound_recorder = options.recorder.clone();
         let inbound_task = tokio::spawn(async move {
+            use crate::voice::InputAudioProcessor as _;
             while let Some(text) = from_rx.recv().await {
                 match parse_inbound(&text) {
-                    Ok(Inbound::Audio(samples)) => {
+                    Ok(Inbound::Audio(mut samples)) => {
+                        guard.process_frame(&mut samples);
+                        if let Some(recorder) = &inbound_recorder {
+                            recorder.caller(&samples);
+                        }
                         if mic_tx.send(samples).await.is_err() {
                             break;
                         }
@@ -326,18 +417,52 @@ impl TwilioCall {
             }
         });
 
+        let out_state = handle.state().clone();
+        let outbound_recorder = options.recorder;
         let outbound_task = tokio::spawn(async move {
-            while let Some(playback) = speaker_rx.recv().await {
+            let mut framer = Framer::default();
+            loop {
+                let next = if framer.is_idle() {
+                    speaker_rx.recv().await
+                } else {
+                    match tokio::time::timeout(TAIL_WAIT, speaker_rx.recv()).await {
+                        Ok(next) => next,
+                        // The model paused mid-frame: pad and send the tail.
+                        Err(_) => {
+                            framer.pad_tail();
+                            Some(Playback::Chunk(Vec::new()))
+                        }
+                    }
+                };
+                let Some(playback) = next else { break };
                 // Frames are unsendable until `start` delivers the SID.
                 let Some(sid) = sid_rx.borrow().clone() else {
                     continue;
                 };
-                let frame = match &playback {
-                    Playback::Chunk(samples) => media_frame(&sid, samples),
-                    Playback::Flush => clear_frame(&sid),
-                };
-                if to_tx.send(frame).await.is_err() {
-                    break;
+                let now = std::time::Instant::now();
+                let mut frames = Vec::new();
+                match playback {
+                    Playback::Chunk(samples) => {
+                        for frame in framer.push(&samples, now) {
+                            if let Some(recorder) = &outbound_recorder {
+                                recorder.agent(&frame);
+                            }
+                            frames.push(media_frame(&sid, &frame));
+                        }
+                    }
+                    Playback::Flush => {
+                        let unplayed = framer.flush(now);
+                        let _ = out_state.set(KEY_UNPLAYED_MS, unplayed.as_millis() as u64);
+                        if let Some(recorder) = &outbound_recorder {
+                            recorder.flush();
+                        }
+                        frames.push(clear_frame(&sid));
+                    }
+                }
+                for frame in frames {
+                    if to_tx.send(frame).await.is_err() {
+                        return;
+                    }
                 }
             }
         });
@@ -370,6 +495,27 @@ impl TwilioCall {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_audio_goes_out_in_20ms_frames_on_a_playout_clock() {
+        let t0 = std::time::Instant::now();
+        let mut framer = Framer::default();
+        // 50 ms of audio in one burst: two whole frames now, 10 ms pending.
+        let frames = framer.push(&[1; 400], t0);
+        assert_eq!(frames.len(), 2);
+        assert!(frames.iter().all(|f| f.len() == FRAME_SAMPLES));
+        assert!(!framer.is_idle());
+        // The model pauses: the tail is padded to a full frame.
+        framer.pad_tail();
+        let tail = framer.push(&[], t0);
+        assert_eq!(tail.len(), 1);
+        assert_eq!(&tail[0][..80], &[1; 80]);
+        assert_eq!(&tail[0][80..], &[0; 80]);
+        // 60 ms were sent at t0; a barge-in 25 ms later cuts 35 ms.
+        let unplayed = framer.flush(t0 + std::time::Duration::from_millis(25));
+        assert_eq!(unplayed, std::time::Duration::from_millis(35));
+        assert!(framer.is_idle());
+    }
 
     #[test]
     fn parses_the_start_frame() {

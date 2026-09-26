@@ -801,6 +801,10 @@ async fn inbound_loop(
     let mut buf = [0u8; 2048];
     let mut latched = false;
     let mut dtmf = DtmfDeduper::default();
+    // Keypad tones stay away from the model; without RFC 4733 they are the
+    // only record of a keypress, so they are also counted.
+    let mut guard =
+        bridge::KeypadGuard::new(state.clone(), 8_000).record_in_band(telephone_event_pt.is_none());
     loop {
         let (len, source) = tokio::select! {
             _ = cancel.cancelled() => break,
@@ -842,11 +846,12 @@ async fn inbound_loop(
             let _ = peer_tx.send(source);
             latched = true;
         }
-        let samples = if payload_type == PT_PCMA {
+        let mut samples = if payload_type == PT_PCMA {
             g711::decode_alaw(&packet.payload)
         } else {
             g711::decode_ulaw(&packet.payload)
         };
+        crate::voice::InputAudioProcessor::process_frame(&mut guard, &mut samples);
         if mic_tx.send(samples).await.is_err() {
             break;
         }

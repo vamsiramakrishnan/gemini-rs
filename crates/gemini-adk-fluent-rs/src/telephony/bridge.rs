@@ -40,16 +40,114 @@ pub const KEY_STREAM_SID: &str = "telephony:stream_sid";
 /// (SIP `From`, a platform's ANI field, …).
 pub const KEY_CALLER: &str = "telephony:caller";
 
+/// Set this state key to `true` to mask the keypad: while it is set, the
+/// caller's audio reaches neither the model nor the recording (it is
+/// replaced with silence), and keypresses go to [`KEY_KEYPAD_ENTRY`] instead
+/// of [`KEY_DTMF`]. This is the "pause and resume" pattern for taking card
+/// numbers and PINs by keypad. Set it back to `false` to resume.
+pub const KEY_KEYPAD_MASK: &str = "telephony:keypad_mask";
+/// Digits keyed while the keypad was masked, in order. The key is marked
+/// sensitive ([`State::redact_keys`]): tools read the real value, while
+/// journals, exports and telemetry see it redacted.
+pub const KEY_KEYPAD_ENTRY: &str = "telephony:keypad_entry";
+/// How many digits [`KEY_KEYPAD_ENTRY`] holds. Not sensitive, so a flow can
+/// guard on it.
+pub const KEY_KEYPAD_LEN: &str = "telephony:keypad_len";
+/// Set to `true` when the caller presses `#` while the keypad is masked.
+pub const KEY_KEYPAD_DONE: &str = "telephony:keypad_done";
+
+/// Whether the keypad is masked (see [`KEY_KEYPAD_MASK`]).
+pub fn keypad_masked(state: &State) -> bool {
+    state.get::<bool>(KEY_KEYPAD_MASK).unwrap_or(false)
+}
+
 /// Record one DTMF keypress into session state under the shared keys.
 ///
 /// Sets [`KEY_DTMF`] to the digit and appends it to [`KEY_DTMF_HISTORY`] —
-/// the exact writes every connector must make, factored to one place.
+/// the exact writes every connector must make, factored to one place. While
+/// the keypad is masked ([`KEY_KEYPAD_MASK`]) the digit goes to the
+/// sensitive [`KEY_KEYPAD_ENTRY`] instead, and `#` ends the entry.
 pub fn record_dtmf(state: &State, digit: char) {
+    if keypad_masked(state) {
+        state.redact_keys([KEY_KEYPAD_ENTRY]);
+        if digit == '#' {
+            let _ = state.set(KEY_KEYPAD_DONE, true);
+            return;
+        }
+        let mut len = 0usize;
+        let _ = state.modify(KEY_KEYPAD_ENTRY, String::new(), |mut entry| {
+            entry.push(digit);
+            len = entry.len();
+            entry
+        });
+        let _ = state.set(KEY_KEYPAD_LEN, len);
+        return;
+    }
     let _ = state.set(KEY_DTMF, digit.to_string());
     let _ = state.modify(KEY_DTMF_HISTORY, String::new(), |mut history| {
         history.push(digit);
         history
     });
+}
+
+/// Keeps keypad tones and masked keypad entry away from the model.
+///
+/// An [`InputAudioProcessor`](crate::voice::InputAudioProcessor) for the
+/// caller's audio at the connector's rate:
+///
+/// - Frames carrying DTMF tones are silenced (from the first detection, for
+///   60 ms after), so the model neither hears nor transcribes keypresses.
+///   Up to one detection block (26 ms) of a tone's onset can pass before it
+///   is recognized; that is too short to be decoded.
+/// - While [`KEY_KEYPAD_MASK`] is set, every frame is silenced.
+/// - With [`record_in_band`](Self::record_in_band), digits found in the audio
+///   are recorded with [`record_dtmf`]. Use it for transports without
+///   out-of-band DTMF; where the platform reports keypresses itself (Twilio
+///   `dtmf` events, RFC 4733), leave it off so digits aren't counted twice.
+pub struct KeypadGuard {
+    state: State,
+    detector: super::dtmf::DtmfDetector,
+    record_in_band: bool,
+    hold_samples: usize,
+    held: usize,
+}
+
+impl KeypadGuard {
+    /// A guard for caller audio at `sample_rate`, writing to `state`.
+    pub fn new(state: State, sample_rate: u32) -> Self {
+        Self {
+            state,
+            detector: super::dtmf::DtmfDetector::new(sample_rate),
+            record_in_band: false,
+            hold_samples: (sample_rate as usize * 60) / 1000,
+            held: 0,
+        }
+    }
+
+    /// Also record digits detected in the audio (see the type docs).
+    pub fn record_in_band(mut self, enabled: bool) -> Self {
+        self.record_in_band = enabled;
+        self
+    }
+}
+
+impl crate::voice::InputAudioProcessor for KeypadGuard {
+    fn process_frame(&mut self, frame: &mut Vec<i16>) {
+        for digit in self.detector.feed(frame) {
+            if self.record_in_band {
+                record_dtmf(&self.state, digit);
+            }
+        }
+        let tone = self.detector.tone_present();
+        if tone {
+            self.held = self.hold_samples;
+        }
+        let silence = tone || self.held > 0 || keypad_masked(&self.state);
+        self.held = self.held.saturating_sub(frame.len());
+        if silence {
+            frame.fill(0);
+        }
+    }
 }
 
 /// Deduplicates RFC 4733 end-of-event packets.
@@ -206,6 +304,52 @@ mod tests {
         record_dtmf(&state, '#');
         assert_eq!(state.get::<String>(KEY_DTMF), Some("#".into()));
         assert_eq!(state.get::<String>(KEY_DTMF_HISTORY), Some("4#".into()));
+    }
+
+    #[test]
+    fn a_masked_keypad_keeps_digits_out_of_the_shared_keys() {
+        let state = State::new();
+        record_dtmf(&state, '1');
+        let _ = state.set(KEY_KEYPAD_MASK, true);
+        for digit in "4242#".chars() {
+            record_dtmf(&state, digit);
+        }
+        let _ = state.set(KEY_KEYPAD_MASK, false);
+        // The shared keys never saw the masked digits.
+        assert_eq!(state.get::<String>(KEY_DTMF_HISTORY), Some("1".into()));
+        assert_eq!(state.get::<String>(KEY_KEYPAD_ENTRY), Some("4242".into()));
+        assert_eq!(state.get::<usize>(KEY_KEYPAD_LEN), Some(4));
+        assert_eq!(state.get::<bool>(KEY_KEYPAD_DONE), Some(true));
+        // The entry is sensitive wherever state leaves the process.
+        assert!(state.redacted_keys().contains(KEY_KEYPAD_ENTRY));
+    }
+
+    #[test]
+    fn the_keypad_guard_silences_tones_and_masked_speech() {
+        use crate::voice::InputAudioProcessor as _;
+        let state = State::new();
+        let mut guard = KeypadGuard::new(state.clone(), 8_000).record_in_band(true);
+        let tones = crate::telephony::dtmf::tests::keypresses("73", 80, 60, 6_000.0);
+        let mut heard = Vec::new();
+        for chunk in tones.chunks(160) {
+            let mut frame = chunk.to_vec();
+            guard.process_frame(&mut frame);
+            heard.extend(frame);
+        }
+        assert_eq!(state.get::<String>(KEY_DTMF_HISTORY), Some("73".into()));
+        // At most one detection block of each tone's onset gets through.
+        let leaked = heard.iter().filter(|&&s| s != 0).count();
+        assert!(leaked <= 2 * 205, "{leaked} tone samples reached the model");
+
+        // Speech passes, until the keypad is masked.
+        let speech: Vec<i16> = (0..160).map(|n| ((n % 40) as i16 - 20) * 300).collect();
+        let mut frame = speech.clone();
+        guard.process_frame(&mut frame);
+        assert_eq!(frame, speech);
+        let _ = state.set(KEY_KEYPAD_MASK, true);
+        let mut frame = speech.clone();
+        guard.process_frame(&mut frame);
+        assert!(frame.iter().all(|&s| s == 0));
     }
 
     #[tokio::test(start_paused = true)]

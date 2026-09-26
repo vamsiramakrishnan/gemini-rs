@@ -20,7 +20,9 @@
 //! call.
 
 pub mod bridge;
+pub mod dtmf;
 pub mod g711;
+pub mod recorder;
 pub mod rtp;
 pub mod sdp;
 pub mod twilio;
@@ -30,4 +32,6 @@ pub mod sip;
 #[cfg(feature = "sip")]
 pub mod srtp;
 
-pub use twilio::{Inbound, StartMeta, TWILIO_HZ, TwilioCall, TwilioError};
+pub use twilio::{
+    CallOptions, Inbound, KEY_UNPLAYED_MS, StartMeta, TWILIO_HZ, TwilioCall, TwilioError,
+};

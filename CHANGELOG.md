@@ -58,6 +58,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Telephony edge work:
+  - **Keypad masking.** Keypad tones are silenced before the model hears
+    them. While `telephony:keypad_mask` is set, the caller is silenced and
+    keypresses go to the sensitive `telephony:keypad_entry` key, with
+    `telephony:keypad_len` and `telephony:keypad_done`. This is
+    `KeypadGuard`, and the Twilio and SIP bridges use it.
+  - **In-band DTMF detection** (`telephony::dtmf::DtmfDetector`, Goertzel),
+    used on SIP legs without RFC 4733.
+  - **Stereo call recording.** `telephony::recorder::CallRecorder` writes the
+    caller left and the agent right, as heard, cutting unplayed agent audio
+    on barge-in. Enable it with `TwilioCall::attach_with(.., CallOptions {
+    recorder, .. })`.
+  - The Twilio bridge sends 20 ms frames, and on barge-in sets
+    `telephony:unplayed_ms`.
+- `voice::StreamResampler`: stateful, anti-aliased (windowed-sinc
+  polyphase) resampling. The voice pump, and with it every telephony
+  bridge, now uses it instead of per-chunk linear interpolation. Linear
+  interpolation folded 4–12 kHz content into the phone band when going
+  down to 8 kHz, and clicked at chunk boundaries.
 - `adk-runtime` (in `gemini-adk-server-rs`), a production server for
   bundles. It loads bundles by reference from a bundle store (`ADK_BUNDLES`,
   `ADK_SERVE=booking:prod`) and serves them over a WebSocket
