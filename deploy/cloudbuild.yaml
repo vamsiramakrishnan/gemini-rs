@@ -1,0 +1,15 @@
+# Build deploy/Dockerfile with Cloud Build and push it. From the repository
+# root:
+#
+#   gcloud builds submit . --config deploy/cloudbuild.yaml \
+#     --substitutions _IMAGE=us-central1-docker.pkg.dev/PROJECT_ID/adk/adk-runtime:latest
+#
+# `adk deploy` runs this for you.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "deploy/Dockerfile", "-t", "${_IMAGE}", "."]
+images: ["${_IMAGE}"]
+options:
+  # A release build of the workspace takes too long on the default machine.
+  machineType: E2_HIGHCPU_8
+timeout: 3600s

@@ -1,0 +1,27 @@
+# HTTPS in front of adk-runtime. Browsers and Twilio need wss://, so TLS
+# terminates here. Replace runtime.example.com with your host, point its
+# DNS at the reserved address, and reserve that address first:
+#
+#   gcloud compute addresses create adk-runtime-ip --global
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: adk-runtime
+spec:
+  domains:
+    - runtime.example.com
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: adk-runtime
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: adk-runtime-ip
+    networking.gke.io/managed-certificates: adk-runtime
+    kubernetes.io/ingress.allow-http: "false"
+spec:
+  defaultBackend:
+    service:
+      name: adk-runtime
+      port:
+        name: http

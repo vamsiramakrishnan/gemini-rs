@@ -1,0 +1,94 @@
+# adk-runtime on Cloud Run. Replace PROJECT_ID, REGION and BUCKET, then:
+#
+#   gcloud run services replace deploy/cloudrun/service.yaml --region REGION
+#   gcloud run services add-iam-policy-binding adk-runtime --region REGION \
+#     --member allUsers --role roles/run.invoker
+#
+# The service is public at the Cloud Run layer because browsers and Twilio
+# cannot present Google identity tokens; adk-runtime authenticates every
+# session itself (ADK_RUNTIME_TOKENS, Twilio signatures).
+#
+# Before the first deploy: the service account below needs
+# roles/aiplatform.user on the project, roles/storage.objectViewer on the
+# bundle bucket, and roles/secretmanager.secretAccessor on the secrets.
+# deploy/terraform creates all of this.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: adk-runtime
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # Keep one instance warm so the first caller does not wait for a
+        # cold start and a bundle load.
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        # Reconnects from the same browser land on the same instance.
+        run.googleapis.com/sessionAffinity: "true"
+        # CPU always allocated. A WebSocket session does its work between
+        # client messages (model audio, tool calls, label refreshes), which
+        # request-based CPU allocation would throttle.
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      serviceAccountName: adk-runtime@PROJECT_ID.iam.gserviceaccount.com
+      # One WebSocket is one request for its whole life. Match
+      # ADK_MAX_SESSIONS so Cloud Run routes elsewhere before the runtime
+      # has to refuse with 503.
+      containerConcurrency: 50
+      # The longest a session can last on Cloud Run (the maximum).
+      timeoutSeconds: 3600
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/adk/adk-runtime:latest
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            - name: ADK_BUNDLES
+              value: gs://BUCKET/bundles
+            - name: ADK_SERVE
+              value: booking:prod
+            - name: ADK_MAX_SESSIONS
+              value: "50"
+            - name: ADK_MAX_SESSION_SECS
+              value: "3600"
+            # Cloud Run sends SIGTERM and kills the container 10 seconds
+            # later; drain inside that.
+            - name: ADK_DRAIN_SECS
+              value: "8"
+            - name: GOOGLE_GENAI_USE_VERTEXAI
+              value: "true"
+            - name: GOOGLE_CLOUD_PROJECT
+              value: PROJECT_ID
+            - name: GOOGLE_CLOUD_LOCATION
+              value: us-central1
+            # Secrets from Secret Manager, never plain env values.
+            - name: ADK_RUNTIME_TOKENS
+              valueFrom:
+                secretKeyRef:
+                  name: adk-runtime-tokens
+                  key: latest
+            # For phone calls, add the Twilio auth token the same way:
+            # - name: TWILIO_AUTH_TOKEN
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: twilio-auth-token
+            #       key: latest
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 15

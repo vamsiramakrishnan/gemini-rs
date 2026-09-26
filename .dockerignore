@@ -1,0 +1,9 @@
+# The build context for deploy/Dockerfile is the repository root. Keep
+# build output, VCS data and front-end dependencies out of it.
+target
+**/target
+.git
+**/node_modules
+.env
+.claude
+.worktrees
