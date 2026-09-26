@@ -27,6 +27,7 @@ pub(crate) fn assemble_stack(
     repair: std::collections::BTreeMap<String, gemini_adk_rs::flow::RepairPolicy>,
     timing: std::collections::BTreeMap<String, gemini_adk_rs::flow::VoiceTiming>,
     corrections: std::collections::BTreeMap<String, Vec<String>>,
+    verbatim: std::collections::BTreeMap<String, String>,
     ambient: &[String],
 ) -> gemini_adk_rs::flow::FlowStack {
     let overlays = digressions.into_iter().map(|mut ov| {
@@ -38,6 +39,7 @@ pub(crate) fn assemble_stack(
         .with_repairs(repair)
         .with_timings(timing)
         .with_corrections(corrections)
+        .with_verbatims(verbatim)
 }
 
 impl Live {
@@ -347,6 +349,7 @@ impl Live {
                 self.repair_policies,
                 self.stage_timings,
                 self.corrections,
+                self.verbatims,
                 &self.ambient_tools,
             ));
         }

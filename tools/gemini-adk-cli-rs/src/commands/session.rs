@@ -274,3 +274,20 @@ fn diff_journal(path: &str, state: &State) -> Result<(), Box<dyn std::error::Err
         Err(format!("journal drift on {} key(s)", drift.len()).into())
     }
 }
+
+/// `adk session scenario <journal>` — turn a recorded session into a
+/// regression scenario (JSON on stdout) for `adk flow simulate` or
+/// `adk flow ci`. See `Scenario::from_journal`.
+pub fn scenario(journal_path: &str, name: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let journal = gemini_adk_rs::state::read_journal(journal_path)?;
+    let name = name.map(str::to_string).unwrap_or_else(|| {
+        std::path::Path::new(journal_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("recorded")
+            .to_string()
+    });
+    let scenario = gemini_adk_fluent_rs::simulation::Scenario::from_journal(name, &journal);
+    println!("{}", serde_json::to_string_pretty(&scenario)?);
+    Ok(())
+}

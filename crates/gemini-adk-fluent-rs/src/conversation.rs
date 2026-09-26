@@ -261,6 +261,12 @@ pub struct StageSpec {
     /// cues for slow tools, holding the floor, endpointing, context delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timing: Option<VoiceTiming>,
+    /// Text the model must say word for word in this stage (strict canned
+    /// mode). The stage completes only once the output transcript matches it;
+    /// see [`gemini_adk_rs::flow::verbatim`]. The model holds the floor
+    /// unless `timing` says otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verbatim: Option<String>,
     /// Named-resolver slot declarations. Bound to implementations at load via a
     /// [`ResolverRegistry`]; the data lives in the spec so it round-trips JSON.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -271,7 +277,7 @@ pub struct StageSpec {
 // lowers into it and never reimplements it. Re-exported here so existing
 // `conversation::{Resume, RepairPolicy, FlowStack}` paths keep working.
 pub use gemini_adk_rs::flow::{FlowStack, RepairPolicy, Resume, VoiceTiming};
-use gemini_adk_rs::flow::{Overlay, correction_flag, escalate_flag};
+use gemini_adk_rs::flow::{Overlay, correction_flag, escalate_flag, verbatim_flag};
 
 /// A digression (overlay): a named sub-flow that suspends the main flow when its
 /// `trigger` holds, runs to completion, then resumes per `resume`.
@@ -418,6 +424,7 @@ pub struct CompiledConversation {
     repair: BTreeMap<String, RepairPolicy>,
     timing: BTreeMap<String, VoiceTiming>,
     corrections: BTreeMap<String, Vec<String>>,
+    verbatim: BTreeMap<String, String>,
     policies: Vec<crate::policy::Policy>,
     spec: ConversationSpec,
 }
@@ -483,10 +490,15 @@ impl CompiledConversation {
             .with_repairs(self.repair.clone())
             .with_timings(self.timing.clone())
             .with_corrections(self.corrections.clone())
+            .with_verbatims(self.verbatim.clone())
     }
     /// The per-stage repair policies the runtime applies to the main flow.
     pub fn repair_policies(&self) -> &BTreeMap<String, RepairPolicy> {
         &self.repair
+    }
+    /// The stages that must say their text word for word, keyed by stage id.
+    pub fn verbatim_policies(&self) -> &BTreeMap<String, String> {
+        &self.verbatim
     }
     /// The slots whose correction re-opens later stages, each with the state
     /// keys the correction clears (see
@@ -772,6 +784,15 @@ impl Conversation {
         self
     }
 
+    /// Require the current stage to say `text` word for word (strict canned
+    /// mode): it completes only once the model's output transcript matches.
+    /// The model holds the floor while it reads, unless the stage sets
+    /// [`timing`](Self::timing). Needs output transcription on the session.
+    pub fn verbatim(mut self, text: impl Into<String>) -> Self {
+        self.current().verbatim = Some(text.into());
+        self
+    }
+
     /// Set the current stage's voice pacing; see [`VoiceTiming`].
     ///
     /// ```
@@ -930,6 +951,7 @@ impl crate::live::Live {
         self.repair_policies = convo.repair_policies().clone();
         self.stage_timings = convo.timing_policies().clone();
         self.corrections = convo.correction_policies().clone();
+        self.verbatims = convo.verbatim_policies().clone();
         // A safety hand-off is already lowered into the digressions above;
         // redaction and commit governance are enforced at connect.
         self.policies = convo
@@ -1045,8 +1067,8 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
             fb = fb.gate(gate);
         }
 
-        if let Some(say) = &s.say {
-            fb = fb.posture(say.clone());
+        if let Some(posture) = stage_posture(s) {
+            fb = fb.posture(posture);
         }
         if let Some(ground) = &s.ground {
             fb = fb.ground(ground.clone());
@@ -1249,7 +1271,22 @@ fn compile_spec(
         .stages
         .iter()
         .chain(spec.overlays.iter().flat_map(|ov| ov.stages.iter()))
-        .filter_map(|s| s.timing.clone().map(|t| (s.id.clone(), t)))
+        .filter_map(|s| {
+            let timing = s.timing.clone().or_else(|| {
+                s.verbatim
+                    .as_ref()
+                    .map(|_| VoiceTiming::new().uninterruptible())
+            });
+            timing.map(|t| (s.id.clone(), t))
+        })
+        .collect();
+
+    // Verbatim stages, main flow and digressions alike.
+    let verbatim = spec
+        .stages
+        .iter()
+        .chain(spec.overlays.iter().flat_map(|ov| ov.stages.iter()))
+        .filter_map(|s| s.verbatim.clone().map(|t| (s.id.clone(), t)))
         .collect();
 
     // Slots whose correction re-opens downstream stages (lowered as resets
@@ -1275,6 +1312,7 @@ fn compile_spec(
         repair,
         timing,
         corrections,
+        verbatim,
         policies,
         spec,
     })
@@ -1357,7 +1395,32 @@ fn reopen_rules(stages: &[StageSpec]) -> Vec<Reopen> {
         .collect()
 }
 
+/// The posture a stage projects: its `say`, plus the exact-reading
+/// instruction of a verbatim stage.
+fn stage_posture(s: &StageSpec) -> Option<String> {
+    let read = s.verbatim.as_ref().map(|text| {
+        format!(
+            "Say the following exactly as written, word for word. Do not paraphrase, \
+             add to or leave out any part of it:\n\n{text}"
+        )
+    });
+    match (&s.say, read) {
+        (Some(say), Some(read)) => Some(format!("{say}\n\n{read}")),
+        (say, read) => say.clone().or(read),
+    }
+}
+
 fn stage_completion(s: &StageSpec) -> Option<Guard> {
+    let base = stage_base_completion(s);
+    // A verbatim stage also waits for its text to have been said.
+    match (base, s.verbatim.is_some()) {
+        (base, false) => base,
+        (None, true) => Some(Guard::is_true(verbatim_flag(&s.id))),
+        (Some(base), true) => Some(Guard::all(vec![base, Guard::is_true(verbatim_flag(&s.id))])),
+    }
+}
+
+fn stage_base_completion(s: &StageSpec) -> Option<Guard> {
     let base = if let Some(g) = &s.done {
         Some(g.clone())
     } else if !s.collect.is_empty() {
@@ -1921,6 +1984,7 @@ mod tests {
             monitor,
             live.digressions().to_vec(),
             live.repair_policies().clone(),
+            std::collections::BTreeMap::new(),
             std::collections::BTreeMap::new(),
             std::collections::BTreeMap::new(),
             &[],

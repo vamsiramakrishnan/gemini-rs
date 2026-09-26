@@ -46,6 +46,21 @@ pub fn correction_flag(slot: &str) -> String {
     format!("correction:{slot}")
 }
 
+/// Written when the governed flow admits a tool call, before it runs:
+/// `{"tool": name, "id": call id}`. With [`TOOL_DENIED_KEY`] and
+/// [`TOOL_RESULT_KEY`] it puts every governance decision about a tool in the
+/// mutation journal, in order, which is what makes a recorded session
+/// replayable as a scenario.
+pub const TOOL_CALL_KEY: &str = "flow:tool_call";
+
+/// Written when the governed flow refuses a tool call:
+/// `{"tool": name, "id": call id, "reason": why}`.
+pub const TOOL_DENIED_KEY: &str = "flow:tool_denied";
+
+/// Written when an admitted tool call completes:
+/// `{"tool": name, "id": call id, "ok": succeeded}`.
+pub const TOOL_RESULT_KEY: &str = "flow:tool_result";
+
 /// The state key that names the active digression (`null` when the main flow
 /// is driving). Published by the control plane at every turn boundary.
 pub const OVERLAY_STATE_KEY: &str = "flow:overlay";
@@ -253,6 +268,8 @@ pub struct FlowStack {
     corrections: BTreeMap<String, Vec<String>>,
     /// The last value seen for each watched slot.
     slot_values: BTreeMap<String, serde_json::Value>,
+    /// Text each step must have said word for word.
+    verbatim: BTreeMap<String, String>,
     /// Barge-ins each main step has seen while active.
     interruptions: BTreeMap<String, u32>,
     /// Failed tool calls each main step has seen while active.
@@ -296,6 +313,7 @@ impl FlowStack {
             active_turns: BTreeMap::new(),
             timing: BTreeMap::new(),
             corrections: BTreeMap::new(),
+            verbatim: BTreeMap::new(),
             slot_values: BTreeMap::new(),
             interruptions: BTreeMap::new(),
             tool_failures: BTreeMap::new(),
@@ -363,6 +381,27 @@ impl FlowStack {
         &self.corrections
     }
 
+    /// Require `step` to say `text` word for word; see
+    /// [`verbatim`](super::verbatim). The stack publishes the requirement
+    /// while the step is active. Its completion guard must also require
+    /// [`verbatim_flag`](super::verbatim_flag)`(step)`, which a
+    /// `Conversation` lowers for you.
+    pub fn with_verbatim(mut self, step: impl Into<String>, text: impl Into<String>) -> Self {
+        self.verbatim.insert(step.into(), text.into());
+        self
+    }
+
+    /// Verbatim requirements keyed by step.
+    pub fn with_verbatims(mut self, texts: impl IntoIterator<Item = (String, String)>) -> Self {
+        self.verbatim.extend(texts);
+        self
+    }
+
+    /// The verbatim requirements keyed by step.
+    pub fn verbatim_policies(&self) -> &BTreeMap<String, String> {
+        &self.verbatim
+    }
+
     /// Attach voice timing to a step (main flow or digression).
     pub fn with_timing(mut self, step: impl Into<String>, timing: VoiceTiming) -> Self {
         self.timing.insert(step.into(), timing);
@@ -402,6 +441,7 @@ impl FlowStack {
     /// when no timing applies. The stack calls this itself after every turn
     /// and tool call; call it once when installing the stack.
     pub fn publish_timing(&self, state: &State) {
+        self.publish_verbatim(state);
         if self.timing.is_empty() {
             return;
         }
@@ -413,6 +453,37 @@ impl FlowStack {
             }
         } else if current.as_ref() != Some(&timing) {
             let _ = state.set(VOICE_TIMING_KEY, &timing);
+        }
+    }
+
+    /// Publish the active step's verbatim requirement to
+    /// [`VERBATIM_KEY`](super::VERBATIM_KEY), or remove it when no active step
+    /// has one. Called with [`publish_timing`](Self::publish_timing).
+    fn publish_verbatim(&self, state: &State) {
+        if self.verbatim.is_empty() {
+            return;
+        }
+        let required = (self.terminated.is_none())
+            .then(|| {
+                self.current().active_steps(state).iter().find_map(|step| {
+                    self.verbatim
+                        .get(&step.id)
+                        .map(|text| super::VerbatimRequirement {
+                            step: step.id.clone(),
+                            text: text.clone(),
+                        })
+                })
+            })
+            .flatten();
+        let current = state.get::<super::VerbatimRequirement>(super::VERBATIM_KEY);
+        match required {
+            Some(req) if current.as_ref() != Some(&req) => {
+                let _ = state.set(super::VERBATIM_KEY, &req);
+            }
+            None if current.is_some() => {
+                state.remove(super::VERBATIM_KEY);
+            }
+            _ => {}
         }
     }
 

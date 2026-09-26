@@ -125,6 +125,16 @@ pub enum LiveEvent {
         /// How long it has run, in milliseconds.
         elapsed_ms: u64,
     },
+    /// A verbatim stage's required text was compared with what the model
+    /// said this turn.
+    VerbatimChecked {
+        /// The stage.
+        step: String,
+        /// Word-level similarity, 0–1.
+        similarity: f64,
+        /// Whether it was close enough to count as verbatim.
+        passed: bool,
+    },
     /// The user stayed silent past the active stage's reprompt timing, and
     /// the model was asked to repeat its question.
     Reprompted {

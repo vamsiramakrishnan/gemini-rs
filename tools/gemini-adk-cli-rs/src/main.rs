@@ -189,6 +189,18 @@ enum SessionAction {
         #[arg(long)]
         journal: Option<String>,
     },
+    /// Turn a recorded session into a regression scenario (JSON on stdout).
+    ///
+    /// Reads the session's mutation journal (FileJournalSink): slot writes
+    /// and tool outcomes are replayed, and the active steps and tool
+    /// admissions the session had become the expectations.
+    Scenario {
+        /// Path to the journal (JSONL).
+        journal: String,
+        /// Scenario name (defaults to the file name).
+        #[arg(long)]
+        name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -216,6 +228,30 @@ enum FlowAction {
         spec: String,
         /// Path to a Scenario JSON file.
         scenario: String,
+    },
+    /// Re-run a recorded session's decisions through a spec, turn by turn,
+    /// and report where they diverge (exits non-zero on divergence).
+    Replay {
+        /// Path to a ConversationSpec JSON file.
+        spec: String,
+        /// The session's mutation journal (JSONL, from FileJournalSink).
+        #[arg(long)]
+        journal: String,
+    },
+    /// Explain the flow at a turn of a recorded session: active steps, what
+    /// each waits for, and why tools were blocked.
+    Why {
+        /// Path to a ConversationSpec JSON file.
+        spec: String,
+        /// The session's mutation journal (JSONL, from FileJournalSink).
+        #[arg(long)]
+        journal: String,
+        /// The turn to explain (0 = before the first turn).
+        #[arg(long)]
+        turn: u32,
+        /// Answer for this tool only: was it admitted, and if not, why.
+        #[arg(long)]
+        tool: Option<String>,
     },
     /// Conversation CI: compile every spec in a directory and run its scenarios.
     Ci {
@@ -330,6 +366,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SessionAction::Replay { wire_log, journal } => {
                 commands::session::replay(&wire_log, journal.as_deref()).await?
             }
+            SessionAction::Scenario { journal, name } => {
+                commands::session::scenario(&journal, name.as_deref())?
+            }
         },
 
         Command::Flow { action } => match action {
@@ -341,6 +380,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 commands::flow::simulate(&spec, &scenario).await?
             }
             FlowAction::Ci { dir, json } => commands::flow::ci(&dir, json).await?,
+            FlowAction::Replay { spec, journal } => commands::flow::replay(&spec, &journal).await?,
+            FlowAction::Why {
+                spec,
+                journal,
+                turn,
+                tool,
+            } => commands::flow::why(&spec, &journal, turn, tool.as_deref()).await?,
         },
 
         Command::Deploy {

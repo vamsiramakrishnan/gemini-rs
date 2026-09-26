@@ -230,6 +230,27 @@ impl JournalSink for FileJournalSink {
     }
 }
 
+/// Read a journal written by [`FileJournalSink`].
+pub fn read_journal(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<StateMutation>> {
+    parse_journal(&std::fs::read_to_string(path)?)
+}
+
+/// Parse journal JSONL text: one [`StateMutation`] per non-blank line.
+pub fn parse_journal(data: &str) -> std::io::Result<Vec<StateMutation>> {
+    data.lines()
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty())
+        .map(|(n, line)| {
+            serde_json::from_str(line).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("journal line {}: {e}", n + 1),
+                )
+            })
+        })
+        .collect()
+}
+
 impl Drop for FileJournalSink {
     fn drop(&mut self) {
         if let Err(e) = std::io::Write::flush(&mut self.inner.lock().writer) {

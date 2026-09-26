@@ -213,6 +213,8 @@ pub struct Live {
     pub(crate) stage_timings: std::collections::BTreeMap<String, gemini_adk_rs::flow::VoiceTiming>,
     /// Slots whose correction re-opens later stages, with the keys to clear.
     pub(crate) corrections: std::collections::BTreeMap<String, Vec<String>>,
+    /// Text each step must say word for word.
+    pub(crate) verbatims: std::collections::BTreeMap<String, String>,
     /// Redaction and commit-governance policies, enforced at connect.
     pub(crate) policies: Vec<crate::policy::Policy>,
     /// Caller-supplied session `State`, so tools and flow guards can share one.
@@ -321,6 +323,7 @@ impl Live {
             stage_timings: std::collections::BTreeMap::new(),
             corrections: std::collections::BTreeMap::new(),
             policies: Vec::new(),
+            verbatims: std::collections::BTreeMap::new(),
             state: None,
             flow_actions: Vec::new(),
             record_wire_path: None,

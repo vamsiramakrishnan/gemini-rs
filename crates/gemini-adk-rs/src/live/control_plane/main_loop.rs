@@ -196,6 +196,19 @@ pub(in crate::live) async fn run_control_lane(
                     {
                         cb(&accumulated_input, true);
                     }
+                    // A verbatim stage completes only once its text was said
+                    // word for word: record this turn's verdict before the
+                    // flow is evaluated below.
+                    if control_plane.flow.is_some()
+                        && let Some(verdict) =
+                            crate::flow::verbatim::check_turn(&state, &accumulated_output)
+                    {
+                        let _ = event_tx.send(LiveEvent::VerbatimChecked {
+                            step: verdict.step,
+                            similarity: verdict.similarity,
+                            passed: verdict.passed,
+                        });
+                    }
                     accumulated_input.clear();
                     accumulated_output.clear();
                     handle_turn_complete(

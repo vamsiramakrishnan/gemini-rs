@@ -127,6 +127,120 @@ pub async fn simulate(
     }
 }
 
+/// Load a recorded session's mutation journal and the scenario it implies.
+fn recorded(journal_path: &str) -> Result<Scenario, Box<dyn std::error::Error>> {
+    let journal = gemini_adk_rs::state::read_journal(journal_path)?;
+    let name = std::path::Path::new(journal_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("recorded")
+        .to_string();
+    Ok(Scenario::from_journal(name, &journal))
+}
+
+/// `adk flow replay <spec> --journal <journal>` — re-run a recorded session's
+/// decisions through a spec, turn by turn, and report where the spec now
+/// decides differently from the session.
+///
+/// The session's slot writes and tool outcomes are replayed as recorded; at
+/// each turn the spec's active steps, and each tool admission, are compared
+/// with what the session did. Exits non-zero on divergence, so a spec change
+/// can be checked against production recordings.
+pub async fn replay(spec_path: &str, journal_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use gemini_adk_fluent_rs::simulation::{Sim, SimStep};
+
+    let convo = load(spec_path)?;
+    let scenario = recorded(journal_path)?;
+    let mut sim = Sim::new(&convo, Enforcement::Enforce);
+    let mut turn = 0u32;
+    let mut diverged = 0usize;
+    println!("replaying {journal_path} through {spec_path}\n");
+    for step in &scenario.steps {
+        let outcome = sim.apply(step).await;
+        match step {
+            SimStep::Turn => {
+                turn += 1;
+                let overlay = sim
+                    .active_overlay()
+                    .map(|o| format!(" (in digression `{o}`)"))
+                    .unwrap_or_default();
+                println!("turn {turn}: active {:?}{overlay}", sim.active());
+            }
+            SimStep::Set { key, value } => println!("  {key} = {value}"),
+            SimStep::ToolResult { tool, ok } => {
+                println!("  tool {tool} {}", if *ok { "succeeded" } else { "failed" });
+            }
+            _ => {}
+        }
+        if let Err(msg) = outcome {
+            diverged += 1;
+            println!("  DIVERGED: the session and the spec disagree — {msg}");
+        }
+    }
+    if sim.is_complete() {
+        println!("\nconversation complete");
+    }
+    if diverged == 0 {
+        println!("CLEAN: the spec reproduces every recorded decision ({turn} turns)");
+        Ok(())
+    } else {
+        Err(format!("DIVERGED at {diverged} point(s) over {turn} turns").into())
+    }
+}
+
+/// `adk flow why <spec> --journal <journal> --turn N [--tool T]` — explain
+/// the flow's state at turn `N` of a recorded session: which steps were
+/// active, what each was waiting for, and which tools were blocked and why.
+/// With `--tool`, answer for that tool alone.
+pub async fn why(
+    spec_path: &str,
+    journal_path: &str,
+    at_turn: u32,
+    tool: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use gemini_adk_fluent_rs::simulation::{Sim, SimStep};
+
+    let convo = load(spec_path)?;
+    let scenario = recorded(journal_path)?;
+    let mut sim = Sim::new(&convo, Enforcement::Enforce);
+    // Replay what happened up to the end of turn `at_turn`'s boundary.
+    let mut turn = 0u32;
+    for step in &scenario.steps {
+        if turn == at_turn {
+            break;
+        }
+        let expectation = matches!(
+            step,
+            SimStep::ExpectActive(_)
+                | SimStep::ExpectAllowed(_)
+                | SimStep::ExpectDenied(_)
+                | SimStep::ExpectSlot { .. }
+                | SimStep::ExpectComplete
+        );
+        if !expectation {
+            let _ = sim.apply(step).await;
+        }
+        if matches!(step, SimStep::Turn) {
+            turn += 1;
+        }
+    }
+    if turn < at_turn {
+        return Err(format!("the recording has only {turn} turns").into());
+    }
+    match tool {
+        Some(tool) => {
+            if sim.allowed(tool) {
+                println!("turn {at_turn}: `{tool}` was admitted");
+            } else {
+                let why = sim.denied().get(tool).cloned().unwrap_or_default();
+                println!("turn {at_turn}: `{tool}` was blocked: {why}");
+            }
+        }
+        None => println!("{}", serde_json::to_string_pretty(&sim.explain())?),
+    }
+    Ok(())
+}
+
 /// `adk flow ci <dir>` — Conversation CI: compile every `*.spec.json` in `dir`
 /// (recursively) and run each paired `*.scenario.json`, deterministically.
 ///
@@ -344,6 +458,75 @@ mod tests {
     fn graph_renders_mermaid() {
         let mermaid = compiled().to_mermaid();
         assert!(mermaid.contains("flowchart") || mermaid.contains("graph"));
+    }
+
+    /// A recorded booking: party size captured, confirmed, booked.
+    fn journal(dir: &std::path::Path) -> String {
+        let lines = [
+            (1, "party_size", "4"),
+            (2, "flow:active", r#"["confirm"]"#),
+            (3, "user_confirmed", "true"),
+            (4, "flow:tool_call", r#"{"tool":"book","id":"c1"}"#),
+            (
+                5,
+                "flow:tool_result",
+                r#"{"tool":"book","id":"c1","ok":true}"#,
+            ),
+            (6, "flow:active", "[]"),
+        ];
+        let body: String = lines
+            .iter()
+            .map(|(seq, key, new)| {
+                format!(
+                    "{{\"sequence\":{seq},\"key\":\"{key}\",\"old\":null,\"new\":{new},\"origin\":\"set\",\"timestamp_ms\":{},\"delta\":false}}\n",
+                    1_718_000_000_000u64 + seq
+                )
+            })
+            .collect();
+        let path = dir.join("session.journal.jsonl");
+        fs::write(&path, body).unwrap();
+        path.to_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn replay_is_clean_under_the_recorded_spec_and_diverges_under_a_stricter_one() {
+        let dir = corpus_dir("replay");
+        let journal = journal(&dir);
+        let spec = dir.join("booking.spec.json");
+        fs::write(&spec, SPEC).unwrap();
+        replay(spec.to_str().unwrap(), &journal).await.unwrap();
+
+        let stricter = SPEC.replace(
+            r#"{ "is_true": "user_confirmed" }"#,
+            r#"{ "all": [{ "is_true": "user_confirmed" }, { "is_true": "manager_ok" }] }"#,
+        );
+        let strict = dir.join("strict.spec.json");
+        fs::write(&strict, stricter).unwrap();
+        let err = replay(strict.to_str().unwrap(), &journal)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("DIVERGED"), "{err}");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn why_explains_a_turn_of_the_recording() {
+        let dir = corpus_dir("why");
+        let journal = journal(&dir);
+        let spec = dir.join("booking.spec.json");
+        fs::write(&spec, SPEC).unwrap();
+        why(spec.to_str().unwrap(), &journal, 1, Some("book"))
+            .await
+            .unwrap();
+        why(spec.to_str().unwrap(), &journal, 1, None)
+            .await
+            .unwrap();
+        assert!(
+            why(spec.to_str().unwrap(), &journal, 9, None)
+                .await
+                .is_err()
+        );
+        fs::remove_dir_all(&dir).ok();
     }
 
     fn corpus_dir(label: &str) -> std::path::PathBuf {

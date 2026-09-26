@@ -188,6 +188,9 @@ impl Sim {
             SimStep::Interrupt => {
                 self.interrupt();
             }
+            SimStep::ToolResult { tool, ok } => {
+                self.stack.observe_tool(tool, *ok, &self.state);
+            }
             SimStep::ScheduleTool { tool, after } => {
                 self.schedule_tool(tool.clone(), *after);
             }
@@ -306,6 +309,16 @@ pub enum SimStep {
     /// The user barges in on the model; counts toward the active stage's
     /// repair policy. Does not advance a turn.
     Interrupt,
+    /// A tool call completes, successfully or not, where the live runtime
+    /// records it: the flow observes it without advancing a turn (unlike
+    /// [`ToolOk`](Self::ToolOk)). This is what a scenario extracted from a
+    /// recording uses.
+    ToolResult {
+        /// Tool name.
+        tool: String,
+        /// Whether it succeeded.
+        ok: bool,
+    },
     /// Schedule a tool to succeed after N turns (latency).
     ScheduleTool {
         /// Tool name.
@@ -342,7 +355,120 @@ pub struct Scenario {
     pub steps: Vec<SimStep>,
 }
 
+/// State keys the runtime owns. A scenario extracted from a recording skips
+/// them: the simulator recomputes them rather than being told them.
+const RUNTIME_PREFIXES: &[&str] = &[
+    "session:",
+    "flow:",
+    "derived:",
+    "repair:",
+    "correction:",
+    "state_meta:",
+    "idempotency:",
+    "compensated:",
+    "verbatim:",
+    "turn:",
+    "bg:",
+];
+
+fn runtime_owned(key: &str) -> bool {
+    RUNTIME_PREFIXES.iter().any(|p| key.starts_with(p))
+}
+
 impl Scenario {
+    /// Turn a recorded session into a regression scenario: the incident
+    /// becomes a test.
+    ///
+    /// `journal` is the session's mutation journal (see
+    /// [`FileJournalSink`](gemini_adk_rs::state::FileJournalSink) and
+    /// [`read_journal`](gemini_adk_rs::state::read_journal)), which a
+    /// governed session writes as one ordered timeline. The scenario replays
+    /// what the application and user contributed and checks what governance
+    /// decided:
+    ///
+    /// - a slot or flag write becomes `Set`;
+    /// - a tool the flow admitted becomes `ExpectAllowed`, one it refused
+    ///   `ExpectDenied`, and its outcome `ToolResult`;
+    /// - every turn boundary where the flow was evaluated (a `flow:active`
+    ///   write) becomes a `Turn` followed by `ExpectActive` with the steps
+    ///   the session had then.
+    ///
+    /// Keys the runtime owns (`session:`, `flow:`, `derived:`, repair and
+    /// correction signals, …) are not replayed: the simulator must reach them
+    /// itself.
+    ///
+    /// Run the result against the conversation spec in CI. If a change to
+    /// the spec alters what that session would have done, the scenario fails
+    /// at the step where the two diverge.
+    pub fn from_journal(
+        name: impl Into<String>,
+        journal: &[gemini_adk_rs::state::StateMutation],
+    ) -> Self {
+        use gemini_adk_rs::flow::{TOOL_CALL_KEY, TOOL_DENIED_KEY, TOOL_RESULT_KEY};
+
+        let tool_of = |v: &Option<Value>| {
+            v.as_ref()
+                .and_then(|v| v["tool"].as_str())
+                .map(str::to_string)
+        };
+        let mut steps = Vec::new();
+        let mut pending: Vec<(String, Value)> = Vec::new();
+        let flush = |pending: &mut Vec<(String, Value)>, steps: &mut Vec<SimStep>| {
+            for (key, value) in pending.drain(..) {
+                steps.push(SimStep::Set { key, value });
+            }
+        };
+        let mut ordered: Vec<&gemini_adk_rs::state::StateMutation> = journal.iter().collect();
+        ordered.sort_by_key(|m| m.sequence);
+        for m in ordered {
+            match m.key.as_str() {
+                "flow:active" => {
+                    flush(&mut pending, &mut steps);
+                    steps.push(SimStep::Turn);
+                    let active: Vec<String> = m
+                        .new
+                        .clone()
+                        .and_then(|v| serde_json::from_value(v).ok())
+                        .unwrap_or_default();
+                    steps.push(SimStep::ExpectActive(active));
+                }
+                TOOL_CALL_KEY => {
+                    if let Some(tool) = tool_of(&m.new) {
+                        flush(&mut pending, &mut steps);
+                        steps.push(SimStep::ExpectAllowed(tool));
+                    }
+                }
+                TOOL_DENIED_KEY => {
+                    if let Some(tool) = tool_of(&m.new) {
+                        flush(&mut pending, &mut steps);
+                        steps.push(SimStep::ExpectDenied(tool));
+                    }
+                }
+                TOOL_RESULT_KEY => {
+                    if let Some(tool) = tool_of(&m.new) {
+                        flush(&mut pending, &mut steps);
+                        let ok = m.new.as_ref().is_some_and(|v| v["ok"] == true);
+                        steps.push(SimStep::ToolResult { tool, ok });
+                    }
+                }
+                key if runtime_owned(key) => {}
+                key => {
+                    let value = m.new.clone().unwrap_or(Value::Null);
+                    // Keep the latest value per key, in first-written order.
+                    match pending.iter_mut().find(|(k, _)| k == key) {
+                        Some(slot) => slot.1 = value,
+                        None => pending.push((key.to_string(), value)),
+                    }
+                }
+            }
+        }
+        flush(&mut pending, &mut steps);
+        Self {
+            name: name.into(),
+            steps,
+        }
+    }
+
     /// Run the scenario against `convo`. Returns `Ok(())` if every `Expect*` step
     /// holds, else `Err` with the failing step index and a diagnostic.
     pub async fn run(&self, convo: &CompiledConversation, mode: Enforcement) -> Result<(), String> {

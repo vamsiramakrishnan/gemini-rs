@@ -141,6 +141,14 @@ pub(in crate::live) async fn handle_tool_calls(
                         };
                         if let Some(reason) = denial {
                             tracing::info!(tool = %call.name, %reason, "tool denied by the flow gate");
+                            let _ = state.set(
+                                crate::flow::TOOL_DENIED_KEY,
+                                serde_json::json!({
+                                    "tool": call.name,
+                                    "id": call.id,
+                                    "reason": reason,
+                                }),
+                            );
                             results.push(FunctionResponse {
                                 name: call.name.clone(),
                                 response: serde_json::json!({ "error": reason }),
@@ -149,6 +157,10 @@ pub(in crate::live) async fn handle_tool_calls(
                             });
                             continue;
                         }
+                        let _ = state.set(
+                            crate::flow::TOOL_CALL_KEY,
+                            serde_json::json!({ "tool": call.name, "id": call.id }),
+                        );
                     }
                     let mode = execution_modes.get(&call.name);
                     match mode {
