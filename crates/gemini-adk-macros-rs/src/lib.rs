@@ -508,7 +508,13 @@ fn expand(description: Option<LitStr>, func: ItemFn) -> syn::Result<proc_macro2:
             }
 
             fn parameters(&self) -> ::core::option::Option<#serde_json::Value> {
-                ::core::option::Option::Some(#rt::tool::wire_schema::<#args_struct>())
+                // The args struct's name is an implementation detail; the
+                // tool's name and description are what the model reads.
+                let mut schema = #rt::tool::wire_schema::<#args_struct>();
+                if let ::core::option::Option::Some(object) = schema.as_object_mut() {
+                    object.remove("title");
+                }
+                ::core::option::Option::Some(schema)
             }
 
             async fn call(

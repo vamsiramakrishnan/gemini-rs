@@ -110,6 +110,53 @@ def test_interactive_sim_and_explain():
         raise AssertionError("expected ValueError: book should be denied")
 
 
+def test_barge_ins_escalate_and_timing_round_trips():
+    spec = {
+        "name": "support",
+        "stages": [
+            {
+                "id": "collect",
+                "collect": ["issue"],
+                "repair": {
+                    "reprompt_after": 10,
+                    "escalate_after": 10,
+                    "escalate_after_interruptions": 2,
+                    "escalate_to": "handoff",
+                },
+                "timing": {"reprompt_after_ms": 6000, "end_of_speech_ms": 700},
+            },
+            {"id": "handoff", "terminal": True},
+        ],
+    }
+    assert adk.validate_spec(spec) == {"valid": True}
+    sim = adk.Conversation(spec).sim()
+    sim.step("turn")
+    sim.step({"expect_active": ["collect"]})
+    sim.step("interrupt")
+    sim.step("turn")
+    sim.step("interrupt")
+    sim.step({"expect_slot": {"key": "repair:collect:escalate", "value": True}})
+    sim.step("turn")
+    sim.step("expect_complete")
+
+
+def test_a_failed_tool_counts_against_the_stage():
+    sim = adk.Conversation(SPEC).sim()
+    sim.step({"tool_failed": "book"})
+    sim.step({"expect_active": ["collect"]})
+
+
+def test_verbatim_stage_validates():
+    spec = {
+        "name": "disclosure",
+        "stages": [
+            {"id": "terms", "verbatim": "Calls may be recorded."},
+            {"id": "help", "after": ["terms"], "terminal": True},
+        ],
+    }
+    assert adk.validate_spec(spec) == {"valid": True}
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

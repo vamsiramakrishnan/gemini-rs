@@ -41,7 +41,7 @@ use schemars::JsonSchema;
 /// generation.
 ///
 /// The result is then narrowed to the API's schema subset, which draft-07 is
-/// broader than in two ways that matter: a nullable union collapses to its one
+/// broader than in ways that matter: a nullable union collapses to its one
 /// type, and a `oneOf` over single-variant enums flattens into one `enum`.
 pub fn wire_schema<T: JsonSchema + ?Sized>() -> serde_json::Value {
     let settings = schemars::r#gen::SchemaSettings::draft07().with(|s| {
@@ -60,7 +60,7 @@ pub fn wire_schema<T: JsonSchema + ?Sized>() -> serde_json::Value {
 
 /// Rewrite draft-07 constructs the Gemini schema subset cannot express.
 ///
-/// Two rewrites, both verified against the live endpoint:
+/// Three rewrites:
 ///
 /// 1. **Nullable unions are collapsed.** `Option<String>` derives
 ///    `"type": ["string", "null"]`, but the API's `Schema.type` is a single
@@ -76,6 +76,12 @@ pub fn wire_schema<T: JsonSchema + ?Sized>() -> serde_json::Value {
 ///    understand it — so the variant constraint quietly stops applying and the
 ///    model is free to invent values that will not deserialize. Flattening
 ///    restores the constraint the type already declared.
+///
+/// 3. **A nullable composite collapses to the composite.** `Option<T>` for a
+///    struct or enum `T` derives `anyOf: [T, {"type": "null"}]`. As in 1,
+///    optionality is carried by `required`, so the `null` branch is dropped
+///    and the declaration is `T` itself, keeping the field's own
+///    `description`.
 fn narrow_to_api_subset(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(object) => {
@@ -87,6 +93,24 @@ fn narrow_to_api_subset(value: &mut serde_json::Value) {
                     .cloned();
                 if let (Some(only), None) = (kept.next(), kept.next()) {
                     object.insert("type".into(), only);
+                }
+            }
+
+            // 3. `anyOf: [T, {type: null}]` → `T`, with the outer keys kept.
+            let collapsed = object.get("anyOf").and_then(|any_of| {
+                let mut kept = any_of
+                    .as_array()?
+                    .iter()
+                    .filter(|b| b.get("type").and_then(|t| t.as_str()) != Some("null"));
+                match (kept.next(), kept.next()) {
+                    (Some(serde_json::Value::Object(only)), None) => Some(only.clone()),
+                    _ => None,
+                }
+            });
+            if let Some(only) = collapsed {
+                object.remove("anyOf");
+                for (key, value) in only {
+                    object.entry(key).or_insert(value);
                 }
             }
 
@@ -123,5 +147,55 @@ fn narrow_to_api_subset(value: &mut serde_json::Value) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[derive(JsonSchema)]
+    #[allow(dead_code)]
+    enum Seating {
+        Indoor,
+        Outdoor,
+    }
+
+    /// A guest.
+    #[derive(JsonSchema)]
+    #[allow(dead_code)]
+    struct Guest {
+        name: String,
+    }
+
+    #[derive(JsonSchema)]
+    #[allow(dead_code)]
+    struct Booking {
+        /// Where to sit.
+        seating: Option<Seating>,
+        guest: Option<Guest>,
+    }
+
+    #[test]
+    fn an_optional_composite_declares_one_type() {
+        let schema = wire_schema::<Booking>();
+        let seating = &schema["properties"]["seating"];
+        assert!(seating.get("anyOf").is_none(), "{seating}");
+        assert_eq!(seating["type"], "string");
+        assert_eq!(seating["enum"], json!(["Indoor", "Outdoor"]));
+        assert_eq!(
+            seating["description"], "Where to sit.",
+            "the field's own description wins"
+        );
+
+        let guest = &schema["properties"]["guest"];
+        assert!(guest.get("anyOf").is_none(), "{guest}");
+        assert_eq!(guest["type"], "object");
+        assert_eq!(guest["required"], json!(["name"]));
+        assert!(
+            schema.get("required").is_none_or(|r| r == &json!([])),
+            "{schema}"
+        );
     }
 }

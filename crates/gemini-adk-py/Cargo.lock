@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-py"
-version = "0.8.0"
+version = "3.0.0"
 dependencies = [
  "gemini-adk-fluent-rs",
  "once_cell",
