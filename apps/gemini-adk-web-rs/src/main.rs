@@ -171,8 +171,9 @@ async fn validate_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json:
     Json(result)
 }
 
-/// Run a spec's embedded conformance tests offline — scripted conversations
-/// replayed through the real flow monitor, no model or API key involved.
+/// Run a spec's embedded conformance tests and conversation scenarios
+/// offline — scripted conversations replayed through the real flow monitor
+/// and conversation simulator, no model or API key involved.
 async fn test_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Value> {
     let result = match gemini_adk_fluent_rs::spec::SessionSpec::from_value(value) {
         Ok(spec) => {
@@ -182,12 +183,15 @@ async fn test_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Val
                     "valid": false,
                     "errors": validation.errors,
                     "reports": [],
+                    "scenarios": [],
                 })
             } else {
                 serde_json::json!({
                     "valid": true,
                     "errors": [],
                     "reports": serde_json::to_value(spec.run_tests()).unwrap_or_default(),
+                    "scenarios": serde_json::to_value(spec.run_scenarios().await)
+                        .unwrap_or_default(),
                 })
             }
         }
@@ -195,6 +199,7 @@ async fn test_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Val
             "valid": false,
             "errors": [message],
             "reports": [],
+            "scenarios": [],
         }),
     };
     Json(result)

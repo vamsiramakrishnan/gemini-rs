@@ -292,7 +292,7 @@ impl Sim {
 }
 
 /// One step in a serializable [`Scenario`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SimStep {
     /// The fake user speaks (recognizers fill slots), then a turn advances.
@@ -355,7 +355,7 @@ pub enum SimStep {
 
 /// A serializable simulation script — a deterministic, model-free test case that
 /// can be authored in code or loaded from YAML/JSON.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Scenario {
     /// Scenario name (for diagnostics).
     pub name: String,

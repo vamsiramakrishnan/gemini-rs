@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `SessionSpec` can carry a `conversation` (the conversation compiler's
+  spec) in place of a `flow`, plus `scenarios` to run against it with
+  `SessionSpec::run_scenarios`. One document now describes a voice agent
+  end to end: model, tools, conversation and tests. Stage resolvers bind to
+  declared tools by name. Flow Studio's test endpoint runs the scenarios.
+  `Scenario` and `SimStep` derive `JsonSchema`, so the spec schema covers
+  them.
 - `SessionSpec::sandboxed` and `BindingAllowlist`, for applying a spec you
   did not write.
 

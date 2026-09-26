@@ -168,6 +168,51 @@ middleware) are added on the returned builder afterwards. `GET
 /api/flows/schema` serves the document's own JSON Schema — for editor
 autocomplete, and for validating machine-authored specs at generation time.
 
+### A conversation instead of a flow
+
+A spec can carry a `conversation`, written in the
+[conversation compiler](./voice-behavior.md)'s vocabulary, instead of a
+`flow`. The conversation vocabulary covers stages, collected slots, commits,
+digressions, per-stage timing, verbatim readouts, repair and policies. The
+spec's `scenarios` are run against it:
+
+```json
+{
+  "name": "booking",
+  "modality": "audio",
+  "tools": [{ "name": "book", "description": "Book the table", "response": { "confirmation": "B-1" } }],
+  "conversation": {
+    "name": "booking",
+    "stages": [
+      { "id": "collect", "say": "Help the user book a table.", "collect": ["party_size", "slot"],
+        "next": [{ "to": "confirm", "when": { "captured": ["party_size", "slot"] } }] },
+      { "id": "confirm", "allow": ["book"],
+        "commit": { "tool": "book", "when": { "is_true": "user_confirmed" } },
+        "next": [{ "to": "done", "when": { "called_ok": "book" } }] },
+      { "id": "done", "terminal": true }
+    ],
+    "require": ["done"]
+  },
+  "scenarios": [
+    { "name": "cannot_book_without_confirmation",
+      "steps": [{ "expect_denied": "book" }] }
+  ]
+}
+```
+
+- A spec sets `conversation` or `flow`, not both.
+- `validate` compiles the conversation. Its compiled flow goes through the
+  same checks as a hand-written one: unknown tools, and guards reading keys
+  nothing writes. Collected slots count as written.
+- A stage's `resolve` slot is filled by the declared tool of the same name
+  (or the one named in `resolver`). A resolver with no declared tool is an
+  error.
+- `SessionSpec::run_scenarios` runs every scenario through the simulator with
+  resolvers stubbed. The Studio's `POST /api/flows/test` returns the results
+  under `scenarios`.
+- `apply` compiles the conversation and calls `Live::converse`, which
+  installs its governed stack, extractors, timing and policies.
+
 ### Tools: mock, HTTP, MCP
 
 A declared tool without a binding is a **mock**: it returns its canned

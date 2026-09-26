@@ -826,6 +826,16 @@ pub struct SessionSpec {
     /// The governed flow DAG (optional — a spec may be phases-only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow: Option<Flow>,
+    /// The conversation: stages, slots, digressions, commits, timing and
+    /// policies, compiled by the [conversation compiler](crate::conversation).
+    /// The higher-level alternative to `flow`; set one or the other. Stage
+    /// resolvers bind to the declared `tools` by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<crate::conversation::ConversationSpec>,
+    /// Scenarios run against `conversation` by
+    /// [`SessionSpec::run_scenarios`]: model-free, deterministic.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scenarios: Vec<crate::simulation::Scenario>,
     /// Embedded conformance tests, replayed offline by
     /// [`SessionSpec::run_tests`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -927,6 +937,29 @@ impl BindingAllowlist {
     }
 }
 
+/// State-key prefixes the runtime itself writes (flow marking, conversation
+/// signals), so a guard that reads one is not reading an orphan key.
+const RUNTIME_WRITTEN: [&str; 6] = [
+    "flow:",
+    "session:",
+    "verbatim:",
+    "correction:",
+    "repair:",
+    "telephony:",
+];
+
+/// The outcome of one scenario in [`SessionSpec::run_scenarios`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioReport {
+    /// The scenario's name.
+    pub name: String,
+    /// Whether every step held.
+    pub passed: bool,
+    /// The first step that failed, and why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// Tool names a [`MemoryBinding`] installs (ambient on the flow).
 pub const MEMORY_TOOL_NAMES: [&str; 2] = ["recall_context", "manage_memory"];
 
@@ -970,6 +1003,18 @@ impl SessionSpec {
 
     /// The flow with every `use_fragments` directive spliced in.
     pub fn effective_flow(&self) -> Result<Flow, Vec<String>> {
+        if let Some(conversation) = &self.conversation {
+            if self.flow.is_some() || !self.use_fragments.is_empty() {
+                return Err(vec![
+                    "set either `conversation` or `flow` (with `use_fragments`), not both".into(),
+                ]);
+            }
+            return crate::conversation::Conversation::from_spec_stubbing_resolvers(
+                conversation.clone(),
+            )
+            .map(|compiled| compiled.flow().flow().clone())
+            .map_err(|e| vec![format!("conversation: {e}")]);
+        }
         let mut flow = self.flow.clone().unwrap_or_default();
         let mut errors = Vec::new();
         for use_frag in &self.use_fragments {
@@ -1043,7 +1088,87 @@ impl SessionSpec {
                 keys.insert(key.clone());
             }
         }
+        // A conversation's slots are filled by its extractors and resolvers.
+        for stage in self.conversation_stages() {
+            keys.extend(stage.collect.iter().cloned());
+            keys.extend(stage.resolve.iter().map(|r| r.slot.clone()));
+            if let Some(frame) = &stage.frame {
+                keys.extend(frame.slot_keys());
+            }
+        }
         keys
+    }
+
+    /// Every stage of the conversation, main flow and digressions.
+    fn conversation_stages(&self) -> impl Iterator<Item = &crate::conversation::StageSpec> {
+        self.conversation.iter().flat_map(|c| {
+            c.stages
+                .iter()
+                .chain(c.overlays.iter().flat_map(|o| o.stages.iter()))
+        })
+    }
+
+    /// Resolvers for the conversation's `resolve` slots, each bound to the
+    /// declared tool of the same name (the resolver name, or the slot).
+    fn resolver_registry(&self, state: &State) -> crate::conversation::ResolverRegistry {
+        let mut registry = crate::conversation::ResolverRegistry::new();
+        for stage in self.conversation_stages() {
+            for resolve in &stage.resolve {
+                let name = resolve
+                    .resolver
+                    .clone()
+                    .unwrap_or_else(|| resolve.slot.clone());
+                if let Some(tool) = self.tools.iter().find(|t| t.name == name) {
+                    let tool = Arc::new(build_tool(tool, state));
+                    registry.add(name, move |args| {
+                        let tool = tool.clone();
+                        async move {
+                            gemini_adk_rs::tool::ToolFunction::call(tool.as_ref(), args)
+                                .await
+                                .map_err(|e| e.to_string())
+                        }
+                    });
+                }
+            }
+        }
+        registry
+    }
+
+    /// Run [`scenarios`](Self::scenarios) against the conversation, in
+    /// order. Resolvers are stubbed: a scenario supplies their values with
+    /// `set` steps.
+    pub async fn run_scenarios(&self) -> Vec<ScenarioReport> {
+        let failed = |error: String| -> Vec<ScenarioReport> {
+            self.scenarios
+                .iter()
+                .map(|s| ScenarioReport {
+                    name: s.name.clone(),
+                    passed: false,
+                    error: Some(error.clone()),
+                })
+                .collect()
+        };
+        let Some(conversation) = &self.conversation else {
+            return failed("the spec has no `conversation` to run against".into());
+        };
+        let compiled = match crate::conversation::Conversation::from_spec_stubbing_resolvers(
+            conversation.clone(),
+        ) {
+            Ok(compiled) => compiled,
+            Err(e) => return failed(format!("conversation: {e}")),
+        };
+        let mut reports = Vec::with_capacity(self.scenarios.len());
+        for scenario in &self.scenarios {
+            let result = scenario
+                .run(&compiled, gemini_adk_rs::flow::Enforcement::Enforce)
+                .await;
+            reports.push(ScenarioReport {
+                name: scenario.name.clone(),
+                passed: result.is_ok(),
+                error: result.err(),
+            });
+        }
+        reports
     }
 
     /// Every [`EffectSpec`] anywhere in the document, with a location label.
@@ -1124,6 +1249,20 @@ impl SessionSpec {
                 self.flow.clone().unwrap_or_default()
             }
         };
+        for stage in self.conversation_stages() {
+            for resolve in &stage.resolve {
+                let name = resolve.resolver.as_deref().unwrap_or(&resolve.slot);
+                if !self.tools.iter().any(|t| t.name == name) {
+                    errors.push(format!(
+                        "stage '{}' resolves '{}' with '{name}', which is not a declared tool",
+                        stage.id, resolve.slot
+                    ));
+                }
+            }
+        }
+        if !self.scenarios.is_empty() && self.conversation.is_none() {
+            errors.push("`scenarios` need a `conversation` to run against".into());
+        }
         let mermaid = flow.to_mermaid();
         let steps = flow.steps.len();
         let has_flow = !flow.steps.is_empty();
@@ -1433,7 +1572,7 @@ impl SessionSpec {
             // unknown-tool check.
             let written = self.state_keys_written();
             for key in flow.state_keys_read() {
-                if written.contains(&key) {
+                if written.contains(&key) || RUNTIME_WRITTEN.iter().any(|p| key.starts_with(p)) {
                     continue;
                 }
                 // `{name}:result` keys are written by on_enter orchestration.
@@ -1608,10 +1747,20 @@ impl SessionSpec {
             live = live.tools(T::mcp(params.clone()));
         }
 
-        // Governance.
-        let flow = self.effective_flow().map_err(|e| e.join("; "))?;
-        if !flow.steps.is_empty() {
-            live = live.govern(flow);
+        // Governance: a conversation compiles to a governed stack with its
+        // extractors, timing and policies; a bare flow is governed as is.
+        if let Some(conversation) = &self.conversation {
+            let compiled = crate::conversation::Conversation::from_spec_with_resolvers(
+                conversation.clone(),
+                &self.resolver_registry(state),
+            )
+            .map_err(|e| format!("conversation: {e}"))?;
+            live = live.converse(&compiled);
+        } else {
+            let flow = self.effective_flow().map_err(|e| e.join("; "))?;
+            if !flow.steps.is_empty() {
+                live = live.govern(flow);
+            }
         }
 
         // Computed (derived) state variables — dependencies inferred from the
@@ -3007,6 +3156,91 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(followed["path"], "/admin");
+    }
+
+    /// The repo's booking conversation, as one spec with its tools and
+    /// scenarios.
+    fn booking_bundle() -> SessionSpec {
+        let conversation: Value =
+            serde_json::from_str(include_str!("../../../../conversations/booking.spec.json"))
+                .unwrap();
+        let scenario = |file: &str| -> Value { serde_json::from_str(file).unwrap() };
+        SessionSpec::from_value(json!({
+            "name": "booking",
+            "modality": "audio",
+            "tools": [{
+                "name": "book",
+                "description": "Book the table",
+                "response": { "confirmation": "B-1" }
+            }],
+            "conversation": conversation,
+            "scenarios": [
+                scenario(include_str!("../../../../conversations/booking.happy.scenario.json")),
+                scenario(include_str!(
+                    "../../../../conversations/booking.no_book_without_confirm.scenario.json"
+                )),
+            ]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_conversation_spec_validates_like_a_flow() {
+        let spec = booking_bundle();
+        let report = spec.validate();
+        assert!(report.valid, "{:?}", report.errors);
+        // Collected slots are written by the conversation's extractors, so
+        // only the genuinely unwritten key is reported.
+        let unwritten: Vec<&String> = report
+            .warnings
+            .iter()
+            .filter(|w| w.contains("no tool, extractor"))
+            .collect();
+        assert_eq!(unwritten.len(), 1, "{:?}", report.warnings);
+        assert!(unwritten[0].contains("user_confirmed"));
+        assert!(report.mermaid.contains("confirm"), "{}", report.mermaid);
+        assert!(report.tools.contains(&"book".to_string()));
+
+        // Conversation and flow are alternatives.
+        let mut both = spec.clone();
+        both.flow = Some(Flow::default());
+        assert!(!both.validate().valid);
+
+        // A resolver must be a declared tool.
+        let mut resolving = spec;
+        resolving.conversation.as_mut().unwrap().stages[0]
+            .resolve
+            .push(crate::conversation::ResolveSpec {
+                slot: "availability".into(),
+                resolver: None,
+                args: vec![],
+                ttl_secs: None,
+            });
+        let report = resolving.validate();
+        assert!(
+            report.errors.iter().any(|e| e.contains("availability")),
+            "{:?}",
+            report.errors
+        );
+    }
+
+    #[tokio::test]
+    async fn a_conversation_spec_runs_its_scenarios_and_applies() {
+        let spec = booking_bundle();
+        let reports = spec.run_scenarios().await;
+        assert_eq!(reports.len(), 2);
+        assert!(reports.iter().all(|r| r.passed), "{reports:?}");
+
+        let mut broken = spec.clone();
+        broken.scenarios[0]
+            .steps
+            .push(crate::simulation::SimStep::ExpectActive(vec![
+                "nowhere".into(),
+            ]));
+        assert!(!broken.run_scenarios().await[0].passed);
+
+        spec.apply(Live::builder(), &State::new(), &SpecResources::default())
+            .expect("a conversation spec applies");
     }
 
     #[test]
