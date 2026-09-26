@@ -37,6 +37,14 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
 ) {
     let mut attempt = 0u32;
 
+    if config.text_via_transcription() {
+        state.set_text_from_transcription(true);
+        tracing::info!(
+            model = %config.resolved_model(),
+            "text-only session on a speech-only model: asking for audio and delivering its transcription as text"
+        );
+    }
+
     // Once per session, not per reconnect: a setting that never reaches the
     // wire should be visible, not silently without effect.
     let ignored = config.ignored_settings();
@@ -171,7 +179,16 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                     }
                     Ok(Err(e)) => {
                         tracing::warn!(error = %e, "WebSocket setup failed");
+                        let permanent = setup_rejection_is_permanent(&e);
+                        let reason = e.to_string();
                         let _ = event_tx.send(SessionEvent::Error(e));
+                        // The same setup would be refused again: say so now
+                        // instead of retrying with backoff.
+                        if permanent {
+                            let _ = state.transition_to(SessionPhase::Disconnected);
+                            let _ = event_tx.send(SessionEvent::Disconnected(Some(reason)));
+                            return;
+                        }
                     }
                     Err(_) => {
                         tracing::warn!(
@@ -216,6 +233,24 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
     }
 }
 
+/// The WebSocket status code in a [`Transport::close_reason`] string, e.g.
+/// 1007 in "server closed the connection (1007): …".
+pub(super) fn close_code(reason: &str) -> Option<u16> {
+    let start = reason.find('(')? + 1;
+    let end = start + reason[start..].find(')')?;
+    reason[start..end].parse().ok()
+}
+
+/// A setup the server refused as invalid (1007) or against policy (1008):
+/// retrying the same setup cannot succeed.
+fn setup_rejection_is_permanent(error: &SessionError) -> bool {
+    matches!(
+        error,
+        SessionError::SetupFailed(SetupError::ServerRejected { code: Some(code), .. })
+            if code == "1007" || code == "1008"
+    )
+}
+
 /// Wait for setupComplete from the server.
 ///
 /// Reads messages from the transport, decoding each via the codec, until a
@@ -255,6 +290,14 @@ async fn wait_for_setup<T: Transport, C: Codec>(
             },
             Ok(None) => {
                 tracing::warn!("Server closed connection during setup (no setupComplete received)");
+                // The server's own words when it gave them: they name the
+                // unsupported setting or model.
+                if let Some(reason) = transport.close_reason() {
+                    return Err(SessionError::SetupFailed(SetupError::ServerRejected {
+                        code: close_code(&reason).map(|c| c.to_string()),
+                        message: reason,
+                    }));
+                }
                 // A close during the handshake is a rejection, not a timeout.
                 // Reporting it as `Timeout` sends the reader looking for a slow
                 // network when the server in fact answered immediately and said
