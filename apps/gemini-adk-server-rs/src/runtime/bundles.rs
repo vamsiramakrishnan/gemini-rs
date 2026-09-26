@@ -24,7 +24,7 @@ pub struct LoadedBundle {
     pub spec: SessionSpec,
 }
 
-/// A change or failure found by [`BundleSet::refresh`].
+/// What [`Runtime::refresh`](super::Runtime::refresh) changed, and what failed.
 #[derive(Debug, Clone, Default)]
 pub struct RefreshReport {
     /// `(reference, old version, new version)` for every reference that now
