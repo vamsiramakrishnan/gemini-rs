@@ -19,12 +19,11 @@ use std::collections::HashMap;
 use std::fmt;
 
 use aes::Aes128;
-use aes::cipher::{BlockEncrypt, KeyInit, KeyIvInit, StreamCipher, generic_array::GenericArray};
+use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
 use base64::Engine as _;
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
 
-type Aes128Ctr = ctr::Ctr128BE<Aes128>;
 type HmacSha1 = Hmac<Sha1>;
 
 const MASTER_KEY_LEN: usize = 16;
@@ -85,20 +84,19 @@ impl MasterKey {
 
     /// A fresh random key and salt from the operating system's generator.
     pub fn generate() -> std::io::Result<Self> {
-        let mut bytes = [0u8; MASTER_KEY_LEN + MASTER_SALT_LEN];
-        getrandom::getrandom(&mut bytes).map_err(std::io::Error::other)?;
-        Ok(Self::from_bytes(&bytes).expect("the length is right"))
+        let mut buf = [std::mem::MaybeUninit::<u8>::uninit(); MASTER_KEY_LEN + MASTER_SALT_LEN];
+        let bytes = getrandom::getrandom_uninit(&mut buf).map_err(std::io::Error::other)?;
+        Ok(Self::from_bytes(bytes).expect("the length is right"))
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != MASTER_KEY_LEN + MASTER_SALT_LEN {
             return None;
         }
-        let mut key = [0u8; MASTER_KEY_LEN];
-        let mut salt = [0u8; MASTER_SALT_LEN];
-        key.copy_from_slice(&bytes[..MASTER_KEY_LEN]);
-        salt.copy_from_slice(&bytes[MASTER_KEY_LEN..]);
-        Some(Self { key, salt })
+        Some(Self {
+            key: bytes[..MASTER_KEY_LEN].try_into().ok()?,
+            salt: bytes[MASTER_KEY_LEN..].try_into().ok()?,
+        })
     }
 
     /// The SDES `inline:` key parameter: base64 of key then salt.
@@ -210,27 +208,32 @@ struct SessionKeys {
 
 impl SessionKeys {
     fn derive(master: &MasterKey) -> Self {
-        let mut cipher_key = [0u8; MASTER_KEY_LEN];
-        let mut salt = [0u8; MASTER_SALT_LEN];
-        let mut auth_key = [0u8; AUTH_KEY_LEN];
-        derive(master, 0x00, &mut cipher_key);
-        derive(master, 0x01, &mut auth_key);
-        derive(master, 0x02, &mut salt);
         Self {
-            cipher_key,
-            salt,
-            auth_key,
+            cipher_key: derive(master, 0x00),
+            auth_key: derive(master, 0x01),
+            salt: derive(master, 0x02),
         }
     }
 }
 
-/// The AES-CM PRF over `x = label XOR master salt`, index 0.
-fn derive(master: &MasterKey, label: u8, out: &mut [u8]) {
-    let mut iv = [0u8; 16];
-    iv[..MASTER_SALT_LEN].copy_from_slice(&master.salt);
-    iv[7] ^= label;
-    out.fill(0);
-    Aes128Ctr::new(&master.key.into(), &iv.into()).apply_keystream(out);
+/// The AES-CM PRF over `x = label XOR master salt`, index 0: the first `N`
+/// bytes of the keystream whose block `i` is `E(key, x * 2^16 + i)`.
+fn derive<const N: usize>(master: &MasterKey, label: u8) -> [u8; N] {
+    let cipher = Aes128::new(&master.key.into());
+    let blocks: Vec<[u8; 16]> = (0..N.div_ceil(16))
+        .map(|i| {
+            let counter: [u8; 16] = std::array::from_fn(|j| match j {
+                7 => master.salt[j] ^ label,
+                j if j < MASTER_SALT_LEN => master.salt[j],
+                14 => (i >> 8) as u8,
+                _ => i as u8,
+            });
+            let mut block = GenericArray::from(counter);
+            cipher.encrypt_block(&mut block);
+            block.into()
+        })
+        .collect();
+    std::array::from_fn(|k| blocks[k / 16][k % 16])
 }
 
 /// Receive-side state of one SSRC.

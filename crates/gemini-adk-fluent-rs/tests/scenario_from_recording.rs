@@ -94,3 +94,27 @@ async fn a_recorded_session_becomes_a_scenario_that_catches_a_regression() {
         .expect_err("the stricter spec diverges from the recording");
     assert!(err.contains("book_table"), "{err}");
 }
+
+#[tokio::test]
+async fn a_recorded_removal_replays_as_a_removal() {
+    let journal = Arc::new(MemoryJournalSink::new());
+    let state = State::new().with_journal_sink(journal.clone());
+    let _ = state.set("party_size", 4);
+    let _ = state.remove("party_size");
+
+    let scenario = Scenario::from_journal("removed", &journal.entries());
+    let json = serde_json::to_value(&scenario).unwrap();
+    assert_eq!(
+        json["steps"],
+        json!([{ "remove": { "key": "party_size" } }])
+    );
+
+    // Replayed, the key is gone, not present as null.
+    let convo = booking(Guard::is_true("confirmed"));
+    let mut sim = gemini_adk_fluent_rs::simulation::Sim::new(&convo, Enforcement::Enforce);
+    sim.set("party_size", 4);
+    for step in &scenario.steps {
+        sim.apply(step).await.unwrap();
+    }
+    assert!(sim.state().get_raw("party_size").is_none());
+}

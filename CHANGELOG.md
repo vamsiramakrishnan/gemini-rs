@@ -230,7 +230,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Offline Live sessions**: `connect_with_transport` on `LiveSessionBuilder`
   and `Live`; `testing::ScriptedServer` (the model's side as a script:
   `says`, `hears`, `speaks`, `calls`, `interrupts`) and `ScriptedRun` (events,
-  state, frames sent, tool responses). `ReplayTransport::with_frame_observer`.
+  state, frames sent, tool responses). `ReplayTransport::with_frame_gate`.
 - **Voice timing per stage**: `VoiceTiming` (`reprompt_after`, `filler_after`,
   `uninterruptible`, `end_of_speech`, `context_delivery`) on a conversation
   stage (`.timing(..)`, spec field `timing`) or `Live::stage_timing`. The

@@ -949,6 +949,11 @@ mod tests {
             .map(str::to_string)
     }
 
+    /// A throwaway password, random per test run.
+    fn test_password() -> String {
+        MasterKey::generate().unwrap().to_inline()
+    }
+
     /// A registrar that challenges a REGISTER without credentials (401) and
     /// grants one with them for 60 s. Every request it sees is forwarded.
     async fn fake_registrar() -> (SocketAddr, mpsc::UnboundedReceiver<String>) {
@@ -999,6 +1004,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn registers_with_digest_auth_and_unregisters() {
+        let password = test_password();
         let (registrar, mut seen) = fake_registrar().await;
         let agent = SipAgent::bind("127.0.0.1:0".parse().unwrap())
             .await
@@ -1007,7 +1013,7 @@ mod tests {
         let registration = tokio::time::timeout(
             Duration::from_secs(5),
             agent.register(
-                SipAccount::new(format!("sip:{registrar}"), "alice", "secret")
+                SipAccount::new(format!("sip:{registrar}"), "alice", &password)
                     .expires(Duration::from_secs(300)),
             ),
         )
@@ -1040,7 +1046,7 @@ mod tests {
             assert!(answered.contains(part), "missing {part} in {answered}");
         }
         assert!(
-            !answered.contains("secret"),
+            !answered.contains(&password),
             "the password never goes on the wire"
         );
 
@@ -1091,7 +1097,11 @@ mod tests {
             .unwrap();
         let result = tokio::time::timeout(
             Duration::from_secs(5),
-            agent.register(SipAccount::new(format!("sip:{registrar}"), "mallory", "x")),
+            agent.register(SipAccount::new(
+                format!("sip:{registrar}"),
+                "mallory",
+                test_password(),
+            )),
         )
         .await
         .expect("finishes");
@@ -1261,8 +1271,9 @@ mod tests {
 
     #[test]
     fn an_account_never_prints_its_password() {
-        let account = SipAccount::new("sip:pbx.example.com", "alice", "hunter2");
-        assert!(!format!("{account:?}").contains("hunter2"));
+        let password = test_password();
+        let account = SipAccount::new("sip:pbx.example.com", "alice", &password);
+        assert!(!format!("{account:?}").contains(&password));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

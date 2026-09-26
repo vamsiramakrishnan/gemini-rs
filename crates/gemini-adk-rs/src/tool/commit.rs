@@ -9,7 +9,9 @@
 //! - **Idempotency.** An idempotency key is rendered from a template
 //!   (`"{user_id}:{amount}"`). A call whose key already succeeded returns the
 //!   first call's result without running the tool again. The result is
-//!   remembered in state under [`idempotency_key`]`(tool, key)`.
+//!   remembered in state under [`idempotency_key`]`(tool, key)`. Calls with
+//!   the same key run one at a time, so two concurrent retries (a duplicate
+//!   background call, say) still charge once.
 //! - **Compensation.** When the tool fails, a compensating tool (a refund, a
 //!   release) runs with the same arguments to undo any partial effect, and
 //!   `compensated:{tool}` is set in state. The failure is still reported to
@@ -17,6 +19,7 @@
 //!
 //! `Policy::commit(..)` in the fluent crate lowers to this.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -43,6 +46,9 @@ pub struct CommitGuard {
     state: State,
     key_template: Option<String>,
     compensate: Option<Arc<dyn ToolFunction>>,
+    /// One lock per rendered key, held from the idempotency check to the
+    /// stored result.
+    in_flight: parking_lot::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl CommitGuard {
@@ -53,6 +59,7 @@ impl CommitGuard {
             state,
             key_template: None,
             compensate: None,
+            in_flight: parking_lot::Mutex::new(HashMap::new()),
         }
     }
 
@@ -140,6 +147,19 @@ impl ToolFunction for CommitGuard {
         let key = self
             .render_key(&args)
             .map(|key| idempotency_key(tool, &key));
+        // Serialize calls with the same key: the second waits for the first
+        // to store its result, then returns it.
+        let lock = key.as_ref().map(|key| {
+            self.in_flight
+                .lock()
+                .entry(key.clone())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+                .clone()
+        });
+        let _held = match &lock {
+            Some(lock) => Some(lock.lock().await),
+            None => None,
+        };
         if let Some(key) = &key
             && let Some(previous) = self.state.get_raw(key)
         {
@@ -217,6 +237,27 @@ mod tests {
             "a different amount is a new commit"
         );
         assert!(state.get_raw(&idempotency_key("charge", "u1:40")).is_some());
+    }
+
+    #[tokio::test]
+    async fn concurrent_calls_with_one_key_commit_once() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let slow: Arc<dyn ToolFunction> =
+            Arc::new(SimpleTool::new("charge", "charge", None, move |_| {
+                let counter = counter.clone();
+                async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    Ok(json!({ "charge": counter.fetch_add(1, Ordering::SeqCst) + 1 }))
+                }
+            }));
+        let guard = Arc::new(CommitGuard::new(slow, State::new()).idempotency_key("{amount}"));
+        let (a, b) = tokio::join!(
+            guard.call(json!({ "amount": 40 })),
+            guard.call(json!({ "amount": 40 }))
+        );
+        assert_eq!(a.unwrap(), b.unwrap(), "both get the one charge");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

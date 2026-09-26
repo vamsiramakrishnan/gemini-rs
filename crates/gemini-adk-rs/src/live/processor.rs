@@ -237,10 +237,14 @@ pub(crate) enum FastEvent {
     Phase(SessionPhase),
     /// Interruption flag — tells fast lane to stop forwarding audio.
     Interrupted,
+    /// Replay lockstep: answered once everything queued before it is handled.
+    Barrier(tokio::sync::oneshot::Sender<()>),
 }
 
 /// Events routed to the control lane (async processing).
 pub(crate) enum ControlEvent {
+    /// Replay lockstep: answered once everything queued before it is handled.
+    Barrier(tokio::sync::oneshot::Sender<()>),
     ToolCall(Vec<gemini_genai_rs::prelude::FunctionCall>),
     ToolCallCancelled(Vec<String>),
     /// A background tool finished. Posted by the detached background task (which
@@ -357,6 +361,45 @@ pub(crate) struct ControlPlaneConfig {
     /// Transcript redaction applied at the router, before either lane sees
     /// the text. `None` = pass through.
     pub redactor: Option<Arc<crate::live::redaction::TranscriptRedactor>>,
+    /// Replay only: the router waits for both lanes to finish each event and
+    /// counts it here. See [`Lockstep`].
+    pub lockstep: Option<Arc<Lockstep>>,
+}
+
+/// Counts the session events the lanes have fully handled, for an offline
+/// replay that must not move its clock past a frame the session is still
+/// processing. With lockstep on, the router waits for both lanes to drain
+/// each event before taking the next, which a live session never should.
+#[derive(Debug, Default)]
+pub(crate) struct Lockstep {
+    settled: AtomicU64,
+    notify: tokio::sync::Notify,
+}
+
+impl Lockstep {
+    /// Events the lanes have finished with (or the router skipped).
+    pub(crate) fn settled(&self) -> u64 {
+        self.settled.load(Ordering::Acquire)
+    }
+
+    fn settle(&self, n: u64) {
+        self.settled.fetch_add(n, Ordering::AcqRel);
+        self.notify.notify_waiters();
+    }
+
+    /// Wait until at least `count` events are settled, or `timeout` passes.
+    pub(crate) async fn wait_for(&self, count: u64, timeout: std::time::Duration) {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let notified = self.notify.notified();
+            if self.settled() >= count {
+                return;
+            }
+            if tokio::time::timeout_at(deadline, notified).await.is_err() {
+                return;
+            }
+        }
+    }
 }
 
 impl Default for ControlPlaneConfig {
@@ -375,6 +418,7 @@ impl Default for ControlPlaneConfig {
             flow: None,
             delivery: DeliveryConfig::default(),
             redactor: None,
+            lockstep: None,
         }
     }
 }
@@ -435,6 +479,7 @@ pub(crate) fn spawn_event_processor(
     let fast_tx_clone = fast_tx.clone();
     let ctrl_tx_clone = ctrl_tx.clone();
     let shared_clone = shared.clone();
+    let lockstep = control_plane.lockstep.clone();
     tokio::spawn(async move {
         // One span per turn; see `turn_trace` for why each lane keeps its own.
         let mut turn = super::turn_trace::TurnTrace::new();
@@ -453,6 +498,15 @@ pub(crate) fn spawn_event_processor(
                     route_event(event, &fast_tx_clone, &ctrl_tx_clone, &shared_clone)
                         .instrument(turn.span())
                         .await;
+                    if let Some(lockstep) = &lockstep {
+                        let (fast_done, fast_rx) = tokio::sync::oneshot::channel();
+                        let (ctrl_done, ctrl_rx) = tokio::sync::oneshot::channel();
+                        let _ = fast_tx_clone.send(FastEvent::Barrier(fast_done)).await;
+                        let _ = ctrl_tx_clone.send(ControlEvent::Barrier(ctrl_done)).await;
+                        let _ = fast_rx.await;
+                        let _ = ctrl_rx.await;
+                        lockstep.settle(1);
+                    }
                     if boundary {
                         turn.advance();
                         tracing::debug!(parent: &turn.span(), "turn started");
@@ -463,6 +517,9 @@ pub(crate) fn spawn_event_processor(
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!(skipped = n, "Event processor lagged, skipped events");
+                    if let Some(lockstep) = &lockstep {
+                        lockstep.settle(n);
+                    }
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             }
@@ -821,6 +878,9 @@ async fn run_fast_lane(
 ) {
     while let Some(event) = rx.recv().await {
         match event {
+            FastEvent::Barrier(done) => {
+                let _ = done.send(());
+            }
             FastEvent::Audio(data) => {
                 // Suppress audio during interruption
                 if !shared.interrupted.load(Ordering::Acquire) {

@@ -179,6 +179,9 @@ impl Sim {
             SimStep::Set { key, value } => {
                 self.set(key.clone(), value.clone());
             }
+            SimStep::Remove { key } => {
+                let _ = self.state.remove(key);
+            }
             SimStep::ToolOk(tool) => {
                 self.tool_ok(tool);
             }
@@ -301,6 +304,11 @@ pub enum SimStep {
         /// Value to store.
         value: Value,
     },
+    /// Remove a state value, as the recorded runtime did.
+    Remove {
+        /// State key.
+        key: String,
+    },
     /// A tool succeeds now.
     ToolOk(String),
     /// A tool fails (or times out) now; counts toward the active stage's
@@ -412,10 +420,15 @@ impl Scenario {
                 .map(str::to_string)
         };
         let mut steps = Vec::new();
-        let mut pending: Vec<(String, Value)> = Vec::new();
-        let flush = |pending: &mut Vec<(String, Value)>, steps: &mut Vec<SimStep>| {
+        // `None` is a removal (`State::remove`, `clear_prefix`), which must
+        // replay as one: a key set to `null` is still present.
+        let mut pending: Vec<(String, Option<Value>)> = Vec::new();
+        let flush = |pending: &mut Vec<(String, Option<Value>)>, steps: &mut Vec<SimStep>| {
             for (key, value) in pending.drain(..) {
-                steps.push(SimStep::Set { key, value });
+                steps.push(match value {
+                    Some(value) => SimStep::Set { key, value },
+                    None => SimStep::Remove { key },
+                });
             }
         };
         let mut ordered: Vec<&gemini_adk_rs::state::StateMutation> = journal.iter().collect();
@@ -453,7 +466,7 @@ impl Scenario {
                 }
                 key if runtime_owned(key) => {}
                 key => {
-                    let value = m.new.clone().unwrap_or(Value::Null);
+                    let value = m.new.clone();
                     // Keep the latest value per key, in first-written order.
                     match pending.iter_mut().find(|(k, _)| k == key) {
                         Some(slot) => slot.1 = value,

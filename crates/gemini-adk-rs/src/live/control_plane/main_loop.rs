@@ -97,6 +97,9 @@ pub(in crate::live) async fn run_control_lane(
         let span = turn.span();
         async {
             match event {
+                ControlEvent::Barrier(done) => {
+                    let _ = done.send(());
+                }
                 // -- Transcript accumulation (exclusive to control lane) --
                 ControlEvent::InputTranscript(text) => {
                     transcript_buffer.push_input(&text);

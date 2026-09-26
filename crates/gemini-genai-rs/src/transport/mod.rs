@@ -18,9 +18,7 @@ pub use recording::{
     FileWireRecorder, MemoryWireRecorder, RecordingCodec, WireDirection, WireEntry, WireLogError,
     WireRecorder, WireRecorderHandle, parse_wire_log, read_wire_log,
 };
-pub use replay::{
-    FrameObserver, OutboundFrames, ReplayControl, ReplayTransport, ReplayTransportError,
-};
+pub use replay::{FrameGate, OutboundFrames, ReplayControl, ReplayTransport, ReplayTransportError};
 pub use ws::{
     MockTransport, MockTransportError, Transport, TungsteniteError, TungsteniteTransport,
 };

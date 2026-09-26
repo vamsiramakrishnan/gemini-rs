@@ -65,6 +65,7 @@ pub struct LiveSessionBuilder {
     flow: Option<crate::flow::FlowStack>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
     clock: Option<crate::clock::SharedClock>,
+    lockstep: Option<Arc<super::processor::Lockstep>>,
 }
 
 impl LiveSessionBuilder {
@@ -95,7 +96,15 @@ impl LiveSessionBuilder {
             flow: None,
             redactor: None,
             clock: None,
+            lockstep: None,
         }
+    }
+
+    /// Replay lockstep: the router waits for both lanes to handle each event
+    /// and counts it in `lockstep`. Offline replay only.
+    pub(crate) fn lockstep(mut self, lockstep: Arc<super::processor::Lockstep>) -> Self {
+        self.lockstep = Some(lockstep);
+        self
     }
 
     /// Install transcript redaction — see
@@ -458,6 +467,7 @@ impl LiveSessionBuilder {
             flow: self.flow,
             redactor: self.redactor,
             clock: self.clock,
+            lockstep: self.lockstep,
         })
     }
 }
@@ -499,6 +509,7 @@ pub(crate) struct SessionPlan {
     flow: Option<crate::flow::FlowStack>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
     clock: Option<crate::clock::SharedClock>,
+    lockstep: Option<Arc<super::processor::Lockstep>>,
 }
 
 /// Fully wired runtime for a connected Live session, ready for lane spawning.
@@ -603,6 +614,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         },
         flow: flow_monitor.clone(),
         redactor: plan.redactor,
+        lockstep: plan.lockstep,
     };
 
     // Create shared PendingContext for deferred delivery.
