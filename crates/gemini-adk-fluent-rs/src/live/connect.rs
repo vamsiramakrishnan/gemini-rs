@@ -531,7 +531,7 @@ async fn resolve_deferred_tool(
 
 /// Parse an MCP connection string: an `http(s)://` URL becomes an SSE/HTTP
 /// connection, anything else is treated as a stdio command line.
-fn parse_mcp_params(params: &str) -> gemini_adk_rs::tools::mcp::McpConnectionParams {
+pub(crate) fn parse_mcp_params(params: &str) -> gemini_adk_rs::tools::mcp::McpConnectionParams {
     use gemini_adk_rs::tools::mcp::McpConnectionParams;
 
     let trimmed = params.trim();

@@ -239,6 +239,32 @@ time:
 "mcp": ["http://localhost:3000/mcp"]
 ```
 
+To implement one declared tool on an MCP server, give the tool an `"mcp"`
+binding: a stdio command or an http(s) URL. The runtime calls the tool of the
+same name on that server. The spec's declaration is what the model sees, and
+`set_state` and `save_response_as` still apply. A tool can have an `http`
+binding or an `mcp` binding, not both.
+
+```json
+{ "name": "book_table", "mcp": "python -m tools",
+  "set_state": { "booked": true } }
+```
+
+In Rust, implement a declared tool in process instead. The implementation
+replaces the tool's call; the declaration and state effects stay the spec's.
+`apply` refuses an implementation for a tool the spec does not declare.
+
+```rust,ignore
+let resources = SpecResources::default().implement(SimpleTool::new(
+    "book_table", "", None,
+    |args| async move { Ok(bookings::create(args).await?) },
+));
+let live = spec.apply(Live::builder(), &state, &resources)?;
+```
+
+When a tool has more than one of these, the in-process implementation wins,
+then `mcp`, then `http`, then the mock `response`.
+
 ### Extraction: the flow advances from speech alone
 
 `extract` entries run an out-of-band model against the transcript, fill a JSON

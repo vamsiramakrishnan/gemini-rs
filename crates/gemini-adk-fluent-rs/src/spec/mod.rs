@@ -39,7 +39,7 @@ use gemini_adk_rs::live::extractor::{ExtractionTrigger, FieldPromotion, LlmExtra
 use gemini_adk_rs::live::{ContextDelivery, RepairConfig, SteeringMode};
 use gemini_adk_rs::llm::BaseLlm;
 use gemini_adk_rs::state::State;
-use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher};
+use gemini_adk_rs::tool::{SimpleTool, ToolDispatcher, ToolFunction};
 use gemini_genai_rs::prelude::{
     AutomaticActivityDetection, Content, FunctionResponseScheduling, Sensitivity, SessionWriter,
     Voice,
@@ -119,6 +119,13 @@ pub struct ToolSpec {
     /// Execute as an HTTP request instead of returning the canned response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http: Option<HttpBinding>,
+    /// Execute by calling the tool of the same name on this MCP server: a
+    /// command line (stdio) or an `http(s)://` URL. This is how a tool
+    /// written in another language (a generated Python or Go tool server)
+    /// implements a declared tool. The declaration here stays what the model
+    /// sees, and `set_state` still applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<String>,
     /// Run non-blocking: the model keeps speaking while the tool executes
     /// (`behavior: NonBlocking` on the wire; Google AI only, stripped on
     /// Vertex). Implied by `scheduling`.
@@ -972,6 +979,20 @@ pub struct SpecResources {
     /// The memory engine honoring the spec's `memory` section. Required when
     /// that section is present.
     pub memory: Option<Arc<dyn MemoryBinding>>,
+    /// In-process implementations of declared tools, by name. A declared
+    /// tool with an implementation calls it instead of its mock response,
+    /// HTTP or MCP binding; its declaration (what the model sees) and its
+    /// `set_state` stay as the spec says. Add with
+    /// [`implement`](Self::implement).
+    pub tools: BTreeMap<String, Arc<dyn ToolFunction>>,
+}
+
+impl SpecResources {
+    /// Implement the declared tool of the same name with `tool`.
+    pub fn implement(mut self, tool: impl ToolFunction + 'static) -> Self {
+        self.tools.insert(tool.name().to_string(), Arc::new(tool));
+        self
+    }
 }
 
 impl SessionSpec {
@@ -1317,6 +1338,14 @@ impl SessionSpec {
                 }
             }
         }
+        for t in &self.tools {
+            if t.http.is_some() && t.mcp.is_some() {
+                errors.push(format!(
+                    "tool '{}' has both an http and an mcp binding; keep one",
+                    t.name
+                ));
+            }
+        }
         if cfg!(not(feature = "http-tools")) {
             for t in &self.tools {
                 if t.http.is_some() {
@@ -1626,9 +1655,36 @@ impl SessionSpec {
 
     /// Build the dispatcher of declared tools bound to `state`.
     pub fn build_dispatcher(&self, state: &State) -> ToolDispatcher {
+        self.build_dispatcher_with(state, &SpecResources::default())
+    }
+
+    /// Build the dispatcher of declared tools bound to `state`, calling the
+    /// in-process implementations in `resources` where it has them. Tools
+    /// bound to the same MCP server share one connection.
+    pub fn build_dispatcher_with(
+        &self,
+        state: &State,
+        resources: &SpecResources,
+    ) -> ToolDispatcher {
+        let mut servers: BTreeMap<String, Arc<gemini_adk_rs::tools::mcp::McpSessionManager>> =
+            BTreeMap::new();
         let mut dispatcher = ToolDispatcher::new();
         for tool in &self.tools {
-            dispatcher.register(build_tool(tool, state));
+            let call = match (resources.tools.get(&tool.name), &tool.mcp) {
+                (Some(implementation), _) => ToolCall::Code(implementation.clone()),
+                (None, Some(params)) => ToolCall::Mcp(
+                    servers
+                        .entry(params.clone())
+                        .or_insert_with(|| {
+                            Arc::new(gemini_adk_rs::tools::mcp::McpSessionManager::new(
+                                crate::live::connect::parse_mcp_params(params),
+                            ))
+                        })
+                        .clone(),
+                ),
+                (None, None) => ToolCall::Declared,
+            };
+            dispatcher.register(build_tool_calling(tool, state, call));
         }
         dispatcher
     }
@@ -1670,6 +1726,15 @@ impl SessionSpec {
             keep
         });
         for tool in &mut spec.tools {
+            if let Some(params) = &tool.mcp
+                && !allow.allows_mcp(params)
+            {
+                notes.push(format!(
+                    "tool `{}`: MCP binding `{params}` is not allowed on this server; it runs as a mock",
+                    tool.name
+                ));
+                tool.mcp = None;
+            }
             let Some(binding) = &mut tool.http else {
                 continue;
             };
@@ -1719,6 +1784,15 @@ impl SessionSpec {
         if self.memory.is_some() && resources.memory.is_none() {
             return Err("spec declares memory but SpecResources.memory is not set".into());
         }
+        if let Some(name) = resources
+            .tools
+            .keys()
+            .find(|name| !self.tools.iter().any(|t| &&t.name == name))
+        {
+            return Err(format!(
+                "SpecResources implements tool '{name}', which the spec does not declare"
+            ));
+        }
 
         // Seed declared defaults before anything reads state.
         self.seed_state_defaults(state);
@@ -1741,7 +1815,7 @@ impl SessionSpec {
 
         // Tools: declared (mock/HTTP) via the dispatcher, MCP merged on top.
         if !self.tools.is_empty() {
-            live = live.dispatcher(self.build_dispatcher(state));
+            live = live.dispatcher(self.build_dispatcher_with(state, resources));
         }
         for params in &self.mcp {
             live = live.tools(T::mcp(params.clone()));
@@ -2058,8 +2132,43 @@ fn apply_runtime(mut live: Live, runtime: &RuntimeSpec) -> Live {
     live
 }
 
+/// How a declared tool's call is carried out.
+enum ToolCall {
+    /// Its `http` binding, or its canned response.
+    Declared,
+    /// An in-process implementation.
+    Code(Arc<dyn ToolFunction>),
+    /// The tool of the same name on an MCP server.
+    Mcp(Arc<gemini_adk_rs::tools::mcp::McpSessionManager>),
+}
+
 /// Build one declared tool as a [`SimpleTool`] bound to `state`.
 fn build_tool(tool: &ToolSpec, state: &State) -> SimpleTool {
+    build_tool_calling(tool, state, ToolCall::Declared)
+}
+
+/// The value of an MCP `tools/call` result: its structured content, else
+/// its single text part parsed as JSON, else the text itself.
+fn mcp_value(result: Value) -> Value {
+    if let Some(structured) = result.get("structuredContent") {
+        return structured.clone();
+    }
+    let texts: Vec<&str> = result["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .collect();
+    match texts.as_slice() {
+        [text] => serde_json::from_str(text).unwrap_or_else(|_| json!({ "output": text })),
+        [] => result,
+        many => json!({ "output": many.join("\n") }),
+    }
+}
+
+/// Build one declared tool, carrying out calls with `call`. Whatever carries
+/// it out, the declaration and the state effects are the spec's.
+fn build_tool_calling(tool: &ToolSpec, state: &State, call: ToolCall) -> SimpleTool {
     let description = if tool.description.is_empty() {
         format!("Tool '{}'", tool.name)
     } else {
@@ -2071,6 +2180,7 @@ fn build_tool(tool: &ToolSpec, state: &State) -> SimpleTool {
     let http = tool.http.clone();
     let st = state.clone();
     let name = tool.name.clone();
+    let call = Arc::new(call);
     SimpleTool::new(
         &tool.name,
         description,
@@ -2082,12 +2192,21 @@ fn build_tool(tool: &ToolSpec, state: &State) -> SimpleTool {
             let http = http.clone();
             let st = st.clone();
             let name = name.clone();
+            let call = call.clone();
             async move {
-                let result = match &http {
-                    Some(binding) => execute_http(binding, &args, &st).await.map_err(|e| {
-                        gemini_adk_rs::error::ToolError::Other(format!("{name}: {e}"))
-                    })?,
-                    None => response,
+                let result = match (call.as_ref(), &http) {
+                    (ToolCall::Code(implementation), _) => implementation.call(args).await?,
+                    (ToolCall::Mcp(server), _) => {
+                        mcp_value(server.call_tool(&name, args).await.map_err(|e| {
+                            gemini_adk_rs::error::ToolError::ExecutionFailed(format!("{name}: {e}"))
+                        })?)
+                    }
+                    (ToolCall::Declared, Some(binding)) => {
+                        execute_http(binding, &args, &st).await.map_err(|e| {
+                            gemini_adk_rs::error::ToolError::Other(format!("{name}: {e}"))
+                        })?
+                    }
+                    (ToolCall::Declared, None) => response,
                 };
                 for (key, value) in &sets {
                     let _ = st.set(key, value.clone());
@@ -3241,6 +3360,125 @@ mod tests {
 
         spec.apply(Live::builder(), &State::new(), &SpecResources::default())
             .expect("a conversation spec applies");
+    }
+
+    fn booking_tool(extra: Value) -> SessionSpec {
+        let mut tool = json!({
+            "name": "book",
+            "description": "Book the table",
+            "response": { "confirmation": "MOCK" },
+            "set_state": { "booked": true },
+            "save_response_as": "booking"
+        });
+        tool.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        SessionSpec::from_value(json!({
+            "name": "t",
+            "tools": [tool],
+            "flow": { "steps": [{ "id": "s", "allow": ["book"] }] }
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_implementation_replaces_the_call_not_the_declaration() {
+        let spec = booking_tool(json!({}));
+        let state = State::new();
+        let resources = SpecResources::default().implement(gemini_adk_rs::tool::SimpleTool::new(
+            "book",
+            "real booking",
+            None,
+            |_| async { Ok(json!({ "confirmation": "REAL-7" })) },
+        ));
+        let dispatcher = spec.build_dispatcher_with(&state, &resources);
+        let out = dispatcher.call_function("book", json!({})).await.unwrap();
+        assert_eq!(out["confirmation"], "REAL-7");
+        // The spec's state effects still apply.
+        assert_eq!(state.get::<bool>("booked"), Some(true));
+        assert_eq!(
+            state.get::<Value>("booking").unwrap()["confirmation"],
+            "REAL-7"
+        );
+        // And the model still sees the spec's declaration.
+        assert_eq!(
+            dispatcher.to_tool_declarations()[0]
+                .function_declarations
+                .as_ref()
+                .unwrap()[0]
+                .description,
+            "Book the table"
+        );
+
+        // An implementation for a tool the spec does not declare is refused.
+        let stray = SpecResources::default().implement(gemini_adk_rs::tool::SimpleTool::new(
+            "refund",
+            "",
+            None,
+            |_| async { Ok(json!({})) },
+        ));
+        assert!(spec.apply(Live::builder(), &state, &stray).is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_mcp_binding_calls_the_tool_on_that_server() {
+        // A minimal stdio MCP server: answers initialize and tools/call.
+        let dir = std::env::temp_dir().join(format!("mcp-bind-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("server.sh");
+        std::fs::write(
+            &script,
+            r#"while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  [ -z "$id" ] && continue
+  case "$line" in
+    *'"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"t","version":"1"}}}\n' "$id" ;;
+    *'"tools/call"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"{\\"confirmation\\":\\"MCP-1\\"}"}]}}\n' "$id" ;;
+    *) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        let spec = booking_tool(json!({ "mcp": format!("sh {}", script.display()) }));
+        let state = State::new();
+        let dispatcher = spec.build_dispatcher_with(&state, &SpecResources::default());
+        let out = dispatcher
+            .call_function("book", json!({ "party": 2 }))
+            .await
+            .unwrap();
+        assert_eq!(out, json!({ "confirmation": "MCP-1" }));
+        assert_eq!(state.get::<bool>("booked"), Some(true));
+
+        // Both bindings on one tool is a validation error.
+        let both = booking_tool(json!({
+            "mcp": "x",
+            "http": { "url": "https://api.example.com/book" }
+        }));
+        assert!(!both.validate().valid);
+
+        // A sandbox without that entry allowed turns the tool into its mock.
+        let (sandboxed, notes) = spec.sandboxed(&BindingAllowlist::default());
+        assert!(sandboxed.tools[0].mcp.is_none());
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mcp_results_become_plain_values() {
+        assert_eq!(
+            mcp_value(json!({ "structuredContent": { "a": 1 }, "content": [] })),
+            json!({ "a": 1 })
+        );
+        assert_eq!(
+            mcp_value(json!({ "content": [{ "type": "text", "text": "{\"a\":2}" }] })),
+            json!({ "a": 2 })
+        );
+        assert_eq!(
+            mcp_value(json!({ "content": [{ "type": "text", "text": "done" }] })),
+            json!({ "output": "done" })
+        );
     }
 
     #[test]

@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A spec's tools can be implemented in code or on an MCP server. A tool's
+  `mcp` field calls the tool of the same name on that server, and
+  `SpecResources::implement` supplies an in-process implementation. The
+  spec's declaration, `set_state` and `save_response_as` apply either way.
 - `SessionSpec` can carry a `conversation` (the conversation compiler's
   spec) in place of a `flow`, plus `scenarios` to run against it with
   `SessionSpec::run_scenarios`. One document now describes a voice agent

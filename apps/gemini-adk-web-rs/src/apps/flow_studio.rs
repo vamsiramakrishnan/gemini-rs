@@ -132,6 +132,7 @@ impl DemoApp for FlowStudio {
                             )
                                 as std::sync::Arc<dyn gemini_adk_fluent_rs::spec::MemoryBinding>
                         }),
+                        ..SpecResources::default()
                     };
                     let state = State::new();
                     spec.apply(live.model(super::live_model()), &state, &resources)
