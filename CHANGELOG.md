@@ -17,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server now:
   - runs posted specs through `SessionSpec::sandboxed`, which drops `mcp`
     entries and turns HTTP bindings into mocks unless the operator allows
-    them (`FLOW_STUDIO_ALLOW_HTTP`, `FLOW_STUDIO_ALLOW_MCP`);
+    them (`FLOW_STUDIO_ALLOW_HTTP`, `FLOW_STUDIO_ALLOW_MCP`). An allowed
+    HTTP binding is checked on normalized URLs, and again at call time after
+    interpolation and on every redirect;
   - binds to `127.0.0.1` unless `ADK_WEB_ADDR` says otherwise.
 
 ### Fixed

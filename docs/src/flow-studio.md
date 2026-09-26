@@ -94,9 +94,13 @@ FLOW_STUDIO_ALLOW_MCP="https://mcp.example.com/sse" \
 cargo run -p gemini-adk-web-rs
 ```
 
-HTTP bindings are matched by URL prefix. A prefix given without a path gets
-a trailing `/`, so arguments interpolated into the URL cannot change the
-host. MCP entries are matched exactly.
+HTTP bindings are matched by URL prefix. Scheme, host and port must match
+exactly, and a prefix given without a path gets a trailing `/`. URLs are
+normalized before the path is compared, so `..` and `%2e%2e` segments cannot
+climb out of a prefix such as `/v2/`. The check runs again on every call,
+after arguments are interpolated, and on every redirect: a request or
+redirect that leaves the allowlist fails the tool call. MCP entries are
+matched exactly.
 
 ## The cookbook gallery
 

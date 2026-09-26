@@ -80,6 +80,11 @@ pub struct HttpBinding {
     /// JSON body; every string value is interpolated. Omit for no body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<Value>,
+    /// Set by [`SessionSpec::sandboxed`]: the request URL (after
+    /// interpolation) and every redirect target must stay inside it.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub(crate) reach: Option<BindingAllowlist>,
 }
 
 fn default_method() -> String {
@@ -896,12 +901,25 @@ impl BindingAllowlist {
         self
     }
 
+    /// Whether `url` falls inside an allowed prefix. Both are parsed and
+    /// normalized first, so `..` and `%2e%2e` segments cannot climb out of a
+    /// path prefix, and scheme, host and port must match exactly. A template
+    /// that interpolates into the host never matches.
     fn allows_http(&self, url: &str) -> bool {
-        // Only a literal scheme and host can match: a template that puts an
-        // interpolation before the first path `/` never does.
-        self.http_prefixes
-            .iter()
-            .any(|p| url.starts_with(p.as_str()))
+        let Ok(target) = url::Url::parse(url) else {
+            return false;
+        };
+        if !target.username().is_empty() || target.password().is_some() {
+            return false;
+        }
+        self.http_prefixes.iter().any(|prefix| {
+            url::Url::parse(prefix).is_ok_and(|prefix| {
+                prefix.scheme() == target.scheme()
+                    && prefix.host() == target.host()
+                    && prefix.port_or_known_default() == target.port_or_known_default()
+                    && target.path().starts_with(prefix.path())
+            })
+        })
     }
 
     fn allows_mcp(&self, params: &str) -> bool {
@@ -1513,9 +1531,14 @@ impl SessionSpec {
             keep
         });
         for tool in &mut spec.tools {
-            if let Some(binding) = &tool.http
-                && !allow.allows_http(&binding.url)
-            {
+            let Some(binding) = &mut tool.http else {
+                continue;
+            };
+            if allow.allows_http(&binding.url) {
+                // Arguments are interpolated and servers redirect at call
+                // time, so the request is checked again then.
+                binding.reach = Some(allow.clone());
+            } else {
                 notes.push(format!(
                     "tool `{}`: HTTP binding to `{}` is not allowed on this server; it runs as a mock",
                     tool.name, binding.url
@@ -1982,7 +2005,26 @@ fn interpolate_value(value: &Value, args: &Value, state: &State) -> Value {
 #[cfg(feature = "http-tools")]
 async fn execute_http(binding: &HttpBinding, args: &Value, state: &State) -> Result<Value, String> {
     let url = interpolate(&binding.url, args, state);
-    let client = reqwest::Client::new();
+    let mut client = reqwest::Client::builder();
+    if let Some(reach) = binding.reach.clone() {
+        if !reach.allows_http(&url) {
+            return Err(format!("{url} is outside this server's HTTP allowlist"));
+        }
+        client = client.redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= 10 {
+                attempt.error("too many redirects")
+            } else if reach.allows_http(attempt.url().as_str()) {
+                attempt.follow()
+            } else {
+                let error = format!(
+                    "redirect to {} is outside this server's HTTP allowlist",
+                    attempt.url()
+                );
+                attempt.error(error)
+            }
+        }));
+    }
+    let client = client.build().map_err(|e| e.to_string())?;
     let method = reqwest::Method::from_bytes(binding.method.to_uppercase().as_bytes())
         .map_err(|_| format!("invalid HTTP method '{}'", binding.method))?;
     let mut request = client.request(method, &url);
@@ -2891,6 +2933,80 @@ mod tests {
         // A prefix without a path cannot be stretched to another host.
         let tricky = BindingAllowlist::default().allow_http_prefix("https://api.example.com");
         assert!(!tricky.allows_http("https://api.example.com.evil.net/x"));
+        assert!(!tricky.allows_http("https://api.example.com@evil.net/x"));
+        assert!(!tricky.allows_http("https://api.example.com:8443/x"));
+        assert!(!tricky.allows_http("http://api.example.com/x"));
+
+        // Dot segments are resolved before a path prefix is checked.
+        let subtree = BindingAllowlist::default().allow_http_prefix("https://api.example.com/v2/");
+        assert!(subtree.allows_http("https://API.example.com/v2/orders/{args.id}"));
+        assert!(!subtree.allows_http("https://api.example.com/v2/../admin"));
+        assert!(!subtree.allows_http("https://api.example.com/v2/%2e%2e/admin"));
+        assert!(!subtree.allows_http("https://api.example.com/v2/%2E%2E/admin"));
+    }
+
+    #[cfg(feature = "http-tools")]
+    #[tokio::test]
+    async fn a_sandboxed_binding_is_checked_again_when_it_runs() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // A local server that redirects /v2/hop to /admin and answers
+        // anything else with its path.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = vec![0u8; 4096];
+                let n = socket.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let response = if path == "/v2/hop" {
+                    "HTTP/1.1 302 Found\r\nlocation: /admin\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_string()
+                } else {
+                    let body = json!({ "path": path }).to_string();
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                };
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+
+        let spec = SessionSpec::from_value(json!({
+            "name": "posted",
+            "tools": [{ "name": "get", "http": { "url": format!("{origin}/v2/{{args.path}}") } }]
+        }))
+        .unwrap();
+        let allow = BindingAllowlist::default().allow_http_prefix(format!("{origin}/v2/"));
+        let (sandboxed, notes) = spec.sandboxed(&allow);
+        assert!(notes.is_empty(), "{notes:?}");
+        let state = State::new();
+        let dispatcher = sandboxed.build_dispatcher(&state);
+
+        let ok = dispatcher
+            .call_function("get", json!({ "path": "orders" }))
+            .await
+            .unwrap();
+        assert_eq!(ok["path"], "/v2/orders");
+        // An argument cannot climb out of the prefix...
+        let climbed = dispatcher
+            .call_function("get", json!({ "path": "../admin" }))
+            .await;
+        assert!(climbed.is_err(), "{climbed:?}");
+        // ...and neither can a redirect.
+        let redirected = dispatcher
+            .call_function("get", json!({ "path": "hop" }))
+            .await;
+        assert!(redirected.is_err(), "{redirected:?}");
+
+        // The same spec, not sandboxed, follows the redirect as written.
+        let trusted = spec.build_dispatcher(&state);
+        let followed = trusted
+            .call_function("get", json!({ "path": "hop" }))
+            .await
+            .unwrap();
+        assert_eq!(followed["path"], "/admin");
     }
 
     #[test]
