@@ -31,6 +31,8 @@ pub use gemini_adk_rs::tape::{
     FileTape, MemoryTape, Tape, TapeEntry, TapeMode, TapedLlm, taped_resolver,
 };
 
+pub use crate::live::scripted::{ScriptedRun, ScriptedServer};
+
 use crate::builder::AgentBuilder;
 
 /// Contract violation detected during static analysis.

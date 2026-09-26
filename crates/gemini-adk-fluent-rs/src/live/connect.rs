@@ -110,7 +110,35 @@ impl Live {
         self.build_and_connect().await
     }
 
-    async fn build_and_connect(mut self) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
+    /// Connect over `transport` instead of a WebSocket to Gemini, with
+    /// everything this builder configured: tools, phases, extractors,
+    /// watchers, governance and callbacks run for real against whatever the
+    /// transport answers.
+    ///
+    /// This is how to test a session offline. Script the server with
+    /// [`ScriptedServer`](crate::testing::ScriptedServer); no network or
+    /// credential is used.
+    pub async fn connect_with_transport<T: gemini_genai_rs::transport::Transport>(
+        self,
+        transport: T,
+    ) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
+        self.build_and_connect_via(move |builder| builder.connect_with_transport(transport))
+            .await
+    }
+
+    async fn build_and_connect(self) -> Result<LiveHandle, gemini_adk_rs::error::AgentError> {
+        self.build_and_connect_via(LiveSessionBuilder::connect)
+            .await
+    }
+
+    async fn build_and_connect_via<F, Fut>(
+        mut self,
+        connect: F,
+    ) -> Result<LiveHandle, gemini_adk_rs::error::AgentError>
+    where
+        F: FnOnce(LiveSessionBuilder) -> Fut,
+        Fut: std::future::Future<Output = Result<LiveHandle, gemini_adk_rs::error::AgentError>>,
+    {
         // Builder setters cannot fail; problems they found are reported here,
         // with a `T::confirm` tool that nothing can confirm (agent and MCP
         // tools resolved below are never gated, so this check is complete).
@@ -323,7 +351,7 @@ impl Live {
             });
         }
 
-        let handle = builder.connect().await?;
+        let handle = connect(builder).await?;
 
         // Input-audio hardening: materialize the configured stages (in
         // order) and hand them plus VAD tuning and authority to the handle.

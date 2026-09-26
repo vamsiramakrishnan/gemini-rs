@@ -46,6 +46,7 @@ mod introspect;
 /// will actually run rather than the one the caller wrote.
 pub(crate) use connect::merge_ambient as merge_ambient_for_check;
 mod phases;
+pub(crate) mod scripted;
 
 use std::collections::HashMap;
 use std::sync::Arc;
