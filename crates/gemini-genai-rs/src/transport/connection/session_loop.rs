@@ -11,6 +11,7 @@ use crate::session::{
     ResumeInfo, SessionCommand, SessionError, SessionEvent, SessionPhase, SessionState, SetupError,
     WebSocketError,
 };
+use crate::telemetry::metrics;
 use crate::transport::TransportConfig;
 use crate::transport::codec::Codec;
 use crate::transport::ws::Transport;
@@ -85,6 +86,9 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
 
         match connect_result {
             Ok(Ok(())) => {
+                if attempt > 0 {
+                    metrics::record_reconnection();
+                }
                 // Send setup message
                 let _ = state.transition_to(SessionPhase::SetupSent);
                 // After a GoAway or a dropped connection, resume the same
@@ -144,6 +148,7 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                     Ok(Ok(())) => {
                         attempt = 0; // Reset backoff on successful setup
                         // Run main session loop
+                        metrics::record_session_connected();
                         let reason = generic_run_session(
                             &config,
                             &mut transport,
@@ -153,6 +158,7 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                             &event_tx,
                         )
                         .await;
+                        metrics::record_session_disconnected();
 
                         match reason {
                             DisconnectReason::Graceful => {
@@ -341,6 +347,7 @@ async fn generic_run_session<T: Transport, C: Codec>(
             data = transport.recv() => {
                 match data {
                     Ok(Some(bytes)) => {
+                        metrics::record_ws_bytes_received(bytes.len() as u64);
                         if let Ok(msg) = codec.decode_message(&bytes) {
                             match handle_server_msg(msg, state, event_tx) {
                                 MessageAction::Continue => {}
@@ -383,6 +390,7 @@ async fn generic_run_session<T: Transport, C: Codec>(
                     Some(cmd) => {
                         match codec.encode_command(&cmd, config) {
                             Ok(bytes) if !bytes.is_empty() => {
+                                metrics::record_ws_bytes_sent(bytes.len() as u64);
                                 if let Err(e) = transport.send(bytes).await {
                                     return DisconnectReason::Error(SessionError::WebSocket(
                                         WebSocketError::ProtocolError(format!(

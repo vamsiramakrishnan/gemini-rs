@@ -70,27 +70,101 @@ pub struct TelemetryGuard {
     _private: (),
 }
 
-impl TelemetryConfig {
-    /// Initialize telemetry subsystems based on configuration.
-    ///
-    /// When `otel-otlp` is enabled and `otel_traces`/`otel_metrics` are set,
-    /// this configures OTLP exporters that send data to whatever endpoint is set
-    /// via the standard `OTEL_EXPORTER_OTLP_ENDPOINT` env var (defaults to
-    /// `http://localhost:4317` for gRPC).
-    ///
-    /// When `otel-gcp` is enabled, use `init_gcp()` to set up Google Cloud-native
-    /// exporters, or configure providers manually and call `init_with_tracer()`.
-    ///
-    /// The returned `TelemetryGuard` must be held alive for the duration of the
-    /// application. Dropping it triggers a flush and shutdown of all exporters.
-    pub fn init(&self) -> Result<TelemetryGuard, Box<dyn std::error::Error>> {
-        #[allow(unused_mut)]
-        let mut guard = TelemetryGuard::default();
+/// The exporters a [`TelemetryConfig`] asks for, built but not yet attached
+/// to a subscriber: for an application that builds its own subscriber (to
+/// add layers of its own) and attaches [`layer`](Self::layer) to it.
+#[derive(Default)]
+pub struct Exporters {
+    /// Keeps the providers alive; dropping it flushes and shuts them down.
+    pub guard: TelemetryGuard,
+    #[cfg(feature = "otel-base")]
+    tracer: Option<opentelemetry_sdk::trace::Tracer>,
+}
 
-        // --- OTel OTLP providers (must be created before tracing subscriber) ---
-        #[cfg(feature = "otel-otlp")]
-        let otel_tracer = if self.otel_traces {
-            use opentelemetry_otlp::WithExportConfig as _;
+impl Exporters {
+    /// A tracing layer that exports spans, when trace export is on.
+    #[cfg(feature = "otel-base")]
+    pub fn layer<S>(
+        &self,
+    ) -> Option<tracing_opentelemetry::OpenTelemetryLayer<S, opentelemetry_sdk::trace::Tracer>>
+    where
+        S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
+    {
+        self.tracer
+            .clone()
+            .map(|tracer| tracing_opentelemetry::layer().with_tracer(tracer))
+    }
+}
+
+impl TelemetryConfig {
+    /// A config from the standard environment variables:
+    ///
+    /// - `OTEL_EXPORTER_OTLP_ENDPOINT`: turns on OTLP trace and metric
+    ///   export to that collector (`otel-otlp`).
+    /// - `ADK_TELEMETRY=gcp`: turns on Cloud Trace and Cloud Monitoring
+    ///   export (`otel-gcp`, use [`build_gcp`](Self::build_gcp)), with
+    ///   `GOOGLE_CLOUD_PROJECT` as the project when set.
+    /// - `OTEL_SERVICE_NAME`: the service name (default `gemini-live`).
+    /// - `ADK_METRICS_ADDR`: serve Prometheus metrics at this address, e.g.
+    ///   `0.0.0.0:9464` (`metrics`).
+    /// - `RUST_LOG`: the log filter (default `info`).
+    pub fn from_env() -> Self {
+        let var = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
+        let endpoint = var("OTEL_EXPORTER_OTLP_ENDPOINT");
+        let gcp = var("ADK_TELEMETRY").is_some_and(|v| v.eq_ignore_ascii_case("gcp"));
+        let metrics_addr = var("ADK_METRICS_ADDR");
+        Self {
+            log_filter: var("RUST_LOG").unwrap_or_else(|| "info".to_string()),
+            metrics_enabled: metrics_addr.is_some(),
+            metrics_addr,
+            otel_traces: endpoint.is_some() || gcp,
+            otel_metrics: endpoint.is_some() || gcp,
+            otel_service_name: var("OTEL_SERVICE_NAME")
+                .unwrap_or_else(|| "gemini-live".to_string()),
+            otel_endpoint: endpoint,
+            otel_gcp_project: if gcp {
+                var("GOOGLE_CLOUD_PROJECT")
+            } else {
+                None
+            },
+            ..Self::default()
+        }
+    }
+
+    /// Whether this config asks for Cloud Trace and Cloud Monitoring rather
+    /// than OTLP (set by [`from_env`](Self::from_env) for `ADK_TELEMETRY=gcp`).
+    pub fn wants_gcp(&self) -> bool {
+        (self.otel_traces || self.otel_metrics) && self.otel_endpoint.is_none()
+    }
+
+    /// Serve the SDK's metrics (Live sessions, reconnections, bytes, tool
+    /// calls, tokens by modality, HTTP requests) in Prometheus format at
+    /// [`metrics_addr`](Self::metrics_addr). Does nothing when metrics are
+    /// off or no address is set.
+    #[cfg(feature = "metrics")]
+    pub fn install_metrics(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let Some(addr) = self
+            .metrics_addr
+            .as_deref()
+            .filter(|_| self.metrics_enabled)
+        else {
+            return Ok(());
+        };
+        let addr: std::net::SocketAddr = addr.parse()?;
+        metrics_exporter_prometheus::PrometheusBuilder::new()
+            .with_http_listener(addr)
+            .install()?;
+        Ok(())
+    }
+
+    /// Build the OTLP exporters this config asks for, without installing a
+    /// subscriber. The meter provider, when metrics are on, is installed
+    /// globally.
+    #[cfg(feature = "otel-otlp")]
+    pub fn build_otlp(&self) -> Result<Exporters, Box<dyn std::error::Error + Send + Sync>> {
+        use opentelemetry_otlp::WithExportConfig as _;
+        let mut guard = TelemetryGuard::default();
+        let tracer = if self.otel_traces {
             let mut builder = opentelemetry_otlp::SpanExporter::builder().with_tonic();
             if let Some(endpoint) = &self.otel_endpoint {
                 builder = builder.with_endpoint(endpoint.clone());
@@ -109,10 +183,7 @@ impl TelemetryConfig {
         } else {
             None
         };
-
-        #[cfg(feature = "otel-otlp")]
         if self.otel_metrics {
-            use opentelemetry_otlp::WithExportConfig as _;
             let mut builder = opentelemetry_otlp::MetricExporter::builder().with_tonic();
             if let Some(endpoint) = &self.otel_endpoint {
                 builder = builder.with_endpoint(endpoint.clone());
@@ -125,20 +196,40 @@ impl TelemetryConfig {
             opentelemetry::global::set_meter_provider(provider.clone());
             guard._meter_provider = Some(provider);
         }
+        Ok(Exporters { guard, tracer })
+    }
 
-        // --- Tracing subscriber ---
+    /// Initialize telemetry subsystems based on configuration: the OTLP
+    /// exporters ([`build_otlp`](Self::build_otlp), feature `otel-otlp`),
+    /// the Prometheus endpoint ([`install_metrics`](Self::install_metrics),
+    /// feature `metrics`) and a logging subscriber carrying the trace
+    /// exporter (feature `tracing-subscriber`).
+    ///
+    /// With `otel-gcp`, use [`init_gcp`](Self::init_gcp) instead. To add
+    /// layers of your own, use `build_otlp` and [`Exporters::layer`].
+    ///
+    /// The returned `TelemetryGuard` must be held alive for the duration of the
+    /// application. Dropping it triggers a flush and shutdown of all exporters.
+    pub fn init(&self) -> Result<TelemetryGuard, Box<dyn std::error::Error>> {
+        #[cfg(feature = "metrics")]
+        self.install_metrics()
+            .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+
+        #[cfg(feature = "otel-otlp")]
+        let Exporters { guard, tracer } = self
+            .build_otlp()
+            .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+        #[cfg(not(feature = "otel-otlp"))]
+        let guard = TelemetryGuard::default();
+
         #[cfg(feature = "tracing-subscriber")]
         if self.logging_enabled {
             #[cfg(feature = "otel-otlp")]
-            {
-                self.init_tracing_subscriber_with_tracer(otel_tracer)
-                    .map_err(|e| -> Box<dyn std::error::Error> { e })?;
-            }
+            self.init_tracing_subscriber_with_tracer(tracer)
+                .map_err(|e| -> Box<dyn std::error::Error> { e })?;
             #[cfg(not(feature = "otel-otlp"))]
-            {
-                self.init_tracing_subscriber()
-                    .map_err(|e| -> Box<dyn std::error::Error> { e })?;
-            }
+            self.init_tracing_subscriber()
+                .map_err(|e| -> Box<dyn std::error::Error> { e })?;
         }
 
         Ok(guard)
@@ -158,6 +249,21 @@ impl TelemetryConfig {
     pub async fn init_gcp(
         &self,
     ) -> Result<TelemetryGuard, Box<dyn std::error::Error + Send + Sync>> {
+        #[cfg(feature = "metrics")]
+        self.install_metrics()?;
+        let Exporters { guard, tracer } = self.build_gcp().await?;
+        #[cfg(feature = "tracing-subscriber")]
+        if self.logging_enabled {
+            self.init_tracing_subscriber_with_tracer(tracer)?;
+        }
+        Ok(guard)
+    }
+
+    /// Build the Cloud Trace and Cloud Monitoring exporters this config asks
+    /// for, without installing a subscriber. The meter provider, when
+    /// metrics are on, is installed globally.
+    #[cfg(feature = "otel-gcp")]
+    pub async fn build_gcp(&self) -> Result<Exporters, Box<dyn std::error::Error + Send + Sync>> {
         use opentelemetry_gcloud_trace::GcpCloudTraceExporterBuilder;
 
         let mut guard = TelemetryGuard::default();
@@ -210,13 +316,10 @@ impl TelemetryConfig {
             guard._meter_provider = Some(meter_provider);
         }
 
-        // --- Tracing subscriber ---
-        #[cfg(feature = "tracing-subscriber")]
-        if self.logging_enabled {
-            self.init_tracing_subscriber_with_tracer(otel_tracer)?;
-        }
-
-        Ok(guard)
+        Ok(Exporters {
+            guard,
+            tracer: otel_tracer,
+        })
     }
 
     /// Set up the tracing subscriber with no OTel tracer layer (plain logging mode).

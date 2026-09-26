@@ -34,7 +34,7 @@ async fn main() {
     dotenvy::dotenv().ok();
 
     // Initialize telemetry with WebSocketSpanLayer wired in
-    let (_telemetry_guard, span_tx) = init_telemetry();
+    let (_telemetry_guard, span_tx) = init_telemetry().await;
 
     let mut registry = AppRegistry::new();
     apps::register_all(&mut registry);
@@ -76,7 +76,15 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-fn init_telemetry() -> (
+/// Logging, the browser's span stream, and, when the environment asks for
+/// it, trace and metric export (`TelemetryConfig::from_env`):
+/// `OTEL_EXPORTER_OTLP_ENDPOINT` with the `otel-otlp` feature, or
+/// `ADK_TELEMETRY=gcp` with `otel-gcp`.
+#[cfg_attr(
+    not(feature = "otel-gcp"),
+    allow(clippy::unused_async, reason = "Cloud Trace setup is async")
+)]
+async fn init_telemetry() -> (
     gemini_genai_rs::telemetry::TelemetryGuard,
     broadcast::Sender<ServerMessage>,
 ) {
@@ -85,19 +93,48 @@ fn init_telemetry() -> (
 
     // Create the WebSocketSpanLayer (bridges tracing spans → browser)
     let (ws_layer, span_tx) = span_layer::WebSocketSpanLayer::new(256);
-
-    let log_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
-    let filter = EnvFilter::try_new(&log_filter).unwrap_or_else(|_| EnvFilter::new("info"));
-    let fmt_layer = tracing_subscriber::fmt::layer();
-
-    // Build subscriber: fmt + WebSocketSpanLayer
-    let subscriber = tracing_subscriber::registry()
+    let config = gemini_genai_rs::telemetry::TelemetryConfig::from_env();
+    let filter = EnvFilter::try_new(&config.log_filter).unwrap_or_else(|_| EnvFilter::new("info"));
+    let registry = tracing_subscriber::registry()
         .with(filter)
-        .with(fmt_layer)
+        .with(tracing_subscriber::fmt::layer())
         .with(ws_layer);
 
-    tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
+    #[cfg(any(feature = "otel-otlp", feature = "otel-gcp"))]
+    {
+        let exporters = if config.wants_gcp() {
+            #[cfg(feature = "otel-gcp")]
+            {
+                config.build_gcp().await
+            }
+            #[cfg(not(feature = "otel-gcp"))]
+            {
+                Err("ADK_TELEMETRY=gcp needs the otel-gcp feature".into())
+            }
+        } else if config.otel_traces || config.otel_metrics {
+            #[cfg(feature = "otel-otlp")]
+            {
+                config.build_otlp()
+            }
+            #[cfg(not(feature = "otel-otlp"))]
+            {
+                Err("OTEL_EXPORTER_OTLP_ENDPOINT needs the otel-otlp feature".into())
+            }
+        } else {
+            Ok(gemini_genai_rs::telemetry::Exporters::default())
+        };
+        match exporters {
+            Ok(exporters) => {
+                let subscriber = registry.with(exporters.layer());
+                tracing::subscriber::set_global_default(subscriber)
+                    .expect("Failed to set tracing subscriber");
+                return (exporters.guard, span_tx);
+            }
+            Err(e) => eprintln!("telemetry export disabled: {e}"),
+        }
+    }
 
+    tracing::subscriber::set_global_default(registry).expect("Failed to set tracing subscriber");
     (Default::default(), span_tx)
 }
 

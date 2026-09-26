@@ -250,6 +250,9 @@ pub struct SessionTelemetry {
     cached_content_token_count: AtomicU64,
     /// Latest thoughts token count (thinking models).
     thoughts_token_count: AtomicU64,
+    /// Session totals by modality (`TEXT`, `AUDIO`, ...): prompt and
+    /// response tokens, summed over turns.
+    tokens_by_modality: parking_lot::Mutex<std::collections::BTreeMap<String, [u64; 2]>>,
 }
 
 impl SessionTelemetry {
@@ -274,6 +277,7 @@ impl SessionTelemetry {
             response_token_count: AtomicU64::new(0),
             cached_content_token_count: AtomicU64::new(0),
             thoughts_token_count: AtomicU64::new(0),
+            tokens_by_modality: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
         }
     }
 
@@ -304,6 +308,7 @@ impl SessionTelemetry {
             if now_ns > vad_end && vad_end > 0 {
                 let latency = now_ns - vad_end;
                 self.latency.record(latency);
+                gemini_genai_rs::telemetry::metrics::record_response_latency(latency as f64 / 1e6);
                 return Some(Duration::from_nanos(latency));
             }
         }
@@ -338,6 +343,7 @@ impl SessionTelemetry {
             if now_ns > send_ns && send_ns > 0 {
                 let latency = now_ns - send_ns;
                 self.latency.record(latency);
+                gemini_genai_rs::telemetry::metrics::record_response_latency(latency as f64 / 1e6);
                 return Some(Duration::from_nanos(latency));
             }
         }
@@ -396,6 +402,29 @@ impl SessionTelemetry {
         }
         if let Some(v) = thoughts {
             self.thoughts_token_count.store(v as u64, Relaxed);
+        }
+    }
+
+    /// Add one turn's usage, by modality, to the session totals, and to the
+    /// `gemini_genai_rs_tokens_total` metric. Pass the last usage report of
+    /// the turn: each report covers the turn so far.
+    pub fn record_turn_usage(&self, usage: &gemini_genai_rs::prelude::UsageMetadata) {
+        let mut totals = self.tokens_by_modality.lock();
+        for (index, direction, details) in [
+            (0, "prompt", &usage.prompt_tokens_details),
+            (1, "response", &usage.response_tokens_details),
+        ] {
+            for detail in details {
+                let (Some(modality), Some(count)) = (&detail.modality, detail.token_count) else {
+                    continue;
+                };
+                totals.entry(modality.clone()).or_default()[index] += u64::from(count);
+                gemini_genai_rs::telemetry::metrics::record_tokens(
+                    direction,
+                    modality,
+                    count.into(),
+                );
+            }
         }
     }
 
@@ -473,6 +502,14 @@ impl SessionTelemetry {
             "response_token_count": response_tokens,
             "cached_content_token_count": cached_tokens,
             "thoughts_token_count": thoughts_tokens,
+            "tokens_by_modality": self
+                .tokens_by_modality
+                .lock()
+                .iter()
+                .map(|(modality, [prompt, response])| {
+                    (modality.clone(), json!({ "prompt": prompt, "response": response }))
+                })
+                .collect::<serde_json::Map<_, _>>(),
         })
     }
 
@@ -491,6 +528,31 @@ impl Default for SessionTelemetry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn turn_usage_is_summed_by_modality() {
+        let t = SessionTelemetry::new();
+        let usage: gemini_genai_rs::prelude::UsageMetadata = serde_json::from_value(json!({
+            "promptTokenCount": 30,
+            "promptTokensDetails": [
+                { "modality": "AUDIO", "tokenCount": 20 },
+                { "modality": "TEXT", "tokenCount": 10 }
+            ],
+            "responseTokensDetails": [{ "modality": "AUDIO", "tokenCount": 40 }]
+        }))
+        .unwrap();
+        t.record_turn_usage(&usage);
+        t.record_turn_usage(&usage);
+        let snap = t.snapshot();
+        assert_eq!(
+            snap["tokens_by_modality"]["AUDIO"],
+            json!({ "prompt": 40, "response": 80 })
+        );
+        assert_eq!(
+            snap["tokens_by_modality"]["TEXT"],
+            json!({ "prompt": 20, "response": 0 })
+        );
+    }
 
     #[test]
     fn new_snapshot_is_zeroed() {

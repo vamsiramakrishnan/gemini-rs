@@ -20,6 +20,7 @@
 - [Voice I/O: pump() and talk()](./voice.md)
 - [Telephony: Answering Phone Calls](./user-guide/telephony.md)
 - [Hardening a Voice Deployment](./user-guide/hardening.md)
+- [Observability: Traces, Metrics, Tokens](./user-guide/observability.md)
 - [Phase System](./user-guide/phases.md)
 - [Phase Transitions Deep Dive](./user-guide/phase-transitions-deep-dive.md)
 - [Steering Modes](./user-guide/steering-modes.md)

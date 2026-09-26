@@ -47,6 +47,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Telemetry export works end to end.** Before this, no binary installed
+  an exporter, and 11 of the 12 Live metrics were never recorded.
+  - A Live session is now one `live_session` span with
+    `gen_ai.conversation.id`, and its turns are child spans.
+  - Sessions, reconnections, wire bytes, response latency and tool calls
+    are recorded, along with tokens by direction and modality
+    (`gemini_genai_rs_tokens_total`). `SessionTelemetry::snapshot()` reports
+    `tokens_by_modality`.
+  - `TelemetryConfig::from_env()` reads `OTEL_EXPORTER_OTLP_ENDPOINT`,
+    `ADK_TELEMETRY=gcp`, `OTEL_SERVICE_NAME` and `ADK_METRICS_ADDR`.
+  - `build_otlp()`/`build_gcp()` return `Exporters`, whose `layer()` joins a
+    subscriber the application builds itself, and `install_metrics()`
+    serves Prometheus metrics.
+  - The web UI exports when built with `otel-otlp` or `otel-gcp`.
+  - See [Observability](docs/user-guide/observability.md).
 - **The Studio, rebuilt.** A TypeScript, React and Vite app (`apps/studio`,
   built into the web app, served at `/studio` and `/flows`). It edits
   conversations as well as flows, on a graph with drag-to-connect. Its

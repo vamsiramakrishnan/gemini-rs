@@ -61,6 +61,7 @@ tokio-util = { version = "0.7", optional = true }
 thiserror = { version = "2", optional = true }
 
 [dev-dependencies]
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 tokio = { version = "1", features = ["full"] }
 tokio-test = "0.4"
 # `debt_collection_eval` synthesises the caller's side with Gemini TTS and
