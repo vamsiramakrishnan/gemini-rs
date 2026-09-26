@@ -355,6 +355,19 @@ mod tests {
         )
     }
 
+    #[test]
+    fn the_studio_tests_run_against_the_current_schema() {
+        let snapshot: serde_json::Value = serde_json::from_str(include_str!(
+            "../../studio/src/test/session-spec.schema.json"
+        ))
+        .unwrap();
+        assert!(
+            snapshot == SessionSpec::json_schema(),
+            "apps/studio/src/test/session-spec.schema.json is stale: refresh it with \
+             `cargo run -p gemini-adk-cli-rs -- spec schema > apps/studio/src/test/session-spec.schema.json`"
+        );
+    }
+
     #[tokio::test]
     async fn the_studio_saves_lists_labels_and_loads_bundles() {
         let dir = std::env::temp_dir().join(format!("studio-bundles-{}", std::process::id()));
