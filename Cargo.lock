@@ -3246,9 +3246,9 @@ checksum = "e62e29dfe041afb8ed2a6c9737ab57db4907285d999ef8ad3a59092a36bdc846"
 
 [[package]]
 name = "opentelemetry_gcloud_monitoring_exporter"
-version = "0.22.1"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a40b99f9c93cc96a4fc8f9836b8aaef60c48f51f42aee73a4ab740e446e89d5"
+checksum = "798056c17b474acd47ee4ce9ceb48f42c0078a9aab05abf17b9025ebbdbb732b"
 dependencies = [
  "google-cloud-api",
  "google-cloud-gax",
@@ -3258,8 +3258,8 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_resourcedetector_gcp_rust",
  "opentelemetry_sdk",
- "rand 0.9.5",
- "reqwest 0.12.28",
+ "rand 0.10.2",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -3270,15 +3270,15 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry_resourcedetector_gcp_rust"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47982d404be6a2a75f19d555d68b83ccb0bc911400cf03b786d0287534f3ea1d"
+checksum = "b0dc0204425252f3c543ae0ddb732a2124a7736e991973b5cea7e3701c94af8d"
 dependencies = [
  "once_cell",
  "opentelemetry",
  "opentelemetry_sdk",
  "regex",
- "reqwest 0.12.28",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "tracing",
@@ -3864,11 +3864,9 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "encoding_rs",
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2",
  "http",
  "http-body",
  "http-body-util",
@@ -3878,7 +3876,6 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
- "mime",
  "mime_guess",
  "native-tls",
  "percent-encoding",
@@ -3914,7 +3911,9 @@ checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "encoding_rs",
  "futures-core",
+ "h2",
  "http",
  "http-body",
  "http-body-util",
@@ -3923,6 +3922,7 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
+ "mime",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
