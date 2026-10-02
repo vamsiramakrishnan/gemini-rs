@@ -25,7 +25,6 @@ use crate::demo_meta;
 /// Runs session specs authored as JSON in the Flow Studio editor.
 pub struct FlowStudio;
 
-/// Snapshot the governed flow's status into a `FlowStatus` message.
 /// What a spec posted by the browser may reach, as the operator configured
 /// it. Nothing by default: MCP entries are dropped and HTTP bindings run as
 /// mocks.
@@ -50,19 +49,12 @@ fn studio_allowlist() -> BindingAllowlist {
 }
 
 fn send_flow_status(tx: &WsSender, handle: &LiveHandle) {
-    let Some(explanation) = handle.explain() else {
+    if let Some(status) = handle.task_snapshot() {
+        let _ = tx.send(ServerMessage::TasksStatus { status });
+    }
+    let Some(status) = handle.flow_snapshot() else {
         return;
     };
-    let state = handle.state();
-    let done: Vec<String> = state.get("flow:done").unwrap_or_default();
-    let mut status = serde_json::to_value(&explanation).unwrap_or_else(|_| serde_json::json!({}));
-    if let Some(obj) = status.as_object_mut() {
-        obj.insert("done".into(), serde_json::json!(done));
-        obj.insert(
-            "complete".into(),
-            serde_json::json!(explanation.missing_requirements.is_empty()),
-        );
-    }
     let _ = tx.send(ServerMessage::FlowStatus { status });
 }
 
@@ -115,12 +107,13 @@ impl DemoApp for FlowStudio {
                     }
 
                     let resources = SpecResources {
-                        extraction_llm: (!spec.extract.is_empty())
+                        extraction_llm: spec
+                            .requires_extraction()
                             .then(super::build_extraction_llm),
                         // An in-process engine per Studio session: `memory`
                         // specs run for real (ambient tools, slots, remember
                         // effects), scoped to the connection.
-                        memory: spec.memory.as_ref().map(|_| {
+                        memory: spec.requires_memory().then(|| {
                             let engine = gemini_memory_rs::prelude::MemoryEngine::in_memory(
                                 gemini_memory_rs::prelude::UserId::new("studio-user"),
                             );
@@ -135,8 +128,14 @@ impl DemoApp for FlowStudio {
                         ..SpecResources::default()
                     };
                     let state = State::new();
-                    spec.apply(live.model(super::live_model()), &state, &resources)
-                        .map_err(AppError::Session)
+                    // The editor presents text even when the configured model
+                    // responds with audio, so request the native transcript too.
+                    spec.apply(
+                        live.model(super::live_model()).transcription(),
+                        &state,
+                        &resources,
+                    )
+                    .map_err(AppError::Session)
                 },
                 move |handle| {
                     // Push an initial snapshot, then one after every turn
@@ -148,12 +147,16 @@ impl DemoApp for FlowStudio {
                     tokio::spawn(async move {
                         loop {
                             match events.recv().await {
+                                Ok(LiveEvent::TasksChanged(status)) => {
+                                    let _ = status_tx.send(ServerMessage::TasksStatus { status });
+                                }
                                 Ok(LiveEvent::TurnComplete)
                                 | Ok(LiveEvent::ToolExecution { .. })
                                 | Ok(LiveEvent::Extraction { .. }) => {
                                     send_flow_status(&status_tx, &handle);
                                 }
-                                Err(broadcast::error::RecvError::Closed) => break,
+                                Ok(LiveEvent::Disconnected { .. })
+                                | Err(broadcast::error::RecvError::Closed) => break,
                                 _ => {}
                             }
                         }
@@ -167,69 +170,115 @@ impl DemoApp for FlowStudio {
 #[cfg(test)]
 mod tests {
     use gemini_adk_fluent_rs::spec::SessionSpec;
+    use gemini_adk_fluent_rs::tasks::{OperationStatus, TaskStatus};
+    use std::collections::{BTreeMap, BTreeSet};
 
-    fn assert_example_valid(name: &str, json: &str) {
-        let value: serde_json::Value = serde_json::from_str(json).expect("well-formed JSON");
-        let spec = SessionSpec::from_value(value).expect("parses as SessionSpec");
-        let validation = spec.validate();
-        assert!(
-            validation.valid,
-            "example '{name}' failed to compile: {:?}",
-            validation.errors
-        );
-        for report in spec.run_tests() {
-            assert!(
-                report.passed,
-                "example '{name}' test '{}' failed: {:?}",
-                report.name, report.failures
-            );
-        }
-    }
-
-    #[test]
-    fn bundled_examples_compile_and_pass_their_tests() {
-        // Every gallery entry: listed in the manifest, compiles through the
-        // real flow compiler, and passes its own embedded tests.
+    #[tokio::test]
+    async fn every_gallery_workflow_and_task_journey_passes() {
+        let directory =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("static/examples/flows");
         let manifest: serde_json::Value =
-            serde_json::from_str(include_str!("../../static/examples/flows/index.json"))
-                .expect("manifest parses");
-        let entries = manifest["examples"].as_array().expect("examples array");
-        let sources: [(&str, &str); 6] = [
-            (
-                "collections.json",
-                include_str!("../../static/examples/flows/collections.json"),
-            ),
-            (
-                "clinic-intake.json",
-                include_str!("../../static/examples/flows/clinic-intake.json"),
-            ),
-            (
-                "telco-support.json",
-                include_str!("../../static/examples/flows/telco-support.json"),
-            ),
-            (
-                "call-screening.json",
-                include_str!("../../static/examples/flows/call-screening.json"),
-            ),
-            (
-                "returns-desk.json",
-                include_str!("../../static/examples/flows/returns-desk.json"),
-            ),
-            (
-                "restaurant.json",
-                include_str!("../../static/examples/flows/restaurant.json"),
-            ),
-        ];
-        assert_eq!(entries.len(), sources.len(), "manifest and bundle drifted");
-        for (file, json) in sources {
+            serde_json::from_str(&std::fs::read_to_string(directory.join("index.json")).unwrap())
+                .unwrap();
+        let entries = manifest["examples"].as_array().unwrap();
+        let mut files = BTreeSet::new();
+        let mut references = 0;
+        let mut reference_tests = 0;
+        for entry in entries {
+            let file = entry["file"].as_str().unwrap();
             assert!(
-                entries.iter().any(|e| e["file"] == file),
-                "{file} missing from index.json"
+                files.insert(file.to_owned()),
+                "duplicate gallery entry {file}"
             );
-            assert_example_valid(file, json);
-            // Every gallery spec carries its own conformance tests.
-            let spec = SessionSpec::from_value(serde_json::from_str(json).unwrap()).unwrap();
-            assert!(!spec.tests.is_empty(), "{file} has no embedded tests");
+            let source = std::fs::read_to_string(directory.join(file)).unwrap();
+            let spec = SessionSpec::from_value(serde_json::from_str(&source).unwrap()).unwrap();
+            let validation = spec.validate();
+            assert!(validation.valid, "{file}: {:?}", validation.errors);
+            let reports = spec.run_tests();
+            assert!(
+                !reports.is_empty() || !spec.task_scenarios.is_empty(),
+                "{file} has no tests"
+            );
+            for report in &reports {
+                assert!(
+                    report.passed,
+                    "{file}/{}: {:?}",
+                    report.name, report.failures
+                );
+            }
+            for report in spec.run_scenarios().await {
+                assert!(report.passed, "{file}/{}: {:?}", report.name, report.error);
+            }
+            let mut completed = BTreeSet::new();
+            let mut exercised = BTreeSet::new();
+            for scenario in &spec.task_scenarios {
+                let (trace, snapshot) = spec
+                    .trace_tasks(&scenario.steps)
+                    .await
+                    .unwrap_or_else(|errors| panic!("{file}/{}: {errors:?}", scenario.name));
+                let failures: Vec<_> = trace.iter().flat_map(|event| &event.failures).collect();
+                assert!(
+                    failures.is_empty(),
+                    "{file}/{}: {failures:?}",
+                    scenario.name
+                );
+                let owners: BTreeMap<_, _> = snapshot
+                    .tasks
+                    .iter()
+                    .map(|task| (&task.id, &task.skill.name))
+                    .collect();
+                for task in &snapshot.tasks {
+                    if task.status == TaskStatus::Completed {
+                        completed.insert(task.skill.name.clone());
+                    }
+                }
+                for operation in &snapshot.operations {
+                    if operation.status == OperationStatus::Succeeded {
+                        exercised.insert((
+                            owners[&operation.owner.task].clone(),
+                            operation.tool.clone(),
+                        ));
+                    }
+                }
+            }
+            if file.starts_with("reference/") {
+                references += 1;
+                reference_tests += reports.len();
+                assert!(
+                    spec.skills.is_empty(),
+                    "original reference unexpectedly migrated: {file}"
+                );
+            } else {
+                assert!(
+                    spec.skills.len() >= 4,
+                    "{file} needs independent capabilities"
+                );
+                assert!(
+                    validation.warnings.is_empty(),
+                    "{file}: {:?}",
+                    validation.warnings
+                );
+                for skill in &spec.skills {
+                    assert!(
+                        completed.contains(&skill.name),
+                        "{file}/{} never completes in a task scenario",
+                        skill.name
+                    );
+                    for tool in &skill.tools {
+                        assert!(
+                            exercised.contains(&(skill.name.clone(), tool.tool.name.clone())),
+                            "{file}/{} tool {} has no successful task scenario",
+                            skill.name,
+                            tool.tool.name
+                        );
+                    }
+                }
+            }
         }
+        assert_eq!(references, 6, "all original workflows stay discoverable");
+        assert_eq!(
+            reference_tests, 20,
+            "retain the original workflow test suite"
+        );
     }
 }

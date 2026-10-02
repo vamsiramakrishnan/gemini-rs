@@ -1822,7 +1822,9 @@ mod tests {
 
     #[test]
     fn thinking_config_serialization() {
-        let config = SessionConfig::new("key").thinking(1024);
+        let config = SessionConfig::new("key")
+            .model(ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST)
+            .thinking(1024);
         let json = config.to_setup_json();
         assert!(json.contains("\"thinkingConfig\""));
         assert!(json.contains("\"thinkingBudget\""));
@@ -1831,7 +1833,9 @@ mod tests {
 
     #[test]
     fn affective_dialog_serialization() {
-        let config = SessionConfig::new("key").affective_dialog(true);
+        let config = SessionConfig::new("key")
+            .model(ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST)
+            .affective_dialog(true);
         let json = config.to_setup_json();
         assert!(json.contains("\"enableAffectiveDialog\""));
         assert!(json.contains("true"));
@@ -1856,6 +1860,7 @@ mod tests {
     #[test]
     fn combined_new_generation_fields() {
         let config = SessionConfig::new("key")
+            .model(ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST)
             .thinking(2048)
             .affective_dialog(true)
             .seed(123)
@@ -1930,6 +1935,7 @@ mod tests {
     #[test]
     fn thinking_config_with_include_thoughts() {
         let config = SessionConfig::new("key")
+            .model(ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST)
             .thinking(2048)
             .include_thoughts(true);
         let json = config.to_setup_json();
@@ -1946,25 +1952,26 @@ mod tests {
     }
 
     #[test]
-    fn vertex_ai_does_not_support_async_tools() {
-        let config = SessionConfig::from_vertex("proj", "us-central1", "token");
+    fn vertex_25_does_not_support_async_tools() {
+        let config = SessionConfig::from_vertex("proj", "us-central1", "token")
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
         assert!(!config.supports_async_tools());
     }
 
     #[test]
-    fn vertex_ai_strips_behavior_from_setup() {
+    fn vertex_25_strips_behavior_from_setup() {
         use crate::protocol::types::{FunctionCallingBehavior, FunctionDeclaration, Tool};
-        let config = SessionConfig::from_vertex("proj", "us-central1", "token").add_tool(
-            Tool::functions(vec![FunctionDeclaration {
+        let config = SessionConfig::from_vertex("proj", "us-central1", "token")
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
+            .add_tool(Tool::functions(vec![FunctionDeclaration {
                 name: "test".into(),
                 description: "test".into(),
                 parameters: None,
                 behavior: Some(FunctionCallingBehavior::NonBlocking),
-            }]),
-        );
+            }]));
         let setup = config.to_setup_message();
         let decl = &setup.setup.tools[0].function_declarations.as_ref().unwrap()[0];
-        assert!(decl.behavior.is_none(), "Vertex AI should strip behavior");
+        assert!(decl.behavior.is_none(), "Vertex 2.5 should strip behavior");
     }
 
     #[test]

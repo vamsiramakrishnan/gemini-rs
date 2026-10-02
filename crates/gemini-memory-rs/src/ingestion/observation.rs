@@ -299,107 +299,136 @@ impl MemoryObservationExtractor for RuleBasedObservationExtractor {
             return Ok(Vec::new());
         }
 
-        let normalized = normalize_utterance(&context.transcript);
         let evidence = TranscriptEvidence::new(&context.transcript);
-        let mut observations = Vec::new();
-
-        if let Some((phrase, intent)) = COMMANDS
-            .iter()
-            .find(|(phrase, _)| normalized.contains(phrase))
-        {
-            let raw_remainder = normalized
-                .split_once(phrase)
-                .map(|(_, rest)| rest.trim().to_string())
-                .unwrap_or_default();
-            // "remember that I am pescatarian now" carries the fact "the user
-            // is pescatarian" — stripping the self-reference is what lets it
-            // fingerprint against the same fact stated plainly.
-            let remainder = strip_self_reference(&raw_remainder);
-            observations.push(build(
-                &context,
-                &evidence,
-                command_kind(*intent),
-                CanonicalPredicate::new(command_predicate(*intent, &remainder)),
-                MemoryValue::Text(remainder.clone()),
-                command_statement(*intent, &remainder),
-                Explicitness::ExplicitCommand,
-                1.0,
-                ProposedPersistence::Durable,
-                TemporalScope::Persistent,
-                SensitivityClass::Normal,
-                Some(*intent),
-            ));
-            return Ok(observations);
-        }
-
-        // Every matching clause, not just the first. "I'm pescatarian and I
-        // prefer quiet places" is one utterance carrying two facts, and taking
-        // only the leading clause silently drops the other.
-        for (opener, kind) in SELF_STATEMENTS
-            .iter()
-            .filter(|(opener, _)| starts_clause(&normalized, opener))
-        {
-            let value = clause_after(&normalized, opener);
-            if value.is_empty() {
-                continue;
-            }
-
-            let episodic = EPISODIC_MARKERS.iter().any(|m| normalized.contains(m));
-            let (kind, scope, persistence) = if episodic {
-                (
-                    MemoryKind::Episodic,
-                    TemporalScope::Momentary,
-                    ProposedPersistence::Episodic,
-                )
-            } else {
-                (
-                    *kind,
-                    TemporalScope::Persistent,
-                    ProposedPersistence::Durable,
-                )
-            };
-
-            let sensitivity = if SENSITIVE_MARKERS.iter().any(|m| normalized.contains(m)) {
-                SensitivityClass::Sensitive
-            } else {
-                SensitivityClass::Normal
-            };
-
-            // Openers overlap: "I am allergic to nuts" matches both
-            // `i am allergic to` (value "nuts") and `i am` (value "allergic to
-            // nuts"). They describe the same clause, so only the more specific
-            // one is kept — otherwise a single fact is counted twice.
-            if observations.iter().any(|o: &MemoryObservation| {
-                let existing = o.value.display();
-                existing.contains(&value) || value.contains(&existing)
-            }) {
-                continue;
-            }
-            let predicate = CanonicalPredicate::new(predicate_for(opener, &value));
-            if observations
-                .iter()
-                .any(|o: &MemoryObservation| o.predicate == predicate)
-            {
-                continue;
-            }
-            observations.push(build(
-                &context,
-                &evidence,
-                kind,
-                predicate,
-                MemoryValue::Text(value.clone()),
-                statement_for(opener, &value),
-                Explicitness::ExplicitStatement,
-                0.9,
-                persistence,
-                scope,
-                sensitivity,
-                None,
-            ));
-        }
-
-        Ok(observations)
+        Ok(utterance_sentences(&context.transcript)
+            .into_iter()
+            .flat_map(|sentence| extract_sentence(&context, &evidence, sentence))
+            .collect())
     }
+}
+
+// Preserve sentence boundaries before normalizing punctuation out of values.
+// A period inside a decimal or word is not a sentence boundary.
+fn utterance_sentences(raw: &str) -> Vec<&str> {
+    let mut sentences = Vec::new();
+    let mut start = 0;
+    let mut chars = raw.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        let boundary = matches!(ch, '!' | '?' | ';' | '\n')
+            || (ch == '.' && chars.peek().is_none_or(|(_, next)| next.is_whitespace()));
+        if boundary {
+            sentences.push(&raw[start..index]);
+            start = index + ch.len_utf8();
+        }
+    }
+    sentences.push(&raw[start..]);
+    sentences
+}
+
+fn extract_sentence(
+    context: &ObservationExtractionContext,
+    evidence: &TranscriptEvidence,
+    sentence: &str,
+) -> Vec<MemoryObservation> {
+    let normalized = normalize_utterance(sentence);
+    let mut observations = Vec::new();
+
+    if let Some((phrase, intent)) = COMMANDS
+        .iter()
+        .find(|(phrase, _)| normalized.contains(phrase))
+    {
+        let raw_remainder = normalized
+            .split_once(phrase)
+            .map(|(_, rest)| rest.trim().to_string())
+            .unwrap_or_default();
+        // "remember that I am pescatarian now" carries the fact "the user
+        // is pescatarian" — stripping the self-reference is what lets it
+        // fingerprint against the same fact stated plainly.
+        let remainder = strip_self_reference(&raw_remainder);
+        observations.push(build(
+            context,
+            evidence,
+            command_kind(*intent),
+            CanonicalPredicate::new(command_predicate(*intent, &remainder)),
+            MemoryValue::Text(remainder.clone()),
+            command_statement(*intent, &remainder),
+            Explicitness::ExplicitCommand,
+            1.0,
+            ProposedPersistence::Durable,
+            TemporalScope::Persistent,
+            SensitivityClass::Normal,
+            Some(*intent),
+        ));
+        return observations;
+    }
+
+    // Every matching clause, not just the first. "I'm pescatarian and I
+    // prefer quiet places" is one utterance carrying two facts, and taking
+    // only the leading clause silently drops the other.
+    for (opener, kind) in SELF_STATEMENTS
+        .iter()
+        .filter(|(opener, _)| starts_clause(&normalized, opener))
+    {
+        let value = clause_after(&normalized, opener);
+        if value.is_empty() {
+            continue;
+        }
+
+        let episodic = EPISODIC_MARKERS.iter().any(|m| normalized.contains(m));
+        let (kind, scope, persistence) = if episodic {
+            (
+                MemoryKind::Episodic,
+                TemporalScope::Momentary,
+                ProposedPersistence::Episodic,
+            )
+        } else {
+            (
+                *kind,
+                TemporalScope::Persistent,
+                ProposedPersistence::Durable,
+            )
+        };
+
+        let sensitivity = if SENSITIVE_MARKERS.iter().any(|m| normalized.contains(m)) {
+            SensitivityClass::Sensitive
+        } else {
+            SensitivityClass::Normal
+        };
+
+        // Openers overlap: "I am allergic to nuts" matches both
+        // `i am allergic to` (value "nuts") and `i am` (value "allergic to
+        // nuts"). They describe the same clause, so only the more specific
+        // one is kept — otherwise a single fact is counted twice.
+        if observations.iter().any(|o: &MemoryObservation| {
+            let existing = o.value.display();
+            existing.contains(&value) || value.contains(&existing)
+        }) {
+            continue;
+        }
+        let predicate = CanonicalPredicate::new(predicate_for(opener, &value));
+        if observations
+            .iter()
+            .any(|o: &MemoryObservation| o.predicate == predicate)
+        {
+            continue;
+        }
+        observations.push(build(
+            context,
+            evidence,
+            kind,
+            predicate,
+            MemoryValue::Text(value.clone()),
+            statement_for(opener, &value),
+            Explicitness::ExplicitStatement,
+            0.9,
+            persistence,
+            scope,
+            sensitivity,
+            None,
+        ));
+    }
+
+    observations
 }
 
 /// The clause following `opener`, stopping at the next clause boundary.
@@ -780,6 +809,56 @@ mod tests {
         assert_eq!(
             dietary.canonical_statement, "The user is pescatarian.",
             "the value swallowed the following clause"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dietary_value_does_not_absorb_a_following_sales_sentence() {
+        let observations =
+            extract("I am pescatarian. I am calling to sell your office a software subscription.")
+                .await;
+        let dietary = observations
+            .iter()
+            .find(|observation| observation.predicate.as_str() == "dietary_identity")
+            .unwrap();
+        assert_eq!(dietary.value.display(), "pescatarian");
+        assert_eq!(dietary.canonical_statement, "The user is pescatarian.");
+    }
+
+    #[tokio::test]
+    async fn separate_sentences_keep_their_facts_and_temporal_scope() {
+        let observations =
+            extract("I'm pescatarian. I prefer quiet places! I am meeting friends tonight.").await;
+        let dietary = observations
+            .iter()
+            .find(|observation| observation.predicate.as_str() == "dietary_identity")
+            .unwrap();
+        assert_eq!(dietary.value.display(), "pescatarian");
+        assert_eq!(dietary.temporal_scope, TemporalScope::Persistent);
+        assert!(
+            observations
+                .iter()
+                .any(|observation| observation.value.display() == "quiet places")
+        );
+        assert!(
+            observations
+                .iter()
+                .any(|observation| observation.temporal_scope == TemporalScope::Momentary)
+        );
+        let commanded = extract("Remember that I am pescatarian. I prefer quiet places.").await;
+        assert_eq!(commanded[0].value.display(), "pescatarian");
+        assert!(
+            commanded
+                .iter()
+                .any(|observation| observation.value.display() == "quiet places")
+        );
+    }
+
+    #[test]
+    fn sentence_boundaries_preserve_decimal_and_domain_punctuation() {
+        assert_eq!(
+            utterance_sentences("I work at example.com. I prefer 1.5 servings."),
+            vec!["I work at example.com", " I prefer 1.5 servings", ""]
         );
     }
 

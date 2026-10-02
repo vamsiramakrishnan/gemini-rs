@@ -193,8 +193,9 @@ fn tool_response_google_ai_keeps_scheduling_golden() {
 }
 
 #[test]
-fn tool_response_vertex_ai_strips_scheduling_golden() {
-    let config = SessionConfig::from_vertex("test-project", "us-central1", "test-token");
+fn tool_response_vertex_25_strips_scheduling_golden() {
+    let config = SessionConfig::from_vertex("test-project", "us-central1", "test-token")
+        .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
     let bytes = JsonCodec
         .encode_command(
             &SessionCommand::SendToolResponse(vec![tool_response()]),
@@ -206,7 +207,7 @@ fn tool_response_vertex_ai_strips_scheduling_golden() {
         actual["toolResponse"]["functionResponses"][0]
             .get("scheduling")
             .is_none(),
-        "Vertex AI must strip scheduling from tool responses"
+        "Vertex 2.5 must strip scheduling from tool responses"
     );
     assert_golden("client_tool_response_vertex.json", &actual);
 }

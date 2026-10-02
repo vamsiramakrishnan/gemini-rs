@@ -10,6 +10,8 @@
 pub mod live;
 #[cfg(feature = "fluent")]
 pub mod spec_binding;
+#[cfg(feature = "fluent")]
+mod task_binding;
 pub mod tools;
 pub mod turn_extractor;
 

@@ -13,11 +13,13 @@ import { Preview } from './panels/Preview';
 import { Run } from './panels/Run';
 import { Code } from './panels/Code';
 import { Bundles } from './panels/Bundles';
+import { Tasks } from './panels/Tasks';
 
 const TABS: { id: DockTab; label: string }[] = [
   { id: 'problems', label: 'Problems' },
   { id: 'tests', label: 'Tests' },
   { id: 'preview', label: 'Step through' },
+  { id: 'tasks', label: 'Tasks' },
   { id: 'run', label: 'Run' },
   { id: 'code', label: 'Code' },
   { id: 'bundles', label: 'Versions' },
@@ -46,7 +48,7 @@ export function App() {
           <main className="center">{view === 'canvas' ? <Canvas /> : <JsonEditor />}</main>
           <Inspector />
         </div>
-        <section className={`dock ${dockOpen ? 'open' : ''}`}>
+        <section className={`dock ${dockOpen ? 'open' : ''} ${dock === 'tasks' ? 'tasks-dock' : ''}`}>
           <div className="dock-tabs">
             {TABS.map((tab) => (
               <button
@@ -60,23 +62,22 @@ export function App() {
               </button>
             ))}
           </div>
-          {dockOpen && (
-            <div className="dock-body">
-              {dock === 'problems' && <Problems />}
-              {dock === 'tests' && (
-                <Tests
-                  onPreview={(test) => {
-                    setPreviewTest(test);
-                    useStudio.getState().openDock('preview');
-                  }}
-                />
-              )}
-              {dock === 'preview' && <Preview test={previewTest} onTest={setPreviewTest} />}
-              {dock === 'run' && <Run />}
-              {dock === 'code' && <Code />}
-              {dock === 'bundles' && <Bundles />}
-            </div>
-          )}
+          <div className="dock-body" hidden={!dockOpen}>
+            {dockOpen && dock === 'problems' && <Problems />}
+            {dockOpen && dock === 'tests' && (
+              <Tests
+                onPreview={(test) => {
+                  setPreviewTest(test);
+                  useStudio.getState().openDock('preview');
+                }}
+              />
+            )}
+            {dockOpen && dock === 'preview' && <Preview test={previewTest} onTest={setPreviewTest} />}
+            <div hidden={!dockOpen || dock !== 'tasks'}><Tasks active={dockOpen && dock === 'tasks'} /></div>
+            <div hidden={!dockOpen || dock !== 'run'} style={{ height: '100%' }}><Run /></div>
+            {dockOpen && dock === 'code' && <Code />}
+            {dockOpen && dock === 'bundles' && <Bundles />}
+          </div>
         </section>
       </div>
     </ReactFlowProvider>
@@ -99,20 +100,21 @@ function useSchema(onError: (message: string | null) => void) {
 /** Validate as you edit, a moment after you stop typing. */
 function useValidation() {
   const spec = useStudio((s) => s.spec);
+  const revision = useStudio((s) => s.revision);
   const setValidation = useStudio((s) => s.setValidation);
   useEffect(() => {
     let cancelled = false;
     const timer = setTimeout(() => {
       api
         .validate(spec)
-        .then((result) => !cancelled && setValidation(result))
-        .catch((err: Error) => !cancelled && setValidation({ valid: false, errors: [err.message], warnings: [] }));
+        .then((result) => !cancelled && setValidation(result, revision))
+        .catch((err: Error) => !cancelled && setValidation({ valid: false, errors: [err.message], warnings: [] }, revision));
     }, 350);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [spec, setValidation]);
+  }, [spec, revision, setValidation]);
 }
 
 function useShortcuts() {

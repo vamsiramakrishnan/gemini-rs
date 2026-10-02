@@ -216,6 +216,94 @@ pub trait TurnExtractor: Send + Sync {
     }
 }
 
+/// A state mutation or promotion decision produced by the shared extraction reducer.
+#[derive(Clone, Debug)]
+pub enum PromotionEvent {
+    /// A field was promoted and can be observed under this extraction event name.
+    Promoted {
+        /// Event name.
+        name: String,
+        /// Promoted value.
+        value: Value,
+    },
+    /// An explicit promotion rule accepted or rejected its field.
+    Decision {
+        /// Source field.
+        field: String,
+        /// Destination key.
+        state_key: String,
+        /// Whether the value was accepted.
+        accepted: bool,
+        /// Stable explanatory reason.
+        reason: String,
+        /// Observed value.
+        value: Value,
+    },
+}
+/// Apply the same null, merge and acceptance rules for Live and owned task extraction.
+pub fn promote_fields(
+    extractor: &dyn TurnExtractor,
+    name: &str,
+    value: &Value,
+    state: &State,
+) -> Vec<PromotionEvent> {
+    let mut events = Vec::new();
+    let Some(object) = value.as_object() else {
+        return events;
+    };
+    let rules = extractor.promotion_rules();
+    if rules.is_empty() {
+        for (field, value) in object {
+            if value.is_null() {
+                continue;
+            }
+            let _ = state.set(field, value.clone());
+            events.push(PromotionEvent::Promoted {
+                name: format!("{name}.{field}"),
+                value: value.clone(),
+            });
+        }
+        return events;
+    }
+    for rule in rules {
+        let Some(value) = object.get(&rule.field) else {
+            continue;
+        };
+        let reason = if value.is_null() {
+            Some("extracted value was null")
+        } else if rule
+            .accept
+            .as_ref()
+            .is_some_and(|accept| !accept(state, value))
+        {
+            Some("promotion predicate rejected the value")
+        } else if matches!(rule.merge, MergePolicy::KeepKnown) && state.contains(&rule.state_key) {
+            Some("existing state value was kept")
+        } else {
+            None
+        };
+        if reason.is_none() {
+            let _ = state.set(&rule.state_key, value.clone());
+            let _ = state.set(
+                format!("state_meta:{}", rule.state_key),
+                serde_json::json!({"source":"extraction", "extractor":name, "field":rule.field}),
+            );
+            events.push(PromotionEvent::Promoted {
+                name: format!("{name}.{}", rule.field),
+                value: value.clone(),
+            });
+        }
+        events.push(PromotionEvent::Decision {
+            field: rule.field.clone(),
+            state_key: rule.state_key.clone(),
+            accepted: reason.is_none(),
+            reason: reason.unwrap_or("promotion rule accepted the value").into(),
+            value: value.clone(),
+        });
+    }
+    events
+}
+
 /// A downstream agent fired when an extractor's results land in state.
 #[derive(Clone)]
 pub struct OnComplete {

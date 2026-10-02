@@ -88,24 +88,41 @@ impl TemporalPattern {
         writer: &Arc<dyn SessionWriter>,
         now: Instant,
     ) -> Option<BoxFuture<()>> {
-        if !self.detector.check(state, event, now) {
+        if !pattern_fires(
+            self.detector.as_ref(),
+            state,
+            event,
+            now,
+            self.cooldown,
+            &mut self.last_triggered.lock(),
+        ) {
             return None;
         }
-
-        // Enforce cooldown.
-        let mut last = self.last_triggered.lock();
-        if let (Some(cooldown), Some(prev)) = (self.cooldown, *last)
-            && now.duration_since(prev) < cooldown
-        {
-            return None;
-        }
-
-        *last = Some(now);
 
         let s = state.clone();
         let w = writer.clone();
         Some((self.action)(s, w))
     }
+}
+
+pub(crate) fn pattern_fires(
+    detector: &dyn PatternDetector,
+    state: &State,
+    event: Option<&SessionEvent>,
+    now: Instant,
+    cooldown: Option<Duration>,
+    last: &mut Option<Instant>,
+) -> bool {
+    if !detector.check(state, event, now) {
+        return false;
+    }
+    if let (Some(cooldown), Some(previous)) = (cooldown, *last)
+        && now.saturating_duration_since(previous) < cooldown
+    {
+        return false;
+    }
+    *last = Some(now);
+    true
 }
 
 // ── TemporalRegistry ─────────────────────────────────────────────────────────
@@ -127,6 +144,11 @@ impl TemporalRegistry {
         Self {
             patterns: Vec::new(),
         }
+    }
+
+    /// Whether the registry contains no temporal patterns.
+    pub fn is_empty(&self) -> bool {
+        self.patterns.is_empty()
     }
 
     /// Register a pattern.

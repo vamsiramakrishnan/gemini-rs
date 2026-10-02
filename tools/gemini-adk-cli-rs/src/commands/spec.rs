@@ -78,7 +78,7 @@ pub fn codegen(
 /// conversation scenarios offline. Exits non-zero on any failure.
 pub async fn test(spec_path: &str) -> CliResult {
     let spec = load(spec_path)?;
-    let validation = spec.validate();
+    let validation = spec.validate_for_replay();
     for warning in &validation.warnings {
         println!("warning: {warning}");
     }
@@ -114,6 +114,15 @@ pub async fn test(spec_path: &str) -> CliResult {
             if let Some(error) = &report.error {
                 println!("        {error}");
             }
+        }
+    }
+    for report in spec.run_task_scenarios().await {
+        if report.passed {
+            passed += 1;
+            println!("ok    task scenario {}", report.name);
+        } else {
+            failed += 1;
+            println!("FAIL  task scenario {}: {:?}", report.name, report.error);
         }
     }
     println!("\n{passed} passed, {failed} failed");
@@ -162,7 +171,7 @@ pub async fn call(spec_path: &str, tool: &str, args: Option<&str>) -> CliResult 
 pub async fn run(spec_path: &str) -> CliResult {
     dotenvy::dotenv().ok();
     let spec = load(spec_path)?;
-    if spec.memory.is_some() {
+    if spec.requires_memory() {
         return Err(
             "this spec uses `memory`, which needs a memory engine: generate a Rust project \
              (`adk spec codegen --lang rust`) and run that"
@@ -170,7 +179,7 @@ pub async fn run(spec_path: &str) -> CliResult {
         );
     }
     let mut resources = SpecResources::default();
-    if !spec.extract.is_empty() {
+    if spec.requires_extraction() {
         resources.extraction_llm = Some(Arc::new(GeminiLlm::from_env()?));
     }
     let state = State::new();

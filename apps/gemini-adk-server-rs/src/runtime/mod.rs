@@ -369,7 +369,7 @@ impl Runtime {
     /// Build a session from `bundle` and connect it.
     pub(crate) async fn connect(&self, bundle: &LoadedBundle) -> Result<LiveHandle, String> {
         let mut resources = SpecResources::default();
-        if !bundle.spec.extract.is_empty() {
+        if bundle.spec.requires_extraction() {
             resources.extraction_llm = Some(self.extraction_llm().await?);
         }
         let mut live = Live::builder();

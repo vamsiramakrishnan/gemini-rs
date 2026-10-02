@@ -1,18 +1,22 @@
-// The live session socket, shared so that edits made while a session runs
-// (a step's posture or grounding) steer its very next turn.
+// Only a continuous sequence of supported edits may patch a running session.
+// Loading a document or changing its structure breaks that revision chain.
+let connection: { socket: WebSocket; revision: number } | null = null;
 
-let socket: WebSocket | null = null;
-
-export function setLiveSocket(ws: WebSocket | null) {
-  socket = ws;
+export function setLiveSocket(value: typeof connection) {
+  connection = value;
 }
 
 export function liveConnected(): boolean {
-  return socket?.readyState === WebSocket.OPEN;
+  return connection?.socket.readyState === WebSocket.OPEN;
 }
 
-/** Send posture/grounding edits for steps to the running session. */
-export function sendPostures(postures: Record<string, string>, grounds: Record<string, string>) {
-  if (!liveConnected()) return;
-  socket!.send(JSON.stringify({ type: 'updateFlowPostures', postures, grounds }));
+export function sendPostures({ postures, grounds, previousRevision, revision }: {
+  postures: Record<string, string>;
+  grounds: Record<string, string>;
+  previousRevision: number;
+  revision: number;
+}) {
+  if (!connection || connection.socket.readyState !== WebSocket.OPEN || connection.revision !== previousRevision) return;
+  connection.socket.send(JSON.stringify({ type: 'updateFlowPostures', postures, grounds }));
+  connection.revision = revision;
 }

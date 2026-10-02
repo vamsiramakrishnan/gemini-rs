@@ -40,7 +40,8 @@ machinery through the server, so the Studio shows what a runtime would do.
 
 Undo and redo cover every edit (Ctrl+Z, Ctrl+Shift+Z). Consecutive
 keystrokes in one field count as one step. The working document is kept in
-the browser across reloads.
+the browser across reloads. Edits, loads, undo, and redo invalidate validation,
+test results, replay snapshots, and generated code for the previous revision.
 
 ## Forms come from the spec's schema
 
@@ -67,12 +68,21 @@ compile and every guard that waits on a state key nothing writes.
 
 **Tests** runs the spec's flow tests (scripted `user`, `tool` and `set`
 events with expectations) and its conversation scenarios offline, through
-the real flow monitor and conversation simulator.
+the real flow stack and conversation simulator. Embedded flow tests on a
+conversation include its digressions and repair policies. These tests use
+declared mock tool effects and supplied state; they do not run model
+extraction, phase callbacks, external services, or audio.
 
 **Step through** replays one flow test event by event. As you scrub, the
 canvas marks active and done stages, and the panel shows admitted and
 blocked tools and each active stage's guard truth tree: exactly which atom
 it is waiting on.
+
+Status identifies the active digression path and distinguishes whole-stack
+completion from termination. A finished digression can still be showing its
+closing turn before the main conversation resumes. Live and replay status
+are kept separately, so scrubbing a test does not overwrite a running
+session's observations.
 
 <p align="center"><img src="./assets/studio/preview.png" alt="Step through: a test at event 3, the canvas marking done and active stages, with blocked tools and the guard truth tree in the panel" width="900"></p>
 
@@ -82,7 +92,11 @@ it is waiting on.
 transcript shows the agent's replies and every tool call with its result,
 including calls the flow refused and the reason. The canvas and the side
 panel track the live flow state. Posture and grounding edits made while a
-flow session runs apply from the next turn.
+flow session runs can be sent for the next turn. Switching dock tabs or
+collapsing the dock keeps the session connected. Use **Stop** to end it.
+Changing the document does not reconfigure the running session; Run identifies
+that it uses an earlier revision, and its status no longer colors the edited
+canvas. Restart to apply structural changes.
 
 Current Live models answer in speech only. A text session asks for audio
 with its transcription, and shows the transcript as the reply.
@@ -148,17 +162,25 @@ npm --prefix apps/studio run build   # refresh the committed build
 
 ## The cookbook gallery
 
-Six industry scenarios ship under **File → Examples**, each a complete
-`SessionSpec` with mock tools, governance constraints, and embedded tests:
+Seven assistants ship under **File → Multi-capability examples**, each a complete
+`SessionSpec` with several reusable skills, controlled business tools, governance
+constraints, and embedded workflow and task tests:
 
 | Cookbook | Industry | Highlights |
 |----------|----------|------------|
-| Debt collection | Financial services | compliance gates, `once` payment, declarative extraction |
-| Patient intake | Healthcare | conditional emergency edge + `any` join into close |
-| Line support | Telecom | `reset` loop — a re-test reopens the diagnostic step |
-| Call screening | Front desk | spam-verdict-gated transfer |
-| Returns desk | E-commerce | eligibility-gated single refund |
-| Table booking | Hospitality | ambient memory, computed state |
+| Collections | Financial services | payment, hardship, disputes, history, public help; speech corrections revoke pending payment approval |
+| Clinic intake | Healthcare | intake, appointment changes, public information, callbacks, documents; urgency extraction gates routine booking |
+| Telecom support | Telecom | diagnostics, outages, ticket status, plans; re-test reopens diagnostics |
+| Call screening | Front desk | screening, office information, callbacks, message status, appointment requests; sticky spam verdict |
+| Returns desk | E-commerce | returns, tracking, exchanges, policy; verified eligibility and approved refunds |
+| Restaurant | Hospitality | bookings, reservation changes, menus, events, memory-backed preferences; computed party policy and reminders |
+| Support assistant | General support | billing, FAQ, diagnostics, human handoff; child tasks resume their parent |
+
+**Original workflow references** preserves the six earlier single-workflow
+examples. Select a skill to edit its extraction, computed fields, watchers,
+patterns, or memory. In **Tasks**, **Test a conversation turn** runs controlled
+service fixtures through the runtime. **Run** uses the configured extraction
+model and memory engine. Studio memory belongs to the current connection.
 
 The manifest lives at
 `apps/gemini-adk-web-rs/static/examples/flows/index.json`; the JSON documents

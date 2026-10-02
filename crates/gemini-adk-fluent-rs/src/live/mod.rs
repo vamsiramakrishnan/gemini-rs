@@ -154,6 +154,7 @@ pub struct Live {
     pub(crate) config: SessionConfig,
     pub(crate) callbacks: EventCallbacks,
     pub(crate) dispatcher: Option<ToolDispatcher>,
+    pub(crate) tasks: Option<gemini_adk_rs::tasks::TaskRuntime>,
     pub(crate) extractors: Vec<Arc<dyn TurnExtractor>>,
     // L1 registries
     pub(crate) computed: ComputedRegistry,
@@ -288,6 +289,7 @@ impl Live {
                 .context_window_compression(config::DEFAULT_COMPRESSION_TARGET_TOKENS),
             callbacks: EventCallbacks::default(),
             dispatcher: None,
+            tasks: None,
             extractors: Vec::new(),
             computed: ComputedRegistry::new(),
             phases: Vec::new(),
@@ -413,6 +415,37 @@ impl Live {
     /// same guarantee for ordinary tools.
     pub fn state(mut self, state: State) -> Self {
         self.state = Some(state);
+        self
+    }
+
+    /// Install task-private capabilities in this speaking session.
+    /// A second installation is a configuration error reported at connect.
+    pub fn tasks(mut self, runtime: gemini_adk_rs::tasks::TaskRuntime) -> Self {
+        if self.tasks.is_some() {
+            self.config_errors.push(
+                "task capabilities are already installed; combine them in one catalog".into(),
+            );
+        } else {
+            self.tasks = Some(runtime);
+        }
+        self
+    }
+
+    /// Install compiled skills; configuration failures surface at connect.
+    pub fn skills(
+        mut self,
+        skills: impl IntoIterator<Item = gemini_adk_rs::tasks::CompiledSkill>,
+    ) -> Self {
+        if self.tasks.is_some() {
+            self.config_errors.push(
+                "task capabilities are already installed; combine them in one catalog".into(),
+            );
+            return self;
+        }
+        match gemini_adk_rs::tasks::TaskRuntime::new(skills.into_iter().collect()) {
+            Ok(runtime) => self.tasks = Some(runtime),
+            Err(error) => self.config_errors.push(error.to_string()),
+        }
         self
     }
 
@@ -562,6 +595,16 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::time::Duration;
+
+    #[test]
+    fn repeated_task_installation_reports_configuration_error() {
+        let first = gemini_adk_rs::tasks::TaskRuntime::new(Vec::new()).expect("empty catalog");
+        let second = gemini_adk_rs::tasks::TaskRuntime::new(Vec::new()).expect("empty catalog");
+        let live = Live::builder().tasks(first).tasks(second);
+        assert_eq!(live.config_errors.len(), 1);
+        let live = Live::builder().skills(Vec::new()).skills(Vec::new());
+        assert_eq!(live.config_errors.len(), 1);
+    }
 
     #[test]
     fn builder_chain_compiles() {

@@ -280,7 +280,7 @@ class AudioManager {
   }
 
   stopRecording() {
-    if (!this.isRecording) return;
+    this.isRecording = false;
 
     if (this._captureNode) {
       this._captureNode.disconnect();
@@ -298,7 +298,6 @@ class AudioManager {
       this.recordCtx.close().catch(() => {});
       this.recordCtx = null;
     }
-    this.isRecording = false;
   }
 
   async toggleRecording() {

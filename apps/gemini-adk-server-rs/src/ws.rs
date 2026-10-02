@@ -208,10 +208,14 @@ pub enum ServerMessage {
     /// Governed-flow status snapshot (active steps, admitted/blocked tools,
     /// unmet requirements, done steps). Sent by flow-governed apps at connect
     /// and after every turn/tool event so a UI can light up the DAG live.
+    /// Skill catalog, foreground task, operation progress and approval requests.
+    TasksStatus {
+        /// The runtime's canonical task observation.
+        status: gemini_adk_rs::tasks::TaskSessionSnapshot,
+    },
     FlowStatus {
-        /// Serialized [`FlowExplanation`](gemini_adk_rs::flow::FlowExplanation)
-        /// plus a `done` step list.
-        status: serde_json::Value,
+        /// Runtime-owned active-layer state and whole-stack completion.
+        status: gemini_adk_rs::flow::FlowSnapshot,
     },
     /// Voice reactor state snapshot for devtools.
     VoiceRuntimeState {
@@ -294,6 +298,11 @@ pub enum ClientMessage {
     UserSpeechStarted,
     /// The browser detected the user stopped speaking.
     UserSpeechEnded,
+    /// Apply a trusted application task command, including approval decisions.
+    TaskCommand {
+        /// Lifecycle operation or exact-operation approval decision.
+        command: gemini_adk_rs::tasks::TaskCommand,
+    },
     /// End the session.
     Stop,
 }

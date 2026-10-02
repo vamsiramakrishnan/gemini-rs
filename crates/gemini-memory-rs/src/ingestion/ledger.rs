@@ -370,7 +370,16 @@ impl InMemorySessionLedger {
         // retracted.
         let mut by_window: BTreeMap<String, Vec<FactFingerprint>> = BTreeMap::new();
         for (fingerprint, candidate) in state.candidates.iter() {
-            if candidate.status == SessionCandidateStatus::Rejected {
+            if candidate.status == SessionCandidateStatus::Rejected
+                || matches!(
+                    candidate.mutation_intent,
+                    Some(
+                        crate::core::MutationIntent::Forget
+                            | crate::core::MutationIntent::Delete
+                            | crate::core::MutationIntent::List
+                    )
+                )
+            {
                 continue;
             }
             by_window

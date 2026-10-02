@@ -1,0 +1,137 @@
+{
+  "name": "collections",
+  "description": "Governed debt-collection call: verify, disclose, negotiate, take payment.",
+  "instruction": "You are a debt-collection assistant for Acme Bank. Be professional and empathetic. Follow the conversation flow you are steered through, and use the available tools rather than inventing account facts.",
+  "greeting": "Greet the caller, say you are calling from Acme Bank about their account, and ask for their full name to verify their identity.",
+  "modality": "text",
+  "tools": [
+    {
+      "name": "verify_identity",
+      "description": "Verify the caller's identity from their name and date of birth.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Caller's full name" },
+          "date_of_birth": { "type": "string", "description": "Caller's date of birth" }
+        },
+        "required": ["name"]
+      },
+      "response": { "verified": true, "account_last4": "4821" },
+      "set_state": { "identity_verified": true }
+    },
+    {
+      "name": "lookup_balance",
+      "description": "Look up the caller's outstanding balance.",
+      "response": { "balance_usd": 1240.5, "days_past_due": 34 }
+    },
+    {
+      "name": "record_promise_to_pay",
+      "description": "Record the agreed payment amount and date.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "amount_usd": { "type": "number" },
+          "date": { "type": "string" }
+        },
+        "required": ["amount_usd", "date"]
+      },
+      "response": { "recorded": true },
+      "set_state": { "ptp_amount": 200, "ptp_date": "next friday", "ptp_confirmed": true }
+    },
+    {
+      "name": "charge_card",
+      "description": "Charge the agreed amount to the card on file.",
+      "response": { "charged": true, "confirmation": "TXN-83921" }
+    }
+  ],
+  "extract": [
+    {
+      "name": "promise_to_pay",
+      "instruction": "Extract the payment amount and date the caller agrees to, once both are stated.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "ptp_amount": { "type": "number", "description": "Agreed payment amount in USD" },
+          "ptp_date": { "type": "string", "description": "Agreed payment date" }
+        }
+      },
+      "promote": [
+        { "field": "ptp_amount" },
+        { "field": "ptp_date" }
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "name": "happy path reaches close",
+      "script": [
+        { "expect": { "active": ["verify"], "blocked": ["charge_card"], "complete": false } },
+        { "tool": "verify_identity" },
+        { "expect": { "done": ["verify"], "active": ["disclose"], "state": { "identity_verified": true } } },
+        { "tool": "lookup_balance" },
+        { "tool": "record_promise_to_pay" },
+        { "expect": { "done": ["negotiate"], "active": ["take_payment"], "allowed": ["charge_card"] } },
+        { "tool": "charge_card" },
+        { "expect": { "done": ["take_payment", "close"], "complete": true } }
+      ]
+    },
+    {
+      "name": "premature charge is blocked",
+      "script": [
+        { "tool": "charge_card" },
+        { "expect": { "blocked": ["charge_card"], "complete": false } }
+      ]
+    },
+    {
+      "name": "extraction alone advances negotiate",
+      "script": [
+        { "tool": "verify_identity" },
+        { "tool": "lookup_balance" },
+        { "set": { "ptp_amount": 150, "ptp_date": "next friday" } },
+        { "expect": { "done": ["negotiate"] } }
+      ]
+    }
+  ],
+  "flow": {
+    "steps": [
+      {
+        "id": "verify",
+        "posture": "Verify the caller's identity before discussing any account details.",
+        "allow": ["verify_identity"],
+        "done": { "is_true": "identity_verified" }
+      },
+      {
+        "id": "disclose",
+        "after": ["verify"],
+        "posture": "Give the required disclosure: this is an attempt to collect a debt and any information obtained will be used for that purpose. Ask the caller to confirm they understood.",
+        "done": { "called_ok": "lookup_balance" },
+        "allow": ["lookup_balance"],
+        "ground": "The caller's identity is {identity_verified?verified:NOT verified}."
+      },
+      {
+        "id": "negotiate",
+        "after": ["disclose"],
+        "posture": "Negotiate an affordable payment plan. Record the promise to pay once agreed.",
+        "allow": ["lookup_balance", "record_promise_to_pay"],
+        "done": { "captured": ["ptp_amount", "ptp_date"] }
+      },
+      {
+        "id": "take_payment",
+        "after": ["negotiate"],
+        "posture": "Take the payment now that an amount and date are agreed.",
+        "allow": ["charge_card"],
+        "done": { "called_ok": "charge_card" }
+      },
+      {
+        "id": "close",
+        "after": ["take_payment"],
+        "terminal": true
+      }
+    ],
+    "constraints": [
+      { "once": "charge_card" },
+      { "never_until": { "tool": "charge_card", "until": { "is_true": "ptp_confirmed" } } },
+      { "require": ["close"] }
+    ]
+  }
+}

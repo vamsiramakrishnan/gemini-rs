@@ -34,7 +34,7 @@ export function Outline() {
           );
         })}
       </div>
-      <div className="outline-group">
+      {graph.nodes.length > 0 && <div className="outline-group">
         <div className="outline-head">{modeOf(spec) === 'flow' ? 'Steps' : 'Stages'}</div>
         {graph.nodes.map((node) => (
           <button
@@ -47,7 +47,11 @@ export function Outline() {
             {node.id || '(no id)'}
           </button>
         ))}
-      </div>
+      </div>}
+      {Array.isArray(spec.skills) && spec.skills.length > 0 && <div className="outline-group">
+        <div className="outline-head">Skill library</div>
+        {spec.skills.map((skill, index) => isObject(skill) && <button key={index} type="button" className={selection?.kind === 'skill' && selection.index === index ? 'active' : ''} onClick={() => select({ kind: 'skill', index })}>{typeof skill.name === 'string' ? skill.name : 'Unnamed skill'}</button>)}
+      </div>}
     </nav>
   );
 }

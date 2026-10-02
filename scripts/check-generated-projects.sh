@@ -13,15 +13,23 @@ out=${1:-$(mktemp -d)}
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 
+# Normalize once before changing directories so a caller's relative target
+# keeps its meaning throughout the generated-project matrix.
+project_target=${CARGO_TARGET_DIR:-"$root/target"}
+mkdir -p "$project_target"
+export CARGO_TARGET_DIR
+CARGO_TARGET_DIR=$(cd "$project_target" && pwd)
 cargo build -p gemini-adk-cli-rs --locked --manifest-path "$root/Cargo.toml"
-adk="$root/target/debug/adk"
-# Generated Rust projects share one target directory and this repository's
-# dependency versions.
-export CARGO_TARGET_DIR="$root/target/generated"
-
-for spec in "$root"/apps/gemini-adk-web-rs/static/examples/flows/*.json; do
+adk="$CARGO_TARGET_DIR/debug/adk"
+# CLI and generated Rust projects share the same dependency artifacts.
+gallery="$root/apps/gemini-adk-web-rs/static/examples/flows"
+for spec in "$gallery"/*.json "$gallery"/reference/*.json; do
+  [ -f "$spec" ] || continue
   name=$(basename "$spec" .json)
   [ "$name" = index ] && continue
+  if [[ "$spec" == "$gallery/reference/"* ]]; then
+    name="reference-$name"
+  fi
   echo "::group::$name"
 
   "$adk" spec codegen "$spec" --lang rust --out "$out/rust/$name" --sdk-path "$root" --force
@@ -45,6 +53,8 @@ for spec in "$root"/apps/gemini-adk-web-rs/static/examples/flows/*.json; do
 done
 
 # One call through each kind of tool server, as the runtime makes it.
-(cd "$out/python/restaurant" && "$adk" spec call agent.json check_availability)
-(cd "$out/go/restaurant" && "$adk" spec call agent.json check_availability)
+# The preserved restaurant workflow exposes a root tool for this protocol smoke.
+# Expanded catalogs are exercised through each generated server's scoped tests.
+(cd "$out/python/reference-restaurant" && "$adk" spec call agent.json check_availability)
+(cd "$out/go/reference-restaurant" && "$adk" spec call agent.json check_availability)
 echo "Generated projects: all checks passed ($out)"

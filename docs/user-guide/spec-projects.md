@@ -30,6 +30,12 @@ A Rust project compiles the spec in (`include_str!`) and passes the stubs to
 [`SessionSpec::apply`](flow-json.md#tools-mock-http-mcp) with
 `SpecResources::implement`.
 
+Tools declared inside skills also receive stubs. Rust registers them with
+`SpecResources::implement_skill`; Python and Go select the owning skill with
+`--skill <name>` when starting its MCP server. Two skills can therefore use
+the same local tool name with separate implementations. Commit-tool stubs
+include the required idempotency argument.
+
 Python and Go projects are MCP tool servers, built on the official `mcp`
 package and the official Go SDK. Their `agent.json` binds each stubbed tool
 to the server with the tool's `mcp` field (`python3 server.py` or `go run .`),
@@ -49,10 +55,12 @@ adk spec call agent.json book_table '{"party_size": 4}'   # one call through its
 adk spec run agent.json                     # a live session (text; audio with --features voice)
 ```
 
-`adk spec call` calls a tool the way a session does: through its in-process
+For session-level tools, `adk spec call` calls through the in-process
 mock, HTTP binding or MCP server. It then prints the result and the state the
 call wrote. Run it from a Python or Go project's directory to exercise that
-project's server without a model.
+project's server without a model. For skills, use `task_scenarios` with
+`adk spec test` or Studio's Tasks panel to exercise activation, admission,
+approval, and completion together.
 
 `adk spec codegen` doesn't overwrite existing files unless you pass `--force`,
 because the stubs are where your implementations go. For a Rust project built

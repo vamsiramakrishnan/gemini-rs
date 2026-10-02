@@ -2,55 +2,71 @@ import { useEffect, useState } from 'react';
 import { api, type FlowStatus } from '../api';
 import { useStudio } from '../store';
 import { FlowState } from './FlowState';
+import { isObject } from '../spec/paths';
+
+type Result = { revision: number; test: string } & (
+  | { kind: 'ready'; snapshots: FlowStatus[] }
+  | { kind: 'error'; message: string }
+);
 
 /** Step through a flow test event by event; the canvas shows the flow's
  * state after each one. */
 export function Preview({ test, onTest }: { test: string | null; onTest: (test: string | null) => void }) {
   const spec = useStudio((s) => s.spec);
-  const setStatus = useStudio((s) => s.setStatus);
-  const [snapshots, setSnapshots] = useState<FlowStatus[] | null>(null);
+  const revision = useStudio((s) => s.revision);
+  const setStatus = useStudio((s) => s.setPreviewStatus);
+  const [result, setResult] = useState<Result | null>(null);
   const [index, setIndex] = useState(0);
-  const [error, setError] = useState<string | null>(null);
   const names = (Array.isArray(spec.tests) ? spec.tests : [])
     .map((t) => (t && typeof t === 'object' && !Array.isArray(t) && typeof t.name === 'string' ? t.name : null))
     .filter((n): n is string => n !== null);
+  for (const skill of Array.isArray(spec.skills) ? spec.skills : []) {
+    if (!isObject(skill) || typeof skill.name !== 'string') continue;
+    for (const test of Array.isArray(skill.tests) ? skill.tests : []) {
+      if (isObject(test) && typeof test.name === 'string') names.push(`${skill.name}/${test.name}`);
+    }
+  }
+  const selected = test && names.includes(test) ? test : null;
+  const current = result?.revision === revision && result.test === selected ? result : null;
+  const snapshots = current?.kind === 'ready' ? current.snapshots : null;
+  const error = current?.kind === 'error' ? current.message : null;
 
   useEffect(() => {
-    if (!test) {
-      setSnapshots(null);
+    if (!selected) {
+      if (test) onTest(null);
       return;
     }
     let cancelled = false;
-    api
-      .simulate(spec, test)
+    const timer = setTimeout(() => api
+      .simulate(spec, selected)
       .then((out) => {
         if (cancelled) return;
         if (!out.valid) {
-          setError(out.errors.join('; '));
-          setSnapshots(null);
+          setResult({ revision, test: selected, kind: 'error', message: out.errors.join('; ') });
         } else {
-          setError(null);
-          setSnapshots(out.snapshots);
+          setResult({ revision, test: selected, kind: 'ready', snapshots: out.snapshots });
           setIndex(0);
         }
       })
-      .catch((err: Error) => setError(err.message));
+      .catch((err: Error) => {
+        if (!cancelled) setResult({ revision, test: selected, kind: 'error', message: err.message });
+      }), 250);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-    // Re-run when the test changes, not on every edit.
-  }, [test]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [spec, revision, selected, test, onTest]);
 
   const snapshot = snapshots?.[index] ?? null;
   useEffect(() => {
-    setStatus(snapshot);
-    return () => setStatus(null);
-  }, [snapshot, setStatus]);
+    setStatus(snapshot, revision);
+    return () => setStatus(null, revision);
+  }, [snapshot, revision, setStatus]);
 
   return (
     <div className="preview">
       <div className="row">
-        <select value={test ?? ''} onChange={(e) => onTest(e.target.value || null)}>
+        <select value={selected ?? ''} onChange={(e) => onTest(e.target.value || null)}>
           <option value="">Choose a flow test…</option>
           {names.map((name) => (
             <option key={name} value={name}>
@@ -58,7 +74,7 @@ export function Preview({ test, onTest }: { test: string | null; onTest: (test: 
             </option>
           ))}
         </select>
-        {snapshots && (
+        {snapshots && snapshots.length > 0 && (
           <>
             <button type="button" onClick={() => setIndex(Math.max(0, index - 1))} disabled={index === 0}>
               ◀
@@ -74,6 +90,7 @@ export function Preview({ test, onTest }: { test: string | null; onTest: (test: 
         )}
       </div>
       {error && <p className="error">{error}</p>}
+      {selected && !current && <p className="hint">Updating preview…</p>}
       {!names.length && <p className="hint">This spec has no flow tests. Add one in the Flow tests section to step through it here.</p>}
       {snapshot && (
         <>

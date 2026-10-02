@@ -405,12 +405,12 @@ impl MemorySession {
 
     /// The snapshot the current turn is being answered from.
     pub fn active_snapshot(&self) -> PreparedMemorySnapshot {
-        self.active.read().clone()
+        self.retriever.filter_snapshot(self.active.read().clone())
     }
 
     /// The most recently prepared snapshot, whether or not a turn is using it.
     pub fn prepared_snapshot(&self) -> PreparedMemorySnapshot {
-        self.prepared.read().clone()
+        self.retriever.filter_snapshot(self.prepared.read().clone())
     }
 
     /// The generation guard, for cancelling stale speculative work.
@@ -625,7 +625,7 @@ impl MemorySession {
             outcomes.push(outcome);
         }
 
-        self.refresh_overlay().await;
+        self.refresh_overlay().await?;
         Ok(outcomes)
     }
 
@@ -639,11 +639,11 @@ impl MemorySession {
             match work {
                 ScheduledWork::MicroReconcile => {
                     self.ledger.micro_reconcile();
-                    self.refresh_overlay().await;
+                    self.refresh_overlay().await?;
                 }
                 ScheduledWork::Checkpoint => {
                     self.ledger.micro_reconcile();
-                    self.refresh_overlay().await;
+                    self.refresh_overlay().await?;
                     let turns = self.cadence.read().total_turns();
                     self.events
                         .append(turn_id.into(), MemoryEvent::SessionCheckpointed { turns })
@@ -731,7 +731,8 @@ impl MemorySession {
             Utc::now(),
         );
         let outcome = self.ledger.append_observation(observation).await?;
-        self.refresh_overlay().await;
+        self.ledger.micro_reconcile();
+        self.refresh_overlay().await?;
 
         let accepted = !matches!(outcome, LedgerOutcome::Rejected(_));
         Ok(serde_json::json!({
@@ -821,32 +822,13 @@ impl MemorySession {
 
     /// The predicate/value pairs memory can currently assert.
     ///
-    /// Session facts shadow canonical ones: something the user said this
-    /// conversation is a better answer than something recalled from months ago.
+    /// Visible session facts shadow canonical ones. Explicit removals and
+    /// corrections use the same visibility rules as retrieval.
     pub fn known_values(&self) -> Vec<(crate::core::CanonicalPredicate, serde_json::Value)> {
-        let mut out: Vec<(crate::core::CanonicalPredicate, serde_json::Value)> = Vec::new();
-        let mut push = |predicate: crate::core::CanonicalPredicate, value: serde_json::Value| {
-            if !out.iter().any(|(p, _)| p == &predicate) {
-                out.push((predicate, value));
-            }
-        };
-
-        for candidate in self.ledger.usable_candidates() {
-            if candidate.mutation_intent == Some(MutationIntent::List) {
-                continue;
-            }
-            push(
-                candidate.predicate.clone(),
-                serde_json::Value::String(candidate.value.display()),
-            );
-        }
-        let now = Utc::now();
-        for doc in self.canonical.read().documents() {
-            if doc.is_retrievable(now) {
-                push(
-                    doc.predicate.clone(),
-                    serde_json::Value::String(doc.value.clone()),
-                );
+        let mut out = Vec::new();
+        for doc in self.visible_documents() {
+            if !out.iter().any(|(predicate, _)| predicate == &doc.predicate) {
+                out.push((doc.predicate, serde_json::Value::String(doc.value)));
             }
         }
         out
@@ -854,21 +836,27 @@ impl MemorySession {
 
     /// Every statement currently retrievable, canonical and provisional.
     pub fn known_statements(&self) -> Vec<String> {
-        let mut statements: Vec<String> = self
-            .canonical
-            .read()
-            .documents()
-            .map(|d| d.statement.clone())
+        let mut statements: Vec<_> = self
+            .visible_documents()
+            .into_iter()
+            .map(|doc| doc.statement)
             .collect();
-        statements.extend(
-            self.ledger
-                .usable_candidates()
-                .iter()
-                .map(|c| c.canonical_statement.clone()),
-        );
         statements.sort();
         statements.dedup();
         statements
+    }
+
+    fn visible_documents(&self) -> Vec<IndexedMemory> {
+        let now = Utc::now();
+        // Copy before consulting the retriever, which also reads these indexes.
+        let mut documents: Vec<_> = self.overlay_handle.read().documents().cloned().collect();
+        documents.extend(self.canonical.read().documents().cloned());
+        documents
+            .into_iter()
+            .filter(|doc| {
+                doc.is_retrievable(now) && self.retriever.record_visible(&doc.id, doc.origin)
+            })
+            .collect()
     }
 
     /// Everything the user has explicitly asked to be remembered this session.
@@ -880,8 +868,40 @@ impl MemorySession {
             .collect()
     }
 
-    async fn refresh_overlay(&self) {
-        let candidates = self.ledger.usable_candidates();
+    async fn refresh_overlay(&self) -> Result<(), MemoryError> {
+        let mut candidates = self.ledger.usable_candidates();
+        let removals: Vec<_> = candidates
+            .iter()
+            .filter(|candidate| {
+                matches!(
+                    candidate.mutation_intent,
+                    Some(MutationIntent::Forget | MutationIntent::Delete)
+                )
+            })
+            .filter_map(crate::reconcile::consolidate::deletion_selector)
+            .collect();
+        let mut removed = std::collections::HashSet::new();
+        if !removals.is_empty() {
+            for memory in self.repository.all(&self.user).await? {
+                if removals.iter().any(|selector| selector.matches(&memory)) {
+                    removed.insert(memory.id);
+                }
+            }
+            candidates.retain(|candidate| {
+                let memory = crate::ingestion::provisional_memory(
+                    candidate,
+                    &self.user,
+                    &self.session_id,
+                    Utc::now(),
+                );
+                let matches = removals.iter().any(|selector| selector.matches(&memory));
+                if matches {
+                    removed.insert(memory.id);
+                }
+                !matches
+            });
+        }
+        self.retriever.suppress_records(removed);
 
         // Anything the user stated outright this session hides the durable
         // record it contradicts for the rest of the conversation. Reconciliation
@@ -906,6 +926,7 @@ impl MemorySession {
             .events
             .append(None, MemoryEvent::SessionOverlayUpdated { revision })
             .await;
+        Ok(())
     }
 
     async fn recompile_canonical(&self) -> Result<(), MemoryError> {
@@ -1469,6 +1490,91 @@ mod tests {
 
         let stored = engine.repository().all(engine.user()).await.unwrap();
         assert_eq!(stored.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn forget_hides_canonical_slots_and_frozen_recall_before_reconciliation() {
+        let engine = engine();
+        let first = engine.begin_session(SessionId::new("prior"));
+        first
+            .observe_final_transcript(TurnId(1), "I am pescatarian")
+            .await
+            .unwrap();
+        first.finish().await.unwrap();
+        let session = engine.begin_session(SessionId::new("forget"));
+        session
+            .prepare(TurnId(1), "dietary preference pescatarian")
+            .await
+            .unwrap();
+        session.begin_turn(TurnId(1));
+        assert!(!session.active_snapshot().is_empty());
+        session
+            .apply_explicit_command(MutationIntent::Forget, "pescatarian", TurnId(2))
+            .await
+            .unwrap();
+        assert!(session.known_values().is_empty());
+        assert!(session.known_statements().is_empty());
+        assert!(session.active_snapshot().is_empty());
+        assert!(session.prepared_snapshot().is_empty());
+        assert_eq!(
+            session
+                .recall("dietary preference pescatarian", TurnId(2))
+                .await["status"],
+            "not_found"
+        );
+        session.finish().await.unwrap();
+        assert!(
+            engine
+                .begin_session(SessionId::new("after"))
+                .known_values()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn forgetting_a_new_session_fact_does_not_recreate_it_at_finish() {
+        let engine = engine();
+        let session = engine.begin_session(SessionId::new("same-session"));
+        session
+            .observe_final_transcript(TurnId(1), "I am pescatarian")
+            .await
+            .unwrap();
+        session
+            .apply_explicit_command(MutationIntent::Forget, "pescatarian", TurnId(2))
+            .await
+            .unwrap();
+        assert!(session.known_values().is_empty());
+        session.finish().await.unwrap();
+        assert!(
+            engine
+                .repository()
+                .all(engine.user())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn successive_removals_keep_prior_targets_and_preserve_unrelated_words() {
+        let engine = engine();
+        let session = engine.begin_session(SessionId::new("removals"));
+        for (turn, intent, statement) in [
+            (1, MutationIntent::Remember, "Enjoys art"),
+            (2, MutationIntent::Remember, "Owns a shopping cart"),
+            (3, MutationIntent::Forget, "art"),
+            (4, MutationIntent::Forget, "unrelated"),
+        ] {
+            session
+                .apply_explicit_command(intent, statement, TurnId(turn))
+                .await
+                .unwrap();
+        }
+        assert_eq!(session.known_statements(), vec!["Owns a shopping cart"]);
+        session.finish().await.unwrap();
+        let remaining = engine.repository().all(engine.user()).await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].statement, "Owns a shopping cart");
     }
 
     #[tokio::test]

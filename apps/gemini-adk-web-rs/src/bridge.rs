@@ -147,12 +147,20 @@ impl SessionBridge {
                 let _tx = tx_disconnected.clone();
                 async move {}
             })
-            .on_input_transcript(move |text, _is_final| {
+            .on_input_transcript(move |text, is_final| {
+                if is_final {
+                    return;
+                }
                 let _ = tx_input.send(ServerMessage::InputTranscription {
                     text: text.to_string(),
                 });
             })
-            .on_output_transcript(move |text, _is_final| {
+            .on_output_transcript(move |text, is_final| {
+                // The browser appends chunks. Final callbacks repeat the full
+                // accumulated turn and must not append it a second time.
+                if is_final {
+                    return;
+                }
                 let _ = tx_output.send(ServerMessage::OutputTranscription {
                     text: text.to_string(),
                 });
@@ -298,6 +306,16 @@ impl SessionBridge {
                     for (step, text) in grounds {
                         let ground = (!text.trim().is_empty()).then_some(text);
                         handle.update_step_ground(&step, ground);
+                    }
+                }
+                ClientMessage::TaskCommand { command } => {
+                    match handle.task_command(command).await {
+                        Ok(status) => {
+                            let _ = self.tx.send(ServerMessage::TasksStatus { status });
+                        }
+                        Err(message) => {
+                            let _ = self.tx.send(ServerMessage::Error { message });
+                        }
                     }
                 }
                 ClientMessage::Stop => {
@@ -505,6 +523,16 @@ impl SessionBridge {
                         handle.update_step_ground(&step, ground);
                     }
                 }
+                ClientMessage::TaskCommand { command } => {
+                    match handle.task_command(command).await {
+                        Ok(status) => {
+                            let _ = self.tx.send(ServerMessage::TasksStatus { status });
+                        }
+                        Err(message) => {
+                            let _ = self.tx.send(ServerMessage::Error { message });
+                        }
+                    }
+                }
                 ClientMessage::Stop => {
                     let _ = handle.disconnect().await;
                     break;
@@ -593,5 +621,36 @@ fn map_event(event: LiveEvent) -> Option<ServerMessage> {
             response_tokens,
         }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gemini_adk_fluent_rs::testing::ScriptedServer;
+
+    #[tokio::test]
+    async fn transcript_finalization_does_not_repeat_browser_chunks() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let bridge = SessionBridge::new(tx);
+        let run = ScriptedServer::new()
+            .hears("My question.")
+            .speaks("The answer.")
+            .turn_complete()
+            .play(bridge.wire_live(Live::builder()))
+            .await
+            .unwrap();
+        let mut input = String::new();
+        let mut output = String::new();
+        while let Ok(message) = rx.try_recv() {
+            match message {
+                ServerMessage::InputTranscription { text } => input.push_str(&text),
+                ServerMessage::OutputTranscription { text } => output.push_str(&text),
+                _ => {}
+            }
+        }
+        assert_eq!(input, "My question.");
+        assert_eq!(output, "The answer.");
+        run.disconnect().await;
     }
 }

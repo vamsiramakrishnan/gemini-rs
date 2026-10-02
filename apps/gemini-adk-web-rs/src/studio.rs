@@ -31,6 +31,7 @@ pub fn router(static_dir: &'static str) -> Router {
         .route("/api/flows/validate", post(validate_flow))
         .route("/api/flows/test", post(test_flow))
         .route("/api/flows/simulate", post(simulate_flow))
+        .route("/api/flows/tasks", post(simulate_tasks))
         .route("/api/flows/codegen", post(codegen_flow))
         .route("/api/flows/project", post(project_flow))
         .route("/api/flows/schema", get(flow_schema))
@@ -82,7 +83,7 @@ async fn validate_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json:
 async fn test_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Value> {
     let result = match gemini_adk_fluent_rs::spec::SessionSpec::from_value(value) {
         Ok(spec) => {
-            let validation = spec.validate();
+            let validation = spec.validate_for_replay();
             if !validation.valid {
                 serde_json::json!({
                     "valid": false,
@@ -91,12 +92,13 @@ async fn test_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Val
                     "scenarios": [],
                 })
             } else {
+                let mut scenarios = spec.run_scenarios().await;
+                scenarios.extend(spec.run_task_scenarios().await);
                 serde_json::json!({
                     "valid": true,
                     "errors": [],
                     "reports": serde_json::to_value(spec.run_tests()).unwrap_or_default(),
-                    "scenarios": serde_json::to_value(spec.run_scenarios().await)
-                        .unwrap_or_default(),
+                    "scenarios": scenarios,
                 })
             }
         }
@@ -108,6 +110,29 @@ async fn test_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Val
         }),
     };
     Json(result)
+}
+
+/// Replay task commands using controlled mock implementations and the L1 runtime.
+/// No posted HTTP/MCP binding or attached application implementation runs here.
+async fn simulate_tasks(Json(body): Json<serde_json::Value>) -> Json<serde_json::Value> {
+    let result = async {
+        let spec = SessionSpec::from_value(body.get("spec").cloned().unwrap_or_default())
+            .map_err(|error| vec![error])?;
+        let commands: Vec<gemini_adk_fluent_rs::spec::TaskStep> =
+            serde_json::from_value(body.get("commands").cloned().unwrap_or_else(|| json!([])))
+                .map_err(|error| vec![format!("invalid task commands: {error}")])?;
+        if commands.len() > 512 {
+            return Err(vec!["task preview accepts at most 512 commands".into()]);
+        }
+        spec.trace_tasks(&commands).await
+    }
+    .await;
+    Json(match result {
+        Ok((snapshots, status)) => {
+            json!({"valid":true,"errors":[],"snapshots":snapshots,"status":status})
+        }
+        Err(errors) => json!({"valid":false,"errors":errors,"snapshots":[],"status":null}),
+    })
 }
 
 /// The JSON Schema of the session spec document itself — for editor
@@ -142,12 +167,19 @@ async fn simulate_flow(Json(body): Json<serde_json::Value>) -> Json<serde_json::
 /// Generate the standalone Rust application a spec is equivalent to.
 async fn codegen_flow(Json(value): Json<serde_json::Value>) -> Json<serde_json::Value> {
     let result = match gemini_adk_fluent_rs::spec::SessionSpec::from_value(value) {
-        Ok(spec) => serde_json::json!({
-            "valid": true,
-            "errors": [],
-            "main_rs": spec.to_rust(),
-            "cargo_toml": spec.to_cargo_toml(),
-        }),
+        Ok(spec) => {
+            let validation = spec.validate();
+            if validation.valid {
+                serde_json::json!({
+                    "valid": true,
+                    "errors": [],
+                    "main_rs": spec.to_rust(),
+                    "cargo_toml": spec.to_cargo_toml(),
+                })
+            } else {
+                serde_json::json!({"valid": false, "errors": validation.errors})
+            }
+        }
         Err(message) => serde_json::json!({"valid": false, "errors": [message]}),
     };
     Json(result)
@@ -164,11 +196,18 @@ async fn project_flow(Json(body): Json<serde_json::Value>) -> Json<serde_json::V
         .parse::<ProjectLanguage>();
     let spec = SessionSpec::from_value(body.get("spec").cloned().unwrap_or_default());
     let result = match (spec, language) {
-        (Ok(spec), Ok(language)) => serde_json::json!({
-            "valid": true,
-            "errors": [],
-            "files": spec.to_project(language),
-        }),
+        (Ok(spec), Ok(language)) => {
+            let validation = spec.validate();
+            if validation.valid {
+                serde_json::json!({
+                    "valid": true,
+                    "errors": [],
+                    "files": spec.to_project(language),
+                })
+            } else {
+                serde_json::json!({"valid": false, "errors": validation.errors, "files": []})
+            }
+        }
         (Err(message), _) | (_, Err(message)) => {
             serde_json::json!({"valid": false, "errors": [message], "files": []})
         }
@@ -368,6 +407,78 @@ mod tests {
         );
     }
 
+    #[test]
+    fn runtime_flow_status_matches_the_browser_contract() {
+        use gemini_adk_rs::flow::{Enforcement, Flow, FlowStack, Guard, Overlay, Resume};
+        use gemini_adk_rs::state::State;
+
+        let main = Flow::new()
+            .step("main")
+            .done(Guard::is_true("finished"))
+            .build()
+            .unwrap()
+            .compile()
+            .unwrap();
+        let faq = Flow::new()
+            .step("answer")
+            .done(Guard::is_true("answered"))
+            .step("end")
+            .after("answer")
+            .terminal()
+            .require(["end"])
+            .build()
+            .unwrap()
+            .compile()
+            .unwrap();
+        let state = State::new();
+        let _ = state.set("faq", true);
+        let mut stack = FlowStack::new(main, Enforcement::Enforce).with_overlay(Overlay::new(
+            "faq",
+            Guard::is_true("faq"),
+            faq,
+            Resume::Previous,
+        ));
+        stack.on_turn(&state);
+        let message = crate::app::ServerMessage::FlowStatus {
+            status: stack.snapshot(&state),
+        };
+        let message = serde_json::to_value(message).unwrap();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../studio/src/test/flow-status.json")).unwrap();
+        assert_eq!(message["type"], "flowStatus");
+        assert_eq!(message["status"], fixture);
+    }
+
+    #[tokio::test]
+    async fn invalid_specs_cannot_be_exported_as_valid_projects() {
+        let invalid = json!({"flow": {"steps": [{"id": "s", "allow": ["unknown"]}]}});
+        let Json(code) = codegen_flow(Json(invalid.clone())).await;
+        assert_eq!(code["valid"], false);
+        assert!(code["main_rs"].is_null());
+        assert!(!code["errors"].as_array().unwrap().is_empty());
+        for lang in ["rust", "python", "go"] {
+            let Json(project) = project_flow(Json(json!({"spec": invalid, "lang": lang}))).await;
+            assert_eq!(project["valid"], false);
+            assert_eq!(project["files"], json!([]));
+            assert!(!project["errors"].as_array().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn tests_and_preview_reject_the_same_conflicting_bindings() {
+        let mut invalid = spec();
+        invalid["tools"] = json!([{
+            "name": "lookup", "http": {"url": "http://127.0.0.1:1/never-executed"},
+            "mcp": "never-executed-tool-server"
+        }]);
+        invalid["tests"] = json!([{"name": "check", "script": []}]);
+        let Json(tests) = test_flow(Json(invalid.clone())).await;
+        let Json(preview) = simulate_flow(Json(json!({"spec": invalid, "test": "check"}))).await;
+        assert_eq!(tests["valid"], false);
+        assert_eq!(preview["valid"], false);
+        assert_eq!(tests["errors"], preview["errors"]);
+    }
+
     #[tokio::test]
     async fn the_studio_saves_lists_labels_and_loads_bundles() {
         let dir = std::env::temp_dir().join(format!("studio-bundles-{}", std::process::id()));
@@ -414,5 +525,44 @@ mod tests {
         let (status, _) = call(&app, "GET", "/api/bundle?ref=booking:nope", None).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         let _ = std::fs::remove_dir_all(dir);
+    }
+    #[tokio::test]
+    async fn task_preview_uses_the_shared_runtime_and_never_posted_http_bindings() {
+        let spec = json!({"name":"offline", "skills":[{
+            "name":"lookup", "version":"1", "outputs":{"receipt":{"type":"object"}},
+            "tools":[{"name":"fetch","effect":{"kind":"read"},
+                "http":{"url":"http://127.0.0.1:9/never-call"},
+                "response":{"controlled":true},"save_response_as":"receipt"}]
+        }]});
+        let Json(result) = simulate_tasks(Json(json!({"spec":spec,"commands":[
+            {"event":"command","command":{"action":"start","skill":"lookup","input":{}}},
+            {"event":"command","command":{"action":"invoke","task":"task-1","tool":"fetch","args":{}}},
+            {"event":"command","command":{"action":"complete","task":"task-1","output":{}}}
+        ]}))).await;
+        assert_eq!(result["valid"], true, "{result}");
+        assert_eq!(
+            result["status"]["tasks"][0]["output"]["receipt"],
+            json!({"controlled":true})
+        );
+        assert!(
+            result["snapshots"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|s| s["failures"] == json!([])),
+            "{result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn task_preview_rejects_malformed_commands_instead_of_ignoring_them() {
+        let Json(result) = simulate_tasks(Json(json!({"spec":{"skills":[]},"commands":[{"event":"command","command":{"action":"teleport"}}]}))).await;
+        assert_eq!(result["valid"], false);
+        assert!(
+            result["errors"][0]
+                .as_str()
+                .unwrap()
+                .contains("invalid task commands")
+        );
     }
 }

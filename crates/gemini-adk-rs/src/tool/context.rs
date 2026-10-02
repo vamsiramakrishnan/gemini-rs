@@ -54,6 +54,8 @@ pub struct ToolContext {
     pub state: State,
     /// The model's id for this call, when it gave one.
     pub call_id: Option<String>,
+    /// Task activation ownership, captured at admission when using skills.
+    pub task: Option<crate::tasks::TaskOwner>,
     /// Cancelled when the call should stop: the user barged in, or the
     /// session is ending. A long tool can check it between steps; the
     /// runtime also drops the call's future when it fires.
@@ -66,6 +68,7 @@ impl ToolContext {
         Self {
             state,
             call_id: None,
+            task: None,
             cancel: CancellationToken::new(),
         }
     }
@@ -79,6 +82,12 @@ impl ToolContext {
     /// With the model's call id.
     pub fn with_call_id(mut self, id: impl Into<String>) -> Self {
         self.call_id = Some(id.into());
+        self
+    }
+
+    /// Bind execution and tracing to its original task activation.
+    pub fn with_task(mut self, owner: crate::tasks::TaskOwner) -> Self {
+        self.task = Some(owner);
         self
     }
 

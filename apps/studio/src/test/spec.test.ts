@@ -54,6 +54,16 @@ describe('schema', () => {
     expect(variants(root, pred).find((v) => v.label === 'eq')!.make()).toEqual({ eq: ['', null] });
   });
 
+  it('labels internally tagged skill effects and selects task commands by their discriminator', () => {
+    const effect = { $ref: '#/definitions/TaskToolEffect' };
+    expect(variants(root, effect).map((variant) => variant.label)).toEqual(['read', 'commit']);
+    expect(variants(root, effect).find((variant) => variant.label === 'commit')?.make()).toEqual({ kind: 'commit', idempotency_argument: '' });
+    const command = { $ref: '#/definitions/TaskCommand' };
+    for (const action of ['suspend', 'resume', 'cancel']) {
+      expect(variants(root, command)[variantOf(root, command, { action, task: 'task-1' })]?.label).toBe(action);
+    }
+  });
+
   it('makes minimal defaults', () => {
     const stage = resolve(root, { $ref: '#/definitions/StageSpec' });
     expect(defaultFor(root, stage)).toEqual({ id: '' });

@@ -1,291 +1,2433 @@
 {
   "name": "clinic-intake",
-  "description": "Healthcare patient intake: identify, triage symptoms, schedule \u2014 with a hard emergency escalation gate.",
-  "instruction": "You are the intake assistant for Cedar Grove Clinic. Be calm and precise. Never give medical advice; gather information and schedule. If symptoms sound like an emergency, escalate immediately.",
-  "greeting": "Welcome the caller to Cedar Grove Clinic and ask for their full name and date of birth.",
-  "modality": "text",
-  "tools": [
+  "version": "2.0.0",
+  "description": "Clinic assistant with intake, appointment changes, public information, nurse callbacks and visit documents. Task-owned triage extraction prevents routine booking after urgency is reported. Tools use controlled demo services.",
+  "instruction": "You are Cedar Grove Clinic\u2019s voice assistant. Route routine intake to patient_intake, changes/cancellations to appointment_management, public questions to clinic_info, nonurgent callback requests to nurse_callback, and document checklists to visit_documents. Use a child clinic_info task to answer public questions, then return to the patient task. Verify identity independently in each private capability. Never diagnose or provide medical advice. Flag caller-reported urgency; routine booking must stop. Nurse routing is a controlled proposal requiring application approval, not immediate care. All results are demo data. Spoken consent never substitutes for application approval.",
+  "greeting": "Welcome to Cedar Grove Clinic. I can help with routine appointments, appointment changes, clinic information, or a nonurgent nurse callback. What would you like help with?",
+  "modality": "audio",
+  "voice": "Kore",
+  "skills": [
     {
-      "name": "find_patient",
-      "description": "Look up the patient record from name and date of birth.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "date_of_birth": {
-            "type": "string"
-          }
+      "name": "patient_intake",
+      "version": "2.0.0",
+      "description": "Identify, capture symptoms, and propose a routine appointment or nurse routing; urgency prevents booking.",
+      "instruction": "Identify, capture symptoms, and propose a routine appointment or nurse routing; urgency prevents booking. Use controlled demo data only. Explain proposed changes and wait for trusted application approval. Do not treat spoken consent as application approval. Never borrow verification from another task. Transcript extraction records symptoms and latches caller-reported urgency for this task. A new urgency flag revokes an unexecuted booking proposal.",
+      "inputs": {
+        "patient_name": {
+          "type": "string",
+          "description": "Patient name supplied by the caller."
         },
-        "required": [
-          "name"
-        ]
-      },
-      "response": {
-        "found": true,
-        "patient_id": "P-2210"
-      },
-      "set_state": {
-        "patient_identified": true
-      }
-    },
-    {
-      "name": "record_symptoms",
-      "description": "Record the patient's reported symptoms and their severity.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "symptoms": {
-            "type": "string"
-          },
-          "severity": {
-            "type": "string",
-            "description": "mild, moderate, severe, or emergency"
-          }
+        "date_of_birth": {
+          "type": "string",
+          "description": "Patient date of birth."
         },
-        "required": [
-          "symptoms",
-          "severity"
-        ]
-      },
-      "response": {
-        "recorded": true
-      },
-      "set_state": {
-        "symptoms_recorded": true,
-        "severity": "moderate"
-      }
-    },
-    {
-      "name": "escalate_emergency",
-      "description": "Transfer immediately to the on-call nurse line.",
-      "response": {
-        "transferred": true
-      },
-      "set_state": {
-        "escalated": true
-      }
-    },
-    {
-      "name": "book_appointment",
-      "description": "Book the next suitable appointment slot.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "preferred_time": {
-            "type": "string"
-          }
+        "symptoms": {
+          "type": "string",
+          "description": "Caller-reported symptoms; no diagnosis.",
+          "default": ""
+        },
+        "preferred_time": {
+          "type": "string",
+          "description": "Preferred appointment time.",
+          "default": ""
         }
       },
-      "response": {
-        "booked": true,
-        "slot": "Thursday 10:20",
-        "reference": "CG-5531"
-      }
-    }
-  ],
-  "extract": [
-    {
-      "name": "triage",
-      "instruction": "From the caller's description, extract symptoms and whether they describe an emergency (chest pain, difficulty breathing, stroke signs).",
-      "schema": {
-        "type": "object",
-        "properties": {
-          "symptoms": {
-            "type": "string"
-          },
-          "is_emergency": {
-            "type": "boolean"
-          }
+      "outputs": {
+        "result": {
+          "type": "object",
+          "description": "Accepted controlled tool result, not proof of a real service operation."
         }
       },
-      "promote": [
+      "tools": [
         {
-          "field": "is_emergency",
-          "policy": "true_only"
-        }
-      ]
-    }
-  ],
-  "flow": {
-    "steps": [
-      {
-        "id": "identify",
-        "posture": "Identify the patient before discussing anything medical.",
-        "allow": [
-          "find_patient"
-        ],
-        "done": {
-          "is_true": "patient_identified"
-        }
-      },
-      {
-        "id": "triage",
-        "after": [
-          "identify"
-        ],
-        "posture": "Ask what brings them in today. Record symptoms and severity. If anything sounds like an emergency, stop and escalate.",
-        "allow": [
-          "record_symptoms",
-          "escalate_emergency"
-        ],
-        "done": {
-          "any": [
-            {
-              "is_true": "symptoms_recorded"
-            },
-            {
-              "is_true": "escalated"
-            }
-          ]
-        },
-        "ground": "Patient is {patient_identified?identified:NOT identified}."
-      },
-      {
-        "id": "schedule",
-        "after": [
-          {
-            "step": "triage",
-            "when": {
-              "not": {
-                "is_true": "is_emergency"
+          "name": "find_patient",
+          "description": "Read the controlled patient lookup fixture; performs this task\u2019s own patient check.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "date_of_birth": {
+                "type": "string"
               }
-            }
-          }
-        ],
-        "posture": "Offer the next suitable appointment and confirm the booking reference back.",
-        "allow": [
-          "book_appointment"
-        ],
-        "done": {
-          "called_ok": "book_appointment"
-        }
-      },
-      {
-        "id": "close",
-        "after": [
-          "schedule",
-          {
-            "step": "triage",
-            "when": {
-              "is_true": "is_emergency"
-            }
-          }
-        ],
-        "terminal": true,
-        "join": "any"
-      }
-    ],
-    "constraints": [
-      {
-        "never_until": {
-          "tool": "book_appointment",
-          "until": {
-            "is_true": "symptoms_recorded"
-          }
-        }
-      },
-      {
-        "once": "book_appointment"
-      },
-      {
-        "require": [
-          "close"
-        ]
-      }
-    ],
-    "ambient": [
-      "escalate_emergency"
-    ]
-  },
-  "tests": [
-    {
-      "name": "routine visit books an appointment",
-      "script": [
-        {
-          "expect": {
-            "active": [
-              "identify"
-            ],
-            "blocked": [
-              "book_appointment"
+            },
+            "required": [
+              "name",
+              "date_of_birth"
             ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "found": true,
+            "patient_id": "P-2210",
+            "demo": true
+          },
+          "set_state": {
+            "patient_identified": true
           }
         },
         {
-          "tool": "find_patient"
-        },
-        {
-          "tool": "record_symptoms"
-        },
-        {
-          "expect": {
-            "done": [
-              "identify",
-              "triage"
-            ],
-            "allowed": [
-              "book_appointment"
+          "name": "record_symptoms",
+          "description": "Capture the reported symptom text locally; this demo does not classify or diagnose symptoms.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "symptoms": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "symptoms",
+              "severity"
             ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "captured_locally": true,
+            "demo": true
+          },
+          "set_state": {
+            "symptoms_recorded": true
           }
         },
         {
-          "tool": "book_appointment"
-        },
-        {
-          "expect": {
-            "done": [
-              "schedule",
-              "close"
-            ],
-            "complete": true
-          }
-        }
-      ]
-    },
-    {
-      "name": "emergency blocks scheduling",
-      "script": [
-        {
-          "tool": "find_patient"
-        },
-        {
-          "set": {
+          "name": "flag_urgency",
+          "description": "Monotonically flag a caller-reported urgency locally. This cannot clear a prior urgency flag and does not diagnose.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reported_concern": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reported_concern"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "urgency_flagged": true,
+            "demo": true
+          },
+          "set_state": {
             "is_emergency": true
           }
         },
         {
-          "tool": "escalate_emergency"
+          "name": "escalate_emergency",
+          "description": "Propose routing to the nurse line; application approval is required. Demo receipt does not provide immediate care.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "patient_id": {
+                "type": "string"
+              },
+              "callback_number": {
+                "type": "string"
+              },
+              "symptom_summary": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "patient_id",
+              "callback_number",
+              "symptom_summary",
+              "request_id"
+            ]
+          },
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "routing_proposal_accepted": true,
+            "reference": "DEMO-NURSE-2210",
+            "demo": true
+          },
+          "set_state": {
+            "escalated": true
+          },
+          "save_response_as": "result"
         },
         {
-          "expect": {
-            "done": [
-              "triage"
-            ],
-            "blocked": [
-              "book_appointment"
+          "name": "book_appointment",
+          "description": "Propose a routine appointment for the checked patient and supplied time/reason.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "patient_id": {
+                "type": "string"
+              },
+              "preferred_time": {
+                "type": "string"
+              },
+              "visit_reason": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "patient_id",
+              "preferred_time",
+              "visit_reason",
+              "request_id"
             ]
+          },
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "booked": true,
+            "slot": "Thursday 10:20",
+            "reference": "CG-5531",
+            "demo": true
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "patient_identified": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "symptoms_recorded": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "is_emergency": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "escalated": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "triage": {
+          "type": "object",
+          "description": "Latest accepted structured extraction for this task."
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "identify",
+            "posture": "Identify the patient before discussing anything medical.",
+            "allow": [
+              "find_patient"
+            ],
+            "done": {
+              "is_true": "patient_identified"
+            }
+          },
+          {
+            "id": "triage",
+            "after": [
+              "identify"
+            ],
+            "posture": "Record reported symptoms without diagnosing. When the caller reports urgency, flag it and propose nurse routing. Do not promise immediate care or a connected nurse.",
+            "allow": [
+              "record_symptoms",
+              "escalate_emergency"
+            ],
+            "done": {
+              "any": [
+                {
+                  "is_true": "symptoms_recorded"
+                },
+                {
+                  "is_true": "escalated"
+                }
+              ]
+            },
+            "ground": "Patient is {patient_identified?identified:NOT identified}."
+          },
+          {
+            "id": "schedule",
+            "after": [
+              {
+                "step": "triage",
+                "when": {
+                  "not": {
+                    "is_true": "is_emergency"
+                  }
+                }
+              }
+            ],
+            "posture": "Offer a routine appointment only after symptom capture and while urgency is not flagged. Propose a booking with patient ID, time and reason; wait for application approval.",
+            "allow": [
+              "book_appointment"
+            ],
+            "done": {
+              "called_ok": "book_appointment"
+            }
+          },
+          {
+            "id": "close",
+            "after": [
+              "schedule",
+              {
+                "step": "triage",
+                "when": {
+                  "is_true": "is_emergency"
+                }
+              }
+            ],
+            "terminal": true,
+            "join": "any"
+          }
+        ],
+        "constraints": [
+          {
+            "never_until": {
+              "tool": "book_appointment",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "symptoms_recorded"
+                  },
+                  {
+                    "not": {
+                      "is_true": "is_emergency"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "once": "book_appointment"
+          },
+          {
+            "require": [
+              "close"
+            ]
+          }
+        ],
+        "ambient": [
+          "escalate_emergency",
+          "flag_urgency"
+        ]
+      },
+      "tests": [
+        {
+          "name": "routine visit books an appointment",
+          "script": [
+            {
+              "expect": {
+                "active": [
+                  "identify"
+                ],
+                "blocked": [
+                  "book_appointment"
+                ]
+              }
+            },
+            {
+              "tool": "find_patient"
+            },
+            {
+              "tool": "record_symptoms"
+            },
+            {
+              "expect": {
+                "done": [
+                  "identify",
+                  "triage"
+                ],
+                "allowed": [
+                  "book_appointment"
+                ]
+              }
+            },
+            {
+              "tool": "book_appointment"
+            },
+            {
+              "expect": {
+                "done": [
+                  "schedule",
+                  "close"
+                ],
+                "complete": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "emergency blocks scheduling",
+          "script": [
+            {
+              "tool": "find_patient"
+            },
+            {
+              "set": {
+                "is_emergency": true
+              }
+            },
+            {
+              "tool": "escalate_emergency"
+            },
+            {
+              "expect": {
+                "done": [
+                  "triage"
+                ],
+                "blocked": [
+                  "book_appointment"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "no booking before triage",
+          "script": [
+            {
+              "tool": "find_patient"
+            },
+            {
+              "tool": "book_appointment"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "book_appointment"
+                ],
+                "complete": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "late urgency blocks booking after routine triage",
+          "script": [
+            {
+              "tool": "find_patient"
+            },
+            {
+              "tool": "record_symptoms"
+            },
+            {
+              "expect": {
+                "allowed": [
+                  "book_appointment"
+                ]
+              }
+            },
+            {
+              "tool": "flag_urgency"
+            },
+            {
+              "tool": "book_appointment"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "book_appointment"
+                ]
+              }
+            },
+            {
+              "tool": "flag_urgency"
+            },
+            {
+              "expect": {
+                "state": {
+                  "is_emergency": true
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "extract": [
+        {
+          "name": "triage",
+          "instruction": "From the caller's description, extract symptoms and whether they describe an emergency (chest pain, difficulty breathing, stroke signs).",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "symptoms": {
+                "type": "string"
+              },
+              "is_emergency": {
+                "type": "boolean"
+              }
+            }
+          },
+          "promote": [
+            {
+              "field": "is_emergency",
+              "policy": "true_only"
+            },
+            {
+              "field": "symptoms",
+              "policy": "non_empty"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "appointment_management",
+      "version": "2.0.0",
+      "description": "Verify the patient, inspect an existing appointment, then propose rescheduling or cancellation.",
+      "instruction": "Verify the patient, inspect an existing appointment, then propose rescheduling or cancellation. Use controlled demo data only. Explain proposed changes and wait for trusted application approval. Do not treat spoken consent as application approval. Never borrow verification from another task.",
+      "inputs": {
+        "patient_name": {
+          "type": "string",
+          "description": ""
+        },
+        "date_of_birth": {
+          "type": "string",
+          "description": ""
+        },
+        "appointment_reference": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object",
+          "description": "Accepted controlled tool result, not proof of a real service operation."
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_patient",
+          "description": "Read the controlled patient identity check for this appointment task.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "date_of_birth": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "date_of_birth"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "verified": true,
+            "patient_id": "P-2210",
+            "demo": true
+          },
+          "set_state": {
+            "verified": true
+          }
+        },
+        {
+          "name": "lookup_appointment",
+          "description": "Read the appointment identified by patient ID and booking reference.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "patient_id": {
+                "type": "string"
+              },
+              "appointment_reference": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "patient_id",
+              "appointment_reference"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "found": true,
+            "reference": "CG-5531",
+            "time": "Thursday 10:20",
+            "demo": true
+          },
+          "set_state": {
+            "appointment_found": true
+          }
+        },
+        {
+          "name": "reschedule_appointment",
+          "description": "Propose changing this checked appointment to a named time.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "patient_id": {
+                "type": "string"
+              },
+              "appointment_reference": {
+                "type": "string"
+              },
+              "new_time": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "patient_id",
+              "appointment_reference",
+              "new_time",
+              "request_id"
+            ]
+          },
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "rescheduled": true,
+            "reference": "CG-5531",
+            "time": "Friday 14:00",
+            "demo": true
+          },
+          "set_state": {
+            "changed": true
+          },
+          "save_response_as": "result"
+        },
+        {
+          "name": "cancel_appointment",
+          "description": "Propose cancellation of this checked appointment.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "patient_id": {
+                "type": "string"
+              },
+              "appointment_reference": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "patient_id",
+              "appointment_reference",
+              "reason",
+              "request_id"
+            ]
+          },
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "cancelled": true,
+            "reference": "CG-5531",
+            "demo": true
+          },
+          "set_state": {
+            "changed": true
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "verified": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "appointment_found": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "changed": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "identify",
+            "posture": "Use the declared tools to complete identify.",
+            "allow": [
+              "verify_patient"
+            ],
+            "done": {
+              "is_true": "verified"
+            }
+          },
+          {
+            "id": "inspect",
+            "posture": "Use the declared tools to complete inspect.",
+            "allow": [
+              "lookup_appointment"
+            ],
+            "done": {
+              "is_true": "appointment_found"
+            },
+            "after": [
+              "identify"
+            ]
+          },
+          {
+            "id": "change",
+            "posture": "Use the declared tools to complete change.",
+            "allow": [
+              "reschedule_appointment",
+              "cancel_appointment"
+            ],
+            "done": {
+              "is_true": "changed"
+            },
+            "after": [
+              "inspect"
+            ]
+          },
+          {
+            "id": "done",
+            "after": [
+              "change"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "once": "reschedule_appointment"
+          },
+          {
+            "once": "cancel_appointment"
+          },
+          {
+            "never_until": {
+              "tool": "reschedule_appointment",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "verified"
+                  },
+                  {
+                    "is_true": "appointment_found"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "cancel_appointment",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "verified"
+                  },
+                  {
+                    "is_true": "appointment_found"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "clinic_info",
+      "version": "2.0.0",
+      "description": "Answer public clinic hours, location and visit-preparation questions without patient records.",
+      "instruction": "Answer public clinic information questions from the demo source. Do not request patient identifiers or give medical advice. Complete this child task and return to the parent when appropriate.",
+      "inputs": {
+        "question": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object",
+          "description": "Accepted controlled tool result, not proof of a real service operation."
+        }
+      },
+      "tools": [
+        {
+          "name": "lookup_clinic_info",
+          "description": "Retrieve the controlled public clinic information.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "question": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "question"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "hours": "Mon\u2013Fri 08:00\u201318:00",
+            "address": "18 Cedar Lane",
+            "preparation": "Bring photo ID, medication list, and insurance details.",
+            "source": "Cedar Grove clinic information demo",
+            "demo": true
+          },
+          "save_response_as": "result"
+        }
+      ]
+    },
+    {
+      "name": "nurse_callback",
+      "version": "2.0.0",
+      "description": "Verify and prepare a nonurgent nurse callback request. This is not emergency care.",
+      "instruction": "Verify and prepare a nonurgent nurse callback request. This is not emergency care. Use controlled demo data only. Explain proposed changes and wait for trusted application approval. Do not treat spoken consent as application approval. Never borrow verification from another task.",
+      "inputs": {
+        "patient_name": {
+          "type": "string",
+          "description": ""
+        },
+        "date_of_birth": {
+          "type": "string",
+          "description": ""
+        },
+        "reason": {
+          "type": "string",
+          "description": ""
+        },
+        "callback_number": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object",
+          "description": "Accepted controlled tool result, not proof of a real service operation."
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_patient",
+          "description": "Perform a new controlled identity check for this nurse request.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "date_of_birth": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "date_of_birth"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "verified": true,
+            "patient_id": "P-2210",
+            "demo": true
+          },
+          "set_state": {
+            "verified": true
+          }
+        },
+        {
+          "name": "prepare_nurse_summary",
+          "description": "Prepare the caller\u2019s nonurgent nurse request locally; do not diagnose.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "patient_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "callback_number": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "patient_id",
+              "reason",
+              "callback_number"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "summary_ready": true,
+            "demo": true
+          },
+          "set_state": {
+            "summary_ready": true
+          }
+        },
+        {
+          "name": "request_nurse_callback",
+          "description": "Propose a nurse callback with patient identity, exact reason and callback number.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "patient_id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "callback_number": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "patient_id",
+              "reason",
+              "callback_number",
+              "request_id"
+            ]
+          },
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "callback_requested": true,
+            "reference": "DEMO-CB-901",
+            "window": "Next clinic business day",
+            "demo": true
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "verified": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "summary_ready": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "identify",
+            "posture": "Use the declared tools to complete identify.",
+            "allow": [
+              "verify_patient"
+            ],
+            "done": {
+              "is_true": "verified"
+            }
+          },
+          {
+            "id": "prepare",
+            "posture": "Use the declared tools to complete prepare.",
+            "allow": [
+              "prepare_nurse_summary"
+            ],
+            "done": {
+              "is_true": "summary_ready"
+            },
+            "after": [
+              "identify"
+            ]
+          },
+          {
+            "id": "request",
+            "posture": "Use the declared tools to complete request.",
+            "allow": [
+              "request_nurse_callback"
+            ],
+            "done": {
+              "called_ok": "request_nurse_callback"
+            },
+            "after": [
+              "prepare"
+            ]
+          },
+          {
+            "id": "done",
+            "after": [
+              "request"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "once": "request_nurse_callback"
+          },
+          {
+            "never_until": {
+              "tool": "request_nurse_callback",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "verified"
+                  },
+                  {
+                    "is_true": "summary_ready"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "visit_documents",
+      "version": "2.0.0",
+      "description": "Verify the patient and retrieve their controlled visit-document checklist.",
+      "instruction": "Verify the patient and retrieve their controlled visit-document checklist. Use controlled demo data only. Explain proposed changes and wait for trusted application approval. Do not treat spoken consent as application approval. Never borrow verification from another task.",
+      "inputs": {
+        "patient_name": {
+          "type": "string",
+          "description": ""
+        },
+        "date_of_birth": {
+          "type": "string",
+          "description": ""
+        },
+        "visit_type": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object",
+          "description": "Accepted controlled tool result, not proof of a real service operation."
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_patient",
+          "description": "Check this task\u2019s patient before discussing a personalized checklist.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "date_of_birth": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "date_of_birth"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "verified": true,
+            "demo": true
+          },
+          "set_state": {
+            "verified": true
+          }
+        },
+        {
+          "name": "get_visit_documents",
+          "description": "Read the checked patient\u2019s controlled appointment checklist.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "patient_id": {
+                "type": "string"
+              },
+              "visit_type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "patient_id",
+              "visit_type"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "visit_type": "Routine consultation",
+            "checklist": [
+              "Photo ID",
+              "Medication list",
+              "Insurance card"
+            ],
+            "forms": [
+              "Patient history",
+              "Contact preferences"
+            ],
+            "source": "Cedar Grove preparation demo",
+            "demo": true
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "verified": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "identify",
+            "posture": "Use the declared tools to complete identify.",
+            "allow": [
+              "verify_patient"
+            ],
+            "done": {
+              "is_true": "verified"
+            }
+          },
+          {
+            "id": "documents",
+            "posture": "Use the declared tools to complete documents.",
+            "allow": [
+              "get_visit_documents"
+            ],
+            "done": {
+              "called_ok": "get_visit_documents"
+            },
+            "after": [
+              "identify"
+            ]
+          },
+          {
+            "id": "done",
+            "after": [
+              "documents"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "never_until": {
+              "tool": "get_visit_documents",
+              "until": {
+                "is_true": "verified"
+              }
+            }
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "task_scenarios": [
+    {
+      "name": "Routine intake completes after booking approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "patient_intake",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "symptoms": "Persistent cough",
+              "preferred_time": "Thursday 10:20"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "find_patient",
+            "args": {
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_symptoms",
+            "args": {
+              "symptoms": "Persistent cough",
+              "severity": "caller reports mild"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "preferred_time": "Thursday 10:20",
+              "visit_reason": "Persistent cough",
+              "request_id": "BOOK-2210-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "booked": true,
+                  "slot": "Thursday 10:20",
+                  "reference": "CG-5531",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Clinic information completes independently",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "clinic_info",
+            "input": {
+              "question": "What should I bring?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_clinic_info",
+            "args": {
+              "question": "What should I bring?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "hours": "Mon\u2013Fri 08:00\u201318:00",
+                  "address": "18 Cedar Lane",
+                  "preparation": "Bring photo ID, medication list, and insurance details.",
+                  "source": "Cedar Grove clinic information demo",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Appointment reschedule checks patient before approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "appointment_management",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "appointment_reference": "CG-5531"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_patient",
+            "args": {
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "appointment_reference": "CG-5531"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "reschedule_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "appointment_reference": "CG-5531",
+              "request_id": "CHANGE-CG-5531",
+              "new_time": "Friday 14:00"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "rescheduled": true,
+                  "reference": "CG-5531",
+                  "time": "Friday 14:00",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Appointment cancellation checks patient before approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "appointment_management",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "appointment_reference": "CG-5531"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_patient",
+            "args": {
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "appointment_reference": "CG-5531"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "cancel_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "appointment_reference": "CG-5531",
+              "request_id": "CHANGE-CG-5531",
+              "reason": "Caller cannot attend"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "cancelled": true,
+                  "reference": "CG-5531",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Nonurgent nurse callback completes with approved receipt",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "nurse_callback",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "reason": "Question about preparing for appointment",
+              "callback_number": "555-0142"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_patient",
+            "args": {
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "prepare_nurse_summary",
+            "args": {
+              "patient_id": "P-2210",
+              "reason": "Question about preparing for appointment",
+              "callback_number": "555-0142"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "request_nurse_callback",
+            "args": {
+              "patient_id": "P-2210",
+              "reason": "Question about preparing for appointment",
+              "callback_number": "555-0142",
+              "request_id": "CALLBACK-901"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "callback_requested": true,
+                  "reference": "DEMO-CB-901",
+                  "window": "Next clinic business day",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Verified patient visit documents complete",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "visit_documents",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "visit_type": "Routine consultation"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_patient",
+            "args": {
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "get_visit_documents",
+            "args": {
+              "patient_id": "P-2210",
+              "visit_type": "Routine consultation"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "visit_type": "Routine consultation",
+                  "checklist": [
+                    "Photo ID",
+                    "Medication list",
+                    "Insurance card"
+                  ],
+                  "forms": [
+                    "Patient history",
+                    "Contact preferences"
+                  ],
+                  "source": "Cedar Grove preparation demo",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Public clinic question resumes identified intake",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "patient_intake",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "symptoms": "Persistent cough",
+              "preferred_time": "Thursday 10:20"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "find_patient",
+            "args": {
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_symptoms",
+            "args": {
+              "symptoms": "Persistent cough",
+              "severity": "caller reports mild"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "clinic_info",
+            "input": {
+              "question": "Where is the clinic?"
+            },
+            "parent": "task-1"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "lookup_clinic_info",
+            "args": {
+              "question": "Where is the clinic?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-2"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-2",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "hours": "Mon\u2013Fri 08:00\u201318:00",
+                  "address": "18 Cedar Lane",
+                  "preparation": "Bring photo ID, medication list, and insurance details.",
+                  "source": "Cedar Grove clinic information demo",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        },
+        {
+          "event": "expect",
+          "foreground": "task-1",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "identify",
+                "triage"
+              ],
+              "active": [
+                "schedule"
+              ]
+            }
+          ]
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "preferred_time": "Thursday 10:20",
+              "visit_reason": "Persistent cough",
+              "request_id": "BOOK-2210-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-4": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-4",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "booked": true,
+                  "slot": "Thursday 10:20",
+                  "reference": "CG-5531",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Booking is rejected before symptom capture",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "patient_intake",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "symptoms": "Persistent cough",
+              "preferred_time": "Thursday 10:20"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "preferred_time": "Thursday 10:20",
+              "visit_reason": "Persistent cough",
+              "request_id": "BOOK-2210-1"
+            }
+          },
+          "expected_error": "not permitted yet"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "active": [
+                "identify"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Late urgency vetoes routine booking and routes only after approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "patient_intake",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "symptoms": "Persistent cough",
+              "preferred_time": "Thursday 10:20"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "find_patient",
+            "args": {
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_symptoms",
+            "args": {
+              "symptoms": "Persistent cough",
+              "severity": "caller reports mild"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "flag_urgency",
+            "args": {
+              "reported_concern": "Caller reports urgent breathing concern"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "flag_urgency",
+            "args": {
+              "reported_concern": "Concern still present"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "preferred_time": "Thursday 10:20",
+              "visit_reason": "Persistent cough",
+              "request_id": "BOOK-2210-1"
+            }
+          },
+          "expected_error": "not permitted yet"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "escalate_emergency",
+            "args": {
+              "patient_id": "P-2210",
+              "callback_number": "555-0142",
+              "symptom_summary": "Caller reports urgent breathing concern",
+              "request_id": "ROUTE-2210-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-5": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-5",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "routing_proposal_accepted": true,
+                  "reference": "DEMO-NURSE-2210",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Denied booking has no success receipt",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "patient_intake",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "symptoms": "Persistent cough",
+              "preferred_time": "Thursday 10:20"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "find_patient",
+            "args": {
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_symptoms",
+            "args": {
+              "symptoms": "Persistent cough",
+              "severity": "caller reports mild"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "preferred_time": "Thursday 10:20",
+              "visit_reason": "Persistent cough",
+              "request_id": "BOOK-2210-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": false
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "active": [
+                "schedule"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-3": "declined"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          },
+          "expected_error": "governance has not completed"
+        }
+      ]
+    },
+    {
+      "name": "Cancelling a held patient lookup rejects its late result",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "patient_intake",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "symptoms": "Persistent cough",
+              "preferred_time": "Thursday 10:20"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "find_patient",
+            "args": {
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          },
+          "defer": true
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "cancel",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "finish",
+          "operation": "operation-1"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "cancelled",
+              "revision": 2
+            }
+          ],
+          "operations": {
+            "operation-1": "cancelled"
           }
         }
       ]
     },
     {
-      "name": "no booking before triage",
-      "script": [
+      "name": "Stable booking key reuses the accepted receipt",
+      "steps": [
         {
-          "tool": "find_patient"
-        },
-        {
-          "tool": "book_appointment"
-        },
-        {
-          "expect": {
-            "blocked": [
-              "book_appointment"
-            ],
-            "complete": false
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "patient_intake",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "symptoms": "Persistent cough",
+              "preferred_time": "Thursday 10:20"
+            }
           }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "find_patient",
+            "args": {
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_symptoms",
+            "args": {
+              "symptoms": "Persistent cough",
+              "severity": "caller reports mild"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "preferred_time": "Thursday 10:20",
+              "visit_reason": "Persistent cough",
+              "request_id": "BOOK-2210-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "preferred_time": "Thursday 10:20",
+              "visit_reason": "Persistent cough",
+              "request_id": "BOOK-2210-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-4": "succeeded"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "booked": true,
+                  "slot": "Thursday 10:20",
+                  "reference": "CG-5531",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Appointment change requires this task\u2019s own patient check",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "appointment_management",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "appointment_reference": "CG-5531"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "cancel_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "appointment_reference": "CG-5531",
+              "reason": "Caller request",
+              "request_id": "NO-CHECK"
+            }
+          },
+          "expected_error": "not permitted yet"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "active": [
+                "identify"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Caller-reported urgency from speech revokes an unexecuted booking",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "patient_intake",
+            "input": {
+              "patient_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "symptoms": "Persistent cough",
+              "preferred_time": "Thursday 10:20"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "find_patient",
+            "args": {
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_symptoms",
+            "args": {
+              "symptoms": "Persistent cough",
+              "severity": "caller reports mild"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "preferred_time": "Thursday 10:20",
+              "visit_reason": "Persistent cough",
+              "request_id": "BOOK-2210-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I am now having difficulty breathing and need help.",
+          "extraction": {
+            "triage": {
+              "is_emergency": true,
+              "symptoms": "reported difficulty breathing"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "declined"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          },
+          "expected_error": "no longer pending"
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "Can you just make the routine appointment?",
+          "extraction": {
+            "triage": {
+              "is_emergency": false
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_appointment",
+            "args": {
+              "patient_id": "P-2210",
+              "preferred_time": "Thursday 10:20",
+              "visit_reason": "Persistent cough",
+              "request_id": "BOOK-2210-1"
+            }
+          },
+          "expected_error": "not permitted yet"
         }
       ]
     }

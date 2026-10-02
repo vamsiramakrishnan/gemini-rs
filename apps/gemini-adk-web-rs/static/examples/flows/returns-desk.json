@@ -1,103 +1,1991 @@
 {
   "name": "returns-desk",
-  "description": "E-commerce returns: locate the order, check eligibility, then refund or offer store credit — the refund is a confirm-gated, single-use commit.",
-  "instruction": "You are the returns assistant for Meridian Home Goods. Locate the order, check the return window and condition, and process the refund only when eligibility is confirmed. Offer store credit when a refund is not possible.",
-  "greeting": "Welcome the caller to Meridian returns and ask for their order number.",
-  "modality": "text",
-  "tools": [
+  "version": "2.0.0",
+  "description": "Meridian voice service: governed return settlement, independently verified shipment tracking and exchanges, and public return-policy information. Controlled demo fixtures.",
+  "instruction": "You are one voice assistant. Route to the relevant independently usable capability; start its task with real business inputs. Do not activate an unrelated workflow just to answer a public question. A public information capability may be a child task; complete it and resume its parent without repeating finished work. Private tasks verify their own account/order. All service responses are controlled demo fixtures; no real account lookup, payment, transfer or persistent change occurs. Commits require exact proposals and explicit approval in the application, never spoken consent. Wait for a successful receipt before claiming a demo action finished.",
+  "greeting": "Welcome the caller to Meridian Home Goods and ask whether they need a return, shipment tracking, an exchange or policy information.",
+  "modality": "audio",
+  "voice": "Kore",
+  "skills": [
     {
-      "name": "lookup_order",
-      "description": "Look up an order by its number.",
-      "parameters": {
-        "type": "object",
-        "properties": { "order_number": { "type": "string" } },
-        "required": ["order_number"]
+      "name": "return_settlement",
+      "version": "2.0.0",
+      "description": "You are the returns assistant for Meridian Home Goods. Locate the order, check the return window and condition, and process the refund only when eligibility is confirmed. Offer store credit when a refund is not possible.",
+      "instruction": "You are the returns assistant for Meridian Home Goods. Locate the order, check the return window and condition, and process the refund only when eligibility is confirmed. Offer store credit when a refund is not possible. These are controlled demo data, not live account records or persistent actions. Ask for the declared business inputs. Do not reuse another task’s verification. Use the tool receipt for the answer and complete with the declared result. A commit creates an exact proposal: explain its arguments, wait for application approval, then report only its successful receipt. Spoken consent does not approve an operation.",
+      "inputs": {
+        "order_number": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        }
       },
-      "response": { "found": true, "item": "Linen duvet set", "delivered_days_ago": 12, "total_usd": 149 },
-      "set_state": { "order_found": true }
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "lookup_order",
+          "description": "Verify the order number and customer email against the found demo order. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_number": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number",
+              "email"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "found": true,
+            "item": "Linen duvet set",
+            "delivered_days_ago": 12,
+            "total_usd": 149
+          },
+          "set_state": {
+            "order_found": true
+          }
+        },
+        {
+          "name": "check_eligibility",
+          "description": "Read the eligible-return fixture for this order and declared item condition. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_number": {
+                "type": "string"
+              },
+              "item_condition": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number",
+              "item_condition"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "eligible": true,
+            "window_days_left": 18
+          },
+          "set_state": {
+            "eligibility_checked": true,
+            "refund_eligible": true
+          }
+        },
+        {
+          "name": "issue_refund",
+          "description": "Propose the exact order, amount and original payment method for refund. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_number": {
+                "type": "string"
+              },
+              "amount_usd": {
+                "type": "number"
+              },
+              "payment_method": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number",
+              "amount_usd",
+              "payment_method",
+              "request_id"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "refunded": true,
+            "reference": "RF-30917"
+          },
+          "set_state": {
+            "refund_issued": true
+          },
+          "save_response_as": "result"
+        },
+        {
+          "name": "offer_store_credit",
+          "description": "Propose the exact order and amount for store credit instead of refund. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_number": {
+                "type": "string"
+              },
+              "amount_usd": {
+                "type": "number"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number",
+              "amount_usd",
+              "request_id"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "credited": true,
+            "amount_usd": 149
+          },
+          "set_state": {
+            "credit_issued": true
+          },
+          "save_response_as": "result"
+        },
+        {
+          "name": "check_ineligible_return",
+          "description": "Read the separate out-of-window fixture; it never grants refund eligibility. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_number": {
+                "type": "string"
+              },
+              "item_condition": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number",
+              "item_condition"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "eligible": false,
+            "reason": "Outside the refund window",
+            "store_credit_available": true
+          },
+          "set_state": {
+            "eligibility_checked": true,
+            "refund_eligible": false
+          }
+        }
+      ],
+      "flow": {
+        "steps": [
+          {
+            "id": "locate",
+            "posture": "Find the order before discussing the return.",
+            "allow": [
+              "lookup_order"
+            ],
+            "done": {
+              "is_true": "order_found"
+            }
+          },
+          {
+            "id": "eligibility",
+            "after": [
+              "locate"
+            ],
+            "posture": "Check eligibility and explain the outcome plainly — window, condition, and what the customer can expect.",
+            "allow": [
+              "check_eligibility",
+              "check_ineligible_return"
+            ],
+            "done": {
+              "is_true": "eligibility_checked"
+            },
+            "ground": "Order {order_found?located:not located}; eligibility {eligibility_checked?checked:pending}."
+          },
+          {
+            "id": "settle",
+            "after": [
+              "eligibility"
+            ],
+            "posture": "Refund when eligible; otherwise offer store credit. Read the reference back.",
+            "allow": [
+              "issue_refund",
+              "offer_store_credit"
+            ],
+            "done": {
+              "any": [
+                {
+                  "is_true": "refund_issued"
+                },
+                {
+                  "is_true": "credit_issued"
+                }
+              ]
+            }
+          },
+          {
+            "id": "done",
+            "after": [
+              "settle"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "once": "issue_refund"
+          },
+          {
+            "never_until": {
+              "tool": "issue_refund",
+              "until": {
+                "is_true": "refund_eligible"
+              }
+            }
+          },
+          {
+            "require": [
+              "done"
+            ]
+          },
+          {
+            "never_until": {
+              "tool": "offer_store_credit",
+              "until": {
+                "is_true": "eligibility_checked"
+              }
+            }
+          },
+          {
+            "once": "offer_store_credit"
+          }
+        ]
+      },
+      "state": {
+        "order_found": {
+          "type": "boolean",
+          "default": false
+        },
+        "eligibility_checked": {
+          "type": "boolean",
+          "default": false
+        },
+        "refund_eligible": {
+          "type": "boolean",
+          "default": false
+        },
+        "refund_issued": {
+          "type": "boolean",
+          "default": false
+        },
+        "credit_issued": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "tests": [
+        {
+          "name": "eligible return is refunded once",
+          "script": [
+            {
+              "expect": {
+                "active": [
+                  "locate"
+                ],
+                "blocked": [
+                  "issue_refund"
+                ]
+              }
+            },
+            {
+              "tool": "lookup_order"
+            },
+            {
+              "tool": "check_eligibility"
+            },
+            {
+              "expect": {
+                "allowed": [
+                  "issue_refund"
+                ]
+              }
+            },
+            {
+              "tool": "issue_refund"
+            },
+            {
+              "tool": "issue_refund"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "issue_refund"
+                ],
+                "done": [
+                  "settle",
+                  "done"
+                ],
+                "complete": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "no refund before eligibility",
+          "script": [
+            {
+              "tool": "lookup_order"
+            },
+            {
+              "tool": "issue_refund"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "issue_refund"
+                ],
+                "complete": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "ineligible return settles with credit",
+          "script": [
+            {
+              "tool": "lookup_order"
+            },
+            {
+              "set": {
+                "eligibility_checked": true
+              }
+            },
+            {
+              "tool": "offer_store_credit"
+            },
+            {
+              "expect": {
+                "done": [
+                  "settle",
+                  "done"
+                ],
+                "blocked": [
+                  "issue_refund"
+                ],
+                "complete": true
+              }
+            }
+          ]
+        }
+      ]
     },
     {
-      "name": "check_eligibility",
-      "description": "Check the return window and item condition rules for this order.",
-      "response": { "eligible": true, "window_days_left": 18 },
-      "set_state": { "eligibility_checked": true, "refund_eligible": true }
+      "name": "order_tracking",
+      "version": "2.0.0",
+      "description": "Verify an order and retrieve shipment progress without requiring a return or issuing a refund.",
+      "instruction": "Verify an order and retrieve shipment progress without requiring a return or issuing a refund. These are controlled demo data, not live account records or persistent actions. Ask for the declared business inputs. Do not reuse another task’s verification. Use the tool receipt for the answer and complete with the declared result. A commit creates an exact proposal: explain its arguments, wait for application approval, then report only its successful receipt. Spoken consent does not approve an operation.",
+      "inputs": {
+        "order_number": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_order_owner",
+          "description": "Verify the order number and customer email in the shipment fixture. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_number": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number",
+              "email"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "verified": true
+          },
+          "set_state": {
+            "verified": true
+          }
+        },
+        {
+          "name": "lookup_shipment",
+          "description": "Read the verified order shipment fixture. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_number": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "order_number": "MH-30917",
+            "carrier": "Demo Parcel",
+            "tracking_reference": "DP-30917",
+            "status": "in_transit",
+            "estimated_delivery": "Friday demo date"
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "posture": "Use the admitted tools and report their controlled demo result.",
+            "allow": [
+              "verify_order_owner"
+            ],
+            "done": {
+              "is_true": "verified"
+            }
+          },
+          {
+            "id": "track",
+            "posture": "Use the admitted tools and report their controlled demo result.",
+            "allow": [
+              "lookup_shipment"
+            ],
+            "done": {
+              "called_ok": "lookup_shipment"
+            },
+            "after": [
+              "verify"
+            ]
+          },
+          {
+            "id": "done",
+            "after": [
+              "track"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "never_until": {
+              "tool": "lookup_shipment",
+              "until": {
+                "is_true": "verified"
+              }
+            }
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      },
+      "state": {
+        "verified": {
+          "type": "boolean",
+          "default": false
+        }
+      }
     },
     {
-      "name": "issue_refund",
-      "description": "Refund the order to the original payment method.",
-      "response": { "refunded": true, "reference": "RF-30917" },
-      "set_state": { "refund_issued": true }
+      "name": "exchange_request",
+      "version": "2.0.0",
+      "description": "Verify an order, check replacement stock and arrange an approved item exchange; do not issue a refund.",
+      "instruction": "Verify an order, check replacement stock and arrange an approved item exchange; do not issue a refund. These are controlled demo data, not live account records or persistent actions. Ask for the declared business inputs. Do not reuse another task’s verification. Use the tool receipt for the answer and complete with the declared result. A commit creates an exact proposal: explain its arguments, wait for application approval, then report only its successful receipt. Spoken consent does not approve an operation.",
+      "inputs": {
+        "order_number": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "replacement_sku": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_exchange_order",
+          "description": "Verify ownership of the order against the email in the exchange fixture. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_number": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number",
+              "email"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "verified": true
+          },
+          "set_state": {
+            "verified": true
+          }
+        },
+        {
+          "name": "check_replacement",
+          "description": "Read the eligible, in-stock replacement fixture. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_number": {
+                "type": "string"
+              },
+              "replacement_sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number",
+              "replacement_sku"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "eligible": true,
+            "stock_available": true
+          },
+          "set_state": {
+            "replacement_checked": true,
+            "exchange_eligible": true,
+            "stock_available": true
+          }
+        },
+        {
+          "name": "replacement_unavailable",
+          "description": "Read the separate out-of-stock fixture; no exchange is authorized. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_number": {
+                "type": "string"
+              },
+              "replacement_sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number",
+              "replacement_sku"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "eligible": true,
+            "stock_available": false
+          },
+          "set_state": {
+            "replacement_checked": true,
+            "exchange_eligible": true,
+            "stock_available": false
+          }
+        },
+        {
+          "name": "submit_exchange",
+          "description": "Propose this order and replacement SKU for the approved exchange. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_number": {
+                "type": "string"
+              },
+              "replacement_sku": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "order_number",
+              "replacement_sku",
+              "request_id"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "exchange_reference": "EX-30917",
+            "order_number": "MH-30917",
+            "replacement_sku": "DUVET-BLUE-KING",
+            "return_label_reference": "RL-30917"
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "posture": "Use the admitted tools and report their controlled demo result.",
+            "allow": [
+              "verify_exchange_order"
+            ],
+            "done": {
+              "is_true": "verified"
+            }
+          },
+          {
+            "id": "stock",
+            "posture": "Use the admitted tools and report their controlled demo result.",
+            "allow": [
+              "check_replacement",
+              "replacement_unavailable"
+            ],
+            "done": {
+              "is_true": "replacement_checked"
+            },
+            "after": [
+              "verify"
+            ]
+          },
+          {
+            "id": "exchange",
+            "posture": "Use the admitted tools and report their controlled demo result.",
+            "allow": [
+              "submit_exchange"
+            ],
+            "done": {
+              "called_ok": "submit_exchange"
+            },
+            "after": [
+              "stock"
+            ]
+          },
+          {
+            "id": "done",
+            "after": [
+              "exchange"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "once": "submit_exchange"
+          },
+          {
+            "never_until": {
+              "tool": "submit_exchange",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "verified"
+                  },
+                  {
+                    "is_true": "exchange_eligible"
+                  },
+                  {
+                    "is_true": "stock_available"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      },
+      "state": {
+        "verified": {
+          "type": "boolean",
+          "default": false
+        },
+        "replacement_checked": {
+          "type": "boolean",
+          "default": false
+        },
+        "exchange_eligible": {
+          "type": "boolean",
+          "default": false
+        },
+        "stock_available": {
+          "type": "boolean",
+          "default": false
+        }
+      }
     },
     {
-      "name": "offer_store_credit",
-      "description": "Issue store credit instead of a refund.",
-      "response": { "credited": true, "amount_usd": 149 },
-      "set_state": { "credit_issued": true }
+      "name": "return_policy",
+      "version": "2.0.0",
+      "description": "Answer public returns-policy questions without granting order-specific eligibility or processing a return.",
+      "instruction": "Answer public returns-policy questions without granting order-specific eligibility or processing a return. These are controlled demo data, not live account records or persistent actions. Ask for the declared business inputs. Do not reuse another task’s verification. Use the tool receipt for the answer and complete with the declared result. A commit creates an exact proposal: explain its arguments, wait for application approval, then report only its successful receipt. Spoken consent does not approve an operation.",
+      "inputs": {
+        "question": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "lookup_return_policy",
+          "description": "Retrieve the public policy fixture and its source. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "question": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "question"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "return_window_days": 30,
+            "condition": "Unused items in original packaging",
+            "refund_destination": "Original payment method when eligible",
+            "source": "Meridian demo returns policy",
+            "individual_eligibility": "Requires an order check"
+          },
+          "save_response_as": "result"
+        }
+      ]
     }
   ],
-  "flow": {
-    "steps": [
-      {
-        "id": "locate",
-        "posture": "Find the order before discussing the return.",
-        "allow": ["lookup_order"],
-        "done": { "is_true": "order_found" }
-      },
-      {
-        "id": "eligibility",
-        "after": ["locate"],
-        "posture": "Check eligibility and explain the outcome plainly — window, condition, and what the customer can expect.",
-        "allow": ["check_eligibility"],
-        "done": { "is_true": "eligibility_checked" },
-        "ground": "Order {order_found?located:not located}; eligibility {eligibility_checked?checked:pending}."
-      },
-      {
-        "id": "settle",
-        "after": ["eligibility"],
-        "posture": "Refund when eligible; otherwise offer store credit. Read the reference back.",
-        "allow": ["issue_refund", "offer_store_credit"],
-        "done": { "any": [{ "is_true": "refund_issued" }, { "is_true": "credit_issued" }] }
-      },
-      {
-        "id": "done",
-        "after": ["settle"],
-        "terminal": true
-      }
-    ],
-    "constraints": [
-      { "once": "issue_refund" },
-      { "never_until": { "tool": "issue_refund", "until": { "is_true": "refund_eligible" } } },
-      { "require": ["done"] }
-    ]
-  },
-  "tests": [
+  "task_scenarios": [
     {
-      "name": "eligible return is refunded once",
-      "script": [
-        { "expect": { "active": ["locate"], "blocked": ["issue_refund"] } },
-        { "tool": "lookup_order" },
-        { "tool": "check_eligibility" },
-        { "expect": { "allowed": ["issue_refund"] } },
-        { "tool": "issue_refund" },
-        { "tool": "issue_refund" },
-        { "expect": { "blocked": ["issue_refund"], "done": ["settle", "done"], "complete": true } }
+      "name": "eligible return completes with an approved refund",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "return_settlement",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_order",
+            "args": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_eligibility",
+            "args": {
+              "order_number": "MH-30917",
+              "item_condition": "unused"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "issue_refund",
+            "args": {
+              "order_number": "MH-30917",
+              "amount_usd": 149,
+              "payment_method": "original",
+              "request_id": "refund-30917"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "refunded": true,
+                  "reference": "RF-30917"
+                }
+              }
+            }
+          ]
+        }
       ]
     },
     {
-      "name": "no refund before eligibility",
-      "script": [
-        { "tool": "lookup_order" },
-        { "tool": "issue_refund" },
-        { "expect": { "blocked": ["issue_refund"], "complete": false } }
+      "name": "verified order tracking completes independently",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "order_tracking",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_order_owner",
+            "args": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_shipment",
+            "args": {
+              "order_number": "MH-30917"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "order_number": "MH-30917",
+                  "carrier": "Demo Parcel",
+                  "tracking_reference": "DP-30917",
+                  "status": "in_transit",
+                  "estimated_delivery": "Friday demo date"
+                }
+              }
+            }
+          ]
+        }
       ]
     },
     {
-      "name": "ineligible return settles with credit",
-      "script": [
-        { "tool": "lookup_order" },
-        { "set": { "eligibility_checked": true } },
-        { "tool": "offer_store_credit" },
-        { "expect": { "done": ["settle", "done"], "blocked": ["issue_refund"], "complete": true } }
+      "name": "verified in-stock exchange completes with approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "exchange_request",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test",
+              "replacement_sku": "DUVET-BLUE-KING"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_exchange_order",
+            "args": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_replacement",
+            "args": {
+              "order_number": "MH-30917",
+              "replacement_sku": "DUVET-BLUE-KING"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "submit_exchange",
+            "args": {
+              "order_number": "MH-30917",
+              "replacement_sku": "DUVET-BLUE-KING",
+              "request_id": "exchange-30917"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "exchange_reference": "EX-30917",
+                  "order_number": "MH-30917",
+                  "replacement_sku": "DUVET-BLUE-KING",
+                  "return_label_reference": "RL-30917"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public return policy completes independently",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "return_policy",
+            "input": {
+              "question": "How long is the return window?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_return_policy",
+            "args": {
+              "question": "How long is the return window?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "return_window_days": 30,
+                  "condition": "Unused items in original packaging",
+                  "refund_destination": "Original payment method when eligible",
+                  "source": "Meridian demo returns policy",
+                  "individual_eligibility": "Requires an order check"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "policy child resumes the located return without granting eligibility",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "return_settlement",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_order",
+            "args": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "return_policy",
+            "input": {
+              "question": "Where does a refund go?"
+            },
+            "parent": "task-1"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "lookup_return_policy",
+            "args": {
+              "question": "Where does a refund go?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-2"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "locate"
+              ],
+              "active": [
+                "eligibility"
+              ]
+            },
+            {
+              "task": "task-2",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "return_window_days": 30,
+                  "condition": "Unused items in original packaging",
+                  "refund_destination": "Original payment method when eligible",
+                  "source": "Meridian demo returns policy",
+                  "individual_eligibility": "Requires an order check"
+                }
+              }
+            }
+          ],
+          "foreground": "task-1"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "issue_refund",
+            "args": {
+              "order_number": "MH-30917",
+              "amount_usd": 149,
+              "payment_method": "original",
+              "request_id": "refund-30917"
+            }
+          },
+          "expected_error": "issue_refund"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_eligibility",
+            "args": {
+              "order_number": "MH-30917",
+              "item_condition": "unused"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "issue_refund",
+            "args": {
+              "order_number": "MH-30917",
+              "amount_usd": 149,
+              "payment_method": "original",
+              "request_id": "refund-30917"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-4",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "refunded": true,
+                  "reference": "RF-30917"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "refund proposal is rejected before an eligibility check",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "return_settlement",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_order",
+            "args": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "issue_refund",
+            "args": {
+              "order_number": "MH-30917",
+              "amount_usd": 149,
+              "payment_method": "original",
+              "request_id": "refund-30917"
+            }
+          },
+          "expected_error": "issue_refund"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "locate"
+              ],
+              "active": [
+                "eligibility"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-1": "succeeded"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          },
+          "expected_error": "governance has not completed"
+        }
+      ]
+    },
+    {
+      "name": "denied refund does not report settlement",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "return_settlement",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_order",
+            "args": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_eligibility",
+            "args": {
+              "order_number": "MH-30917",
+              "item_condition": "unused"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "issue_refund",
+            "args": {
+              "order_number": "MH-30917",
+              "amount_usd": 149,
+              "payment_method": "original",
+              "request_id": "refund-30917"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": false
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          },
+          "expected_error": "governance has not completed"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "active": [
+                "settle"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-3": "declined"
+          }
+        }
+      ]
+    },
+    {
+      "name": "revision invalidates the old refund proposal",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "return_settlement",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_order",
+            "args": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_eligibility",
+            "args": {
+              "order_number": "MH-30917",
+              "item_condition": "unused"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "issue_refund",
+            "args": {
+              "order_number": "MH-30917",
+              "amount_usd": 149,
+              "payment_method": "original",
+              "request_id": "refund-30917"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "revise",
+            "task": "task-1",
+            "expected_revision": 1,
+            "input": {
+              "order_number": "MH-OTHER",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          },
+          "expected_error": "no longer pending"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "revision": 2,
+              "active": [
+                "locate"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-3": "declined"
+          }
+        }
+      ]
+    },
+    {
+      "name": "stable refund key replays a receipt without a second refund",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "return_settlement",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_order",
+            "args": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_eligibility",
+            "args": {
+              "order_number": "MH-30917",
+              "item_condition": "unused"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "issue_refund",
+            "args": {
+              "order_number": "MH-30917",
+              "amount_usd": 149,
+              "payment_method": "original",
+              "request_id": "refund-30917"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "issue_refund",
+            "args": {
+              "order_number": "MH-30917",
+              "amount_usd": 149,
+              "payment_method": "original",
+              "request_id": "refund-30917"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "settle",
+                "done"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-3": "succeeded",
+            "operation-4": "succeeded"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "refunded": true,
+                  "reference": "RF-30917"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ineligible return blocks refund and settles with approved credit",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "return_settlement",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_order",
+            "args": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_ineligible_return",
+            "args": {
+              "order_number": "MH-30917",
+              "item_condition": "unused"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "issue_refund",
+            "args": {
+              "order_number": "MH-30917",
+              "amount_usd": 149,
+              "payment_method": "original",
+              "request_id": "refund-30917"
+            }
+          },
+          "expected_error": "issue_refund"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "offer_store_credit",
+            "args": {
+              "order_number": "MH-30917",
+              "amount_usd": 149,
+              "request_id": "credit-30917"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "credited": true,
+                  "amount_usd": 149
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "out-of-stock replacement cannot produce an exchange proposal",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "exchange_request",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test",
+              "replacement_sku": "DUVET-BLUE-KING"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_exchange_order",
+            "args": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "replacement_unavailable",
+            "args": {
+              "order_number": "MH-30917",
+              "replacement_sku": "DUVET-BLUE-KING"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "submit_exchange",
+            "args": {
+              "order_number": "MH-30917",
+              "replacement_sku": "DUVET-BLUE-KING",
+              "request_id": "exchange-30917"
+            }
+          },
+          "expected_error": "submit_exchange"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          },
+          "expected_error": "governance has not completed"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "verify",
+                "stock"
+              ],
+              "active": [
+                "exchange"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-1": "succeeded",
+            "operation-2": "succeeded"
+          }
+        }
+      ]
+    },
+    {
+      "name": "shipment lookup cannot inherit verification from settlement",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "return_settlement",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_order",
+            "args": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "order_tracking",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "lookup_shipment",
+            "args": {
+              "order_number": "MH-30917"
+            }
+          },
+          "expected_error": "lookup_shipment"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "suspended"
+            },
+            {
+              "task": "task-2",
+              "status": "running",
+              "active": [
+                "verify"
+              ]
+            }
+          ],
+          "foreground": "task-2"
+        }
+      ]
+    },
+    {
+      "name": "denied exchange approval creates no replacement receipt",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "exchange_request",
+            "input": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test",
+              "replacement_sku": "DUVET-BLUE-KING"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_exchange_order",
+            "args": {
+              "order_number": "MH-30917",
+              "email": "buyer@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_replacement",
+            "args": {
+              "order_number": "MH-30917",
+              "replacement_sku": "DUVET-BLUE-KING"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "submit_exchange",
+            "args": {
+              "order_number": "MH-30917",
+              "replacement_sku": "DUVET-BLUE-KING",
+              "request_id": "exchange-30917"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": false
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          },
+          "expected_error": "governance has not completed"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "active": [
+                "exchange"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-3": "declined"
+          }
+        }
       ]
     }
   ]

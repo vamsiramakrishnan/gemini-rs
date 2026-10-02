@@ -1,169 +1,3338 @@
 {
   "name": "restaurant-booking",
-  "description": "Table booking with durable memory: gather party details, check availability, book — remembering diet and seating across visits.",
-  "instruction": "You are the booking assistant for Trattoria Rustica. Help the caller book a table. Use the tools for availability and booking — never invent availability. Use what you remember about the caller, and never ask again for something you already know.",
-  "greeting": "Welcome the caller to Trattoria Rustica and ask when they would like to dine and for how many people.",
-  "modality": "text",
-  "state": {
-    "party_size": {
-      "type": "number",
-      "description": "How many guests the caller is booking for."
-    },
-    "requested_time": {
-      "type": "string",
-      "description": "The requested date and time, as recorded."
-    },
-    "availability_checked": {
-      "type": "boolean",
-      "default": false,
-      "description": "A real availability lookup has run for the requested time."
-    },
-    "user:diet": {
-      "type": "string",
-      "description": "Remembered dietary identity, projected from memory."
-    },
-    "user:seating": {
-      "type": "string",
-      "description": "Remembered seating preference, projected from memory."
-    }
-  },
-  "computed": [
+  "version": "2.0.0",
+  "description": "Restaurant assistant with bookings, reservation changes, menu information, private events and preference lookup. Booking tasks use memory slots, computed party policy, watchers and a timed turn reminder. Business tools return controlled demo fixtures.",
+  "instruction": "You are Trattoria Rustica's restaurant assistant. Choose an independent skill for the caller's objective, and collect its business inputs before starting. For a public menu or ingredient question during booking, start menu_info as a child of the current task and complete it to return. Reservation and preference lookups must verify their own contact; another task does not authorize access. Keep one voice. Restaurant business tools return controlled demo fixtures, not real restaurant service results. Memory tools use the configured authenticated-user backend. Propose bookings, changes, cancellations and event requests through commit tools, show the exact details, and wait for approval in the application and a successful receipt. Spoken agreement does not approve a proposal. Do not invent availability, claim a memory write is durable before reconciliation, or promise a venue from an event enquiry. If booking inputs change, revise the task and repeat its checks.",
+  "greeting": "Welcome the caller to Trattoria Rustica and ask whether they need a table, help with an existing reservation, menu information or a private event.",
+  "modality": "audio",
+  "voice": "Kore",
+  "skills": [
     {
-      "key": "large_party",
-      "from": { "gte": [{ "key": "party_size" }, { "const": 6 }] },
-      "description": "Six or more guests — the set-menu policy applies."
-    }
-  ],
-  "memory": {
-    "slots": [
-      { "predicate": "dietary_identity", "to": "user:diet" },
-      { "predicate": "seating_preference", "to": "user:seating" }
-    ]
-  },
-  "watch": [
-    {
-      "key": "large_party",
-      "condition": "became_true",
-      "effects": [
-        { "context": "The party is six or more: mention the set-menu policy before booking." },
-        { "remember": "Books for large parties ({state.party_size} guests)" }
-      ]
-    }
-  ],
-  "patterns": [
-    {
-      "name": "undecided",
-      "when": { "not": { "is_true": "availability_checked" } },
-      "turns": 4,
-      "effects": [
-        { "prompt": "The caller has not settled on a time after several turns. Briefly offer tonight's two most popular slots to help them decide." }
-      ]
-    }
-  ],
-  "runtime": {
-    "temperature": 0.6,
-    "steering": "context_injection",
-    "repair": { "nudge_after": 2, "escalate_after": 4 }
-  },
-  "tools": [
-    {
-      "name": "capture_party",
-      "description": "Record the party size and requested date/time.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "party_size": { "type": "integer" },
-          "datetime": { "type": "string", "description": "Requested date and time" }
+      "name": "table_booking",
+      "version": "2.0.0",
+      "description": "Check availability and propose a new table reservation, or return alternatives when unavailable.",
+      "instruction": "Use the task party_size and requested_time as the current request. capture_party only acknowledges those inputs; it does not replace them. Ask the caller for the booking name and contact. Check availability for this request before proposing book_table. If the date/time or party size changes, revise the task inputs and repeat the checks. Use check_unavailable_date only to exercise the controlled unavailable fixture; once unavailable, offer alternatives and finish without a booking. Parties of six or more should hear the demo set-menu policy from menu_info. Commit arguments must contain the exact current party, time, name and contact. Explain the proposal and wait for approval in the application; spoken agreement is not approval. Only a successful receipt permits reporting a demo booking. These tools return controlled fixtures, not real availability or reservations. The configured memory engine projects dietary and seating preferences into this task. Recall them only when relevant and confirm them with the caller. Studio memory is scoped to this connection. A computed large-party flag triggers the set-menu policy; four undecided turns trigger a brief offer of popular times.",
+      "inputs": {
+        "party_size": {
+          "type": "number",
+          "description": "Number of guests supplied by the caller; preserved without a fixed overwrite."
         },
-        "required": ["party_size", "datetime"]
+        "requested_time": {
+          "type": "string",
+          "description": "Requested local date and time; revise inputs before changing the request."
+        }
       },
-      "response": { "recorded": true },
-      "set_state": { "party_size": 2, "requested_time": "recorded" }
-    },
-    {
-      "name": "check_availability",
-      "description": "Check table availability for the requested time.",
-      "response": { "available": true, "options": ["19:00", "19:30", "21:00"] },
-      "set_state": { "availability_checked": true }
-    },
-    {
-      "name": "book_table",
-      "description": "Book the table for the confirmed time.",
-      "response": { "booked": true, "reference": "TR-2044" }
-    }
-  ],
-  "tests": [
-    {
-      "name": "party books a table",
-      "script": [
-        { "expect": { "active": ["gather"], "blocked": ["book_table"] } },
-        { "tool": "capture_party" },
-        { "tool": "check_availability" },
-        { "expect": { "done": ["gather", "check"], "allowed": ["book_table"] } },
-        { "tool": "book_table" },
-        { "expect": { "done": ["book", "farewell"], "complete": true } }
-      ]
-    },
-    {
-      "name": "no booking before availability",
-      "script": [
-        { "tool": "capture_party" },
-        { "tool": "book_table" },
-        { "expect": { "blocked": ["book_table"], "complete": false } }
-      ]
-    },
-    {
-      "name": "memory recall stays ambient",
-      "script": [
-        { "expect": { "allowed": ["recall_context"] } },
-        { "tool": "capture_party" },
-        { "expect": { "allowed": ["recall_context"] } }
-      ]
-    },
-    {
-      "name": "large parties compute their flag",
-      "script": [
-        { "tool": "capture_party" },
-        { "expect": { "state": { "derived:large_party": false } } },
-        { "set": { "party_size": 7 } },
-        { "expect": { "state": { "derived:large_party": true } } }
-      ]
-    }
-  ],
-  "flow": {
-    "steps": [
-      {
-        "id": "gather",
-        "posture": "Find out the party size and the requested date and time, then record them.",
-        "allow": ["capture_party"],
-        "done": { "captured": ["party_size", "requested_time"] }
+      "outputs": {
+        "result": {
+          "type": "object"
+        },
+        "party_size": {
+          "type": "number"
+        },
+        "requested_time": {
+          "type": "string"
+        },
+        "large_party_policy": {
+          "type": "boolean",
+          "default": false,
+          "description": "The large-party watcher added the set-menu policy to this task context."
+        },
+        "slot_suggestions_requested": {
+          "type": "boolean",
+          "default": false,
+          "description": "The undecided pattern requested a helpful suggestion after four owned turns."
+        }
       },
-      {
-        "id": "check",
-        "after": ["gather"],
-        "posture": "Check availability for the requested time and offer the options.",
-        "allow": ["check_availability"],
-        "done": { "is_true": "availability_checked" },
-        "ground": "Party of {party_size}. Diet: {user:diet?known:not on file}."
+      "tools": [
+        {
+          "name": "capture_party",
+          "description": "Acknowledge the current typed party and time inputs locally; never overwrite them with fixture values.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "party_size": {
+                "type": "integer"
+              },
+              "requested_time": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "party_size",
+              "requested_time"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "acknowledged": true
+          },
+          "set_state": {
+            "party_recorded": true
+          }
+        },
+        {
+          "name": "check_availability",
+          "description": "Read the controlled available-table fixture for the current task request. A production adapter must validate that request.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "party_size": {
+                "type": "integer"
+              },
+              "requested_time": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "party_size",
+              "requested_time"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "available": true,
+            "availability_reference": "AV-DEMO-1"
+          },
+          "set_state": {
+            "availability_checked": true
+          }
+        },
+        {
+          "name": "check_unavailable_date",
+          "description": "Read the controlled sold-out fixture. Its veto stays true until inputs are revised.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "party_size": {
+                "type": "integer"
+              },
+              "requested_time": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "party_size",
+              "requested_time"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "available": false
+          },
+          "set_state": {
+            "availability_checked": true,
+            "unavailable": true
+          }
+        },
+        {
+          "name": "book_table",
+          "description": "Propose the exact reservation arguments for application approval. Returns a controlled demo receipt only.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "party_size": {
+                "type": "integer"
+              },
+              "requested_time": {
+                "type": "string"
+              },
+              "guest_name": {
+                "type": "string"
+              },
+              "contact": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "party_size",
+              "requested_time",
+              "guest_name",
+              "contact",
+              "request_id"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "status": "booking_confirmed",
+            "reference": "TR-DEMO-2044"
+          },
+          "save_response_as": "result"
+        },
+        {
+          "name": "offer_alternative_slots",
+          "description": "Return controlled alternatives after an unavailable result, without creating a reservation.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "status": "no_table_booked",
+            "alternative_times": [
+              "19:30",
+              "21:00"
+            ],
+            "next_step": "Revise the task inputs for another time and check availability again."
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "party_recorded": {
+          "type": "boolean",
+          "default": false
+        },
+        "availability_checked": {
+          "type": "boolean",
+          "default": false
+        },
+        "unavailable": {
+          "type": "boolean",
+          "default": false
+        },
+        "user:diet": {
+          "type": "string",
+          "description": "Dietary preference projected from the configured memory engine."
+        },
+        "user:seating": {
+          "type": "string",
+          "description": "Seating preference projected from the configured memory engine."
+        },
+        "large_party_policy": {
+          "type": "boolean",
+          "default": false,
+          "description": "The large-party watcher added the set-menu policy to this task context."
+        },
+        "slot_suggestions_requested": {
+          "type": "boolean",
+          "default": false,
+          "description": "The undecided pattern requested a helpful suggestion after four owned turns."
+        }
       },
-      {
-        "id": "book",
-        "after": ["check"],
-        "posture": "Book the table for the option the caller picks, then read back the reference.",
-        "allow": ["book_table"],
-        "done": { "called_ok": "book_table" }
+      "flow": {
+        "steps": [
+          {
+            "id": "gather",
+            "allow": [
+              "capture_party"
+            ],
+            "done": {
+              "is_true": "party_recorded"
+            },
+            "posture": "Confirm the supplied party and time without replacing them."
+          },
+          {
+            "id": "check",
+            "ground": "Party of {party_size}, requested {requested_time}.",
+            "allow": [
+              "check_availability",
+              "check_unavailable_date"
+            ],
+            "done": {
+              "is_true": "availability_checked"
+            },
+            "after": [
+              "gather"
+            ],
+            "posture": "Check availability for the current request."
+          },
+          {
+            "id": "book",
+            "allow": [
+              "book_table",
+              "offer_alternative_slots"
+            ],
+            "done": {
+              "any": [
+                {
+                  "called_ok": "book_table"
+                },
+                {
+                  "called_ok": "offer_alternative_slots"
+                }
+              ]
+            },
+            "after": [
+              "check"
+            ],
+            "posture": "Propose a booking only when available; otherwise offer alternatives with no booking."
+          },
+          {
+            "id": "farewell",
+            "after": [
+              "book"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "once": "book_table"
+          },
+          {
+            "never_until": {
+              "tool": "book_table",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "availability_checked"
+                  },
+                  {
+                    "not": {
+                      "is_true": "unavailable"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "offer_alternative_slots",
+              "until": {
+                "is_true": "unavailable"
+              }
+            }
+          },
+          {
+            "require": [
+              "farewell"
+            ]
+          }
+        ]
       },
-      {
-        "id": "farewell",
-        "after": ["book"],
-        "terminal": true
+      "tests": [
+        {
+          "name": "party books a table",
+          "script": [
+            {
+              "set": {
+                "party_size": 7,
+                "requested_time": "2026-10-10 19:00"
+              }
+            },
+            {
+              "expect": {
+                "active": [
+                  "gather"
+                ],
+                "blocked": [
+                  "book_table"
+                ]
+              }
+            },
+            {
+              "tool": "capture_party"
+            },
+            {
+              "tool": "check_availability"
+            },
+            {
+              "expect": {
+                "done": [
+                  "gather",
+                  "check"
+                ],
+                "allowed": [
+                  "book_table"
+                ]
+              }
+            },
+            {
+              "tool": "book_table"
+            },
+            {
+              "expect": {
+                "done": [
+                  "book",
+                  "farewell"
+                ],
+                "complete": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "no booking before availability",
+          "script": [
+            {
+              "set": {
+                "party_size": 7,
+                "requested_time": "2026-10-10 19:00"
+              }
+            },
+            {
+              "tool": "capture_party"
+            },
+            {
+              "tool": "book_table"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "book_table"
+                ],
+                "complete": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "typed party inputs are not overwritten by capture",
+          "script": [
+            {
+              "set": {
+                "party_size": 7,
+                "requested_time": "2026-10-10 19:00"
+              }
+            },
+            {
+              "tool": "capture_party"
+            },
+            {
+              "expect": {
+                "state": {
+                  "party_size": 7,
+                  "requested_time": "2026-10-10 19:00"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "sold-out lookup cannot book and ends with alternatives",
+          "script": [
+            {
+              "set": {
+                "party_size": 2,
+                "requested_time": "2026-10-10 20:00"
+              }
+            },
+            {
+              "tool": "capture_party"
+            },
+            {
+              "tool": "check_unavailable_date"
+            },
+            {
+              "tool": "book_table"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "book_table"
+                ]
+              }
+            },
+            {
+              "tool": "offer_alternative_slots"
+            },
+            {
+              "expect": {
+                "complete": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "booking is once per activation",
+          "script": [
+            {
+              "set": {
+                "party_size": 2,
+                "requested_time": "2026-10-10 19:00"
+              }
+            },
+            {
+              "tool": "capture_party"
+            },
+            {
+              "tool": "check_availability"
+            },
+            {
+              "tool": "book_table"
+            },
+            {
+              "tool": "book_table"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "book_table"
+                ],
+                "complete": true
+              }
+            }
+          ]
+        }
+      ],
+      "computed": [
+        {
+          "key": "large_party",
+          "from": {
+            "gte": [
+              {
+                "key": "party_size"
+              },
+              {
+                "const": 6
+              }
+            ]
+          },
+          "description": "Six or more guests — the set-menu policy applies."
+        }
+      ],
+      "watch": [
+        {
+          "key": "large_party",
+          "condition": "became_true",
+          "effects": [
+            {
+              "set": {
+                "large_party_policy": true
+              }
+            },
+            {
+              "context": "The party is six or more: mention the set-menu policy before booking."
+            },
+            {
+              "remember": "Books for large parties ({state.party_size} guests)"
+            }
+          ]
+        }
+      ],
+      "patterns": [
+        {
+          "name": "undecided",
+          "when": {
+            "not": {
+              "is_true": "availability_checked"
+            }
+          },
+          "turns": 4,
+          "effects": [
+            {
+              "set": {
+                "slot_suggestions_requested": true
+              }
+            },
+            {
+              "prompt": "The caller has not settled on a time after several turns. Briefly offer tonight's two most popular slots to help them decide."
+            }
+          ]
+        }
+      ],
+      "memory": {
+        "slots": [
+          {
+            "predicate": "dietary_identity",
+            "to": "user:diet"
+          },
+          {
+            "predicate": "seating_preference",
+            "to": "user:seating"
+          }
+        ]
       }
-    ],
-    "constraints": [
-      { "once": "book_table" },
-      { "never_until": { "tool": "book_table", "until": { "is_true": "availability_checked" } } },
-      { "require": ["farewell"] }
-    ],
-    "ambient": ["recall_context", "manage_memory"]
-  }
+    },
+    {
+      "name": "reservation_management",
+      "version": "2.0.0",
+      "description": "Verify a reservation contact, look up a reservation, and propose a change or cancellation.",
+      "instruction": "Verify the contact for this activation before reading private reservation details or proposing changes. Use the contact-rejected fixture to test denied access; never clear its veto. Look up the reservation, then either finish the read-only lookup, check new availability before a change, or propose cancellation. A change must include the reservation reference, guest contact, new party size and new time. Revise inputs and repeat contact, lookup and availability checks if the request changes. Both change and cancellation require approval in the application and a successful controlled receipt. These are fixed demo fixtures, not live guest records.",
+      "inputs": {
+        "reservation_reference": {
+          "type": "string"
+        },
+        "contact_name": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_reservation_contact",
+          "description": "Read the controlled matching-contact fixture for the reservation reference.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reservation_reference": {
+                "type": "string"
+              },
+              "contact_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reservation_reference",
+              "contact_name"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "verified": true
+          },
+          "set_state": {
+            "contact_verified": true
+          }
+        },
+        {
+          "name": "reject_reservation_contact",
+          "description": "Read the controlled contact-mismatch fixture; no reservation details are returned.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reservation_reference": {
+                "type": "string"
+              },
+              "contact_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reservation_reference",
+              "contact_name"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "verified": false
+          },
+          "set_state": {
+            "contact_rejected": true
+          }
+        },
+        {
+          "name": "lookup_reservation",
+          "description": "Retrieve controlled reservation details after this task verifies its contact.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reservation_reference": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reservation_reference"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "status": "reservation_found",
+            "reference": "TR-DEMO-2044",
+            "details": "Controlled example reservation. Replace the adapter before accessing guest records."
+          },
+          "save_response_as": "result"
+        },
+        {
+          "name": "finish_reservation_lookup",
+          "description": "Finish a read-only reservation enquiry with the controlled lookup result.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "status": "reservation_found",
+            "reference": "TR-DEMO-2044",
+            "details": "Controlled example reservation. Replace the adapter before accessing guest records."
+          },
+          "save_response_as": "result"
+        },
+        {
+          "name": "report_unverified_contact",
+          "description": "Return a contact-verification failure without private booking details.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "status": "verification_required",
+            "private_details_returned": false
+          },
+          "save_response_as": "result"
+        },
+        {
+          "name": "check_change_availability",
+          "description": "Read controlled availability for the proposed new party size and time before changing a reservation.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reservation_reference": {
+                "type": "string"
+              },
+              "party_size": {
+                "type": "integer"
+              },
+              "requested_time": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reservation_reference",
+              "party_size",
+              "requested_time"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "available": true,
+            "availability_reference": "AV-CHANGE-DEMO-1"
+          },
+          "set_state": {
+            "change_availability_checked": true
+          }
+        },
+        {
+          "name": "change_reservation",
+          "description": "Propose the exact reservation change for approval after a fresh availability check.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reservation_reference": {
+                "type": "string"
+              },
+              "contact_name": {
+                "type": "string"
+              },
+              "party_size": {
+                "type": "integer"
+              },
+              "requested_time": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reservation_reference",
+              "contact_name",
+              "party_size",
+              "requested_time",
+              "request_id"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "status": "reservation_changed",
+            "receipt": "CHANGE-DEMO-1"
+          },
+          "save_response_as": "result"
+        },
+        {
+          "name": "cancel_reservation",
+          "description": "Propose cancellation of the verified reservation, with its exact reference and contact.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reservation_reference": {
+                "type": "string"
+              },
+              "contact_name": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reservation_reference",
+              "contact_name",
+              "reason",
+              "request_id"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "status": "reservation_cancelled",
+            "receipt": "CANCEL-DEMO-1"
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "contact_verified": {
+          "type": "boolean",
+          "default": false
+        },
+        "contact_rejected": {
+          "type": "boolean",
+          "default": false
+        },
+        "change_availability_checked": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "allow": [
+              "verify_reservation_contact",
+              "reject_reservation_contact"
+            ],
+            "done": {
+              "any": [
+                {
+                  "is_true": "contact_verified"
+                },
+                {
+                  "is_true": "contact_rejected"
+                }
+              ]
+            },
+            "posture": "Verify this reservation contact independently."
+          },
+          {
+            "id": "lookup",
+            "allow": [
+              "lookup_reservation",
+              "report_unverified_contact"
+            ],
+            "done": {
+              "any": [
+                {
+                  "called_ok": "lookup_reservation"
+                },
+                {
+                  "called_ok": "report_unverified_contact"
+                }
+              ]
+            },
+            "after": [
+              "verify"
+            ],
+            "posture": "Retrieve details only after successful verification."
+          },
+          {
+            "id": "resolve",
+            "allow": [
+              "finish_reservation_lookup",
+              "check_change_availability",
+              "change_reservation",
+              "cancel_reservation"
+            ],
+            "done": {
+              "any": [
+                {
+                  "called_ok": "finish_reservation_lookup"
+                },
+                {
+                  "called_ok": "change_reservation"
+                },
+                {
+                  "called_ok": "cancel_reservation"
+                },
+                {
+                  "called_ok": "report_unverified_contact"
+                }
+              ]
+            },
+            "after": [
+              "lookup"
+            ],
+            "posture": "Finish the lookup or propose a verified change/cancellation. Changes need another availability check."
+          },
+          {
+            "id": "done",
+            "after": [
+              "resolve"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "never_until": {
+              "tool": "lookup_reservation",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "contact_verified"
+                  },
+                  {
+                    "not": {
+                      "is_true": "contact_rejected"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "finish_reservation_lookup",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "contact_verified"
+                  },
+                  {
+                    "not": {
+                      "is_true": "contact_rejected"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "check_change_availability",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "contact_verified"
+                  },
+                  {
+                    "not": {
+                      "is_true": "contact_rejected"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "change_reservation",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "contact_verified"
+                  },
+                  {
+                    "not": {
+                      "is_true": "contact_rejected"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "cancel_reservation",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "contact_verified"
+                  },
+                  {
+                    "not": {
+                      "is_true": "contact_rejected"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "report_unverified_contact",
+              "until": {
+                "is_true": "contact_rejected"
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "change_reservation",
+              "until": {
+                "is_true": "change_availability_checked"
+              }
+            }
+          },
+          {
+            "once": "change_reservation"
+          },
+          {
+            "once": "cancel_reservation"
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      },
+      "tests": [
+        {
+          "name": "private cancellation requires contact verification",
+          "script": [
+            {
+              "tool": "cancel_reservation"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "cancel_reservation"
+                ],
+                "complete": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "reservation changes require a new availability check",
+          "script": [
+            {
+              "tool": "verify_reservation_contact"
+            },
+            {
+              "tool": "lookup_reservation"
+            },
+            {
+              "tool": "change_reservation"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "change_reservation"
+                ]
+              }
+            },
+            {
+              "tool": "check_change_availability"
+            },
+            {
+              "tool": "change_reservation"
+            },
+            {
+              "expect": {
+                "complete": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "failed contact lookup returns no private details",
+          "script": [
+            {
+              "tool": "reject_reservation_contact"
+            },
+            {
+              "tool": "lookup_reservation"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "lookup_reservation"
+                ]
+              }
+            },
+            {
+              "tool": "report_unverified_contact"
+            },
+            {
+              "expect": {
+                "complete": true
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "menu_info",
+      "version": "2.0.0",
+      "description": "Answer public menu, ingredient and large-party policy questions without starting a reservation.",
+      "instruction": "Read the controlled menu sheet, cite its source and distinguish listed ingredients from a guarantee about allergies. Offer staff confirmation for allergy requirements. This public task can run independently or as a child; complete it to return to the booking task without changing its inputs.",
+      "inputs": {
+        "question": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "lookup_menu",
+          "description": "Read the controlled menu, ingredient and set-menu policy sheet.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "question": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "question"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "source": "Trattoria Rustica controlled menu and policy sheet",
+            "dishes": [
+              {
+                "name": "Tomato pasta",
+                "contains": [
+                  "wheat"
+                ],
+                "vegetarian": true
+              },
+              {
+                "name": "Mushroom risotto",
+                "contains": [
+                  "milk"
+                ],
+                "vegetarian": true
+              }
+            ],
+            "allergen_note": "Shared kitchen; staff must confirm individual allergy requirements. No allergen-free guarantee.",
+            "large_party_policy": "Parties of six or more use the demo set menu."
+          },
+          "save_response_as": "result"
+        }
+      ]
+    },
+    {
+      "name": "private_event",
+      "version": "2.0.0",
+      "description": "Review private-event options and propose an enquiry for a coordinator, without confirming a booking.",
+      "instruction": "Read the controlled event options, explain that this is an enquiry rather than a venue reservation, then propose the exact date, party size and contact for application approval. Only a successful controlled receipt means the demo request was accepted. Never promise venue availability or persistent contact storage.",
+      "inputs": {
+        "event_date": {
+          "type": "string"
+        },
+        "party_size": {
+          "type": "number"
+        },
+        "contact_name": {
+          "type": "string"
+        },
+        "contact_email": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "check_event_options",
+          "description": "Read the controlled private-dining options and minimum-party policy.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "event_date": {
+                "type": "string"
+              },
+              "party_size": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "event_date",
+              "party_size"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "space": "Private dining room",
+            "maximum_guests": 24,
+            "availability": "Coordinator review required"
+          },
+          "set_state": {
+            "options_checked": true
+          }
+        },
+        {
+          "name": "submit_event_request",
+          "description": "Propose a private-event enquiry containing the exact date, party size and contact.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "event_date": {
+                "type": "string"
+              },
+              "party_size": {
+                "type": "integer"
+              },
+              "contact_name": {
+                "type": "string"
+              },
+              "contact_email": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "event_date",
+              "party_size",
+              "contact_name",
+              "contact_email",
+              "request_id"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "status": "event_request_received",
+            "reference": "EVENT-DEMO-1",
+            "booking_confirmed": false,
+            "next_step": "An event coordinator would review the request; no venue is reserved by this demo."
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "options_checked": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "review",
+            "allow": [
+              "check_event_options"
+            ],
+            "done": {
+              "is_true": "options_checked"
+            },
+            "posture": "Read the controlled event options and explain that venue availability requires coordinator review."
+          },
+          {
+            "id": "request",
+            "allow": [
+              "submit_event_request"
+            ],
+            "done": {
+              "called_ok": "submit_event_request"
+            },
+            "after": [
+              "review"
+            ],
+            "posture": "Propose the exact event details for approval; this creates an enquiry, not a venue reservation."
+          },
+          {
+            "id": "done",
+            "after": [
+              "request"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "never_until": {
+              "tool": "submit_event_request",
+              "until": {
+                "is_true": "options_checked"
+              }
+            }
+          },
+          {
+            "once": "submit_event_request"
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "preference_lookup",
+      "version": "2.0.0",
+      "description": "Retrieve the authenticated caller’s remembered dietary and seating preferences.",
+      "instruction": "Verify the guest profile for this task, then use recall_context to retrieve the authenticated caller’s preferences. Memory is scoped by the application’s authenticated user; guest_id does not select another person’s memory. Use user:diet and user:seating when known, and ask when a slot is absent. Never present a controlled restaurant fixture as a remembered fact. Use manage_memory only for an explicit request to remember, correct or forget; it requires application approval and a stable request_id. An accepted change is effective in this session; durable reconciliation happens at teardown. Pass exported preferences explicitly when another task needs them.",
+      "inputs": {
+        "guest_id": {
+          "type": "string"
+        },
+        "contact_name": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "user:diet": {
+          "type": "string",
+          "default": "",
+          "description": "Remembered dietary identity, omitted when unknown."
+        },
+        "user:seating": {
+          "type": "string",
+          "default": "",
+          "description": "Remembered seating preference, omitted when unknown."
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_guest_profile",
+          "description": "Read the controlled matching guest-profile fixture.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "guest_id": {
+                "type": "string"
+              },
+              "contact_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "guest_id",
+              "contact_name"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "fixture": "restaurant-demo",
+            "verified": true
+          },
+          "set_state": {
+            "guest_verified": true
+          }
+        }
+      ],
+      "state": {
+        "guest_verified": {
+          "type": "boolean",
+          "default": false
+        },
+        "user:diet": {
+          "type": "string",
+          "description": "Remembered dietary identity, omitted when unknown."
+        },
+        "user:seating": {
+          "type": "string",
+          "description": "Remembered seating preference, omitted when unknown."
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "allow": [
+              "verify_guest_profile"
+            ],
+            "done": {
+              "is_true": "guest_verified"
+            },
+            "posture": "Verify the guest profile before recalling preferences. The memory subject is bound by the application, not the supplied guest identifier."
+          },
+          {
+            "id": "lookup",
+            "allow": [
+              "recall_context",
+              "manage_memory"
+            ],
+            "done": {
+              "called_ok": "recall_context"
+            },
+            "after": [
+              "verify"
+            ],
+            "posture": "Recall known preferences and disclose missing information; export only this task’s declared memory slots."
+          },
+          {
+            "id": "done",
+            "after": [
+              "lookup"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "never_until": {
+              "tool": "recall_context",
+              "until": {
+                "is_true": "guest_verified"
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "manage_memory",
+              "until": {
+                "is_true": "guest_verified"
+              }
+            }
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      },
+      "memory": {
+        "slots": [
+          {
+            "predicate": "dietary_identity",
+            "to": "user:diet"
+          },
+          {
+            "predicate": "seating_preference",
+            "to": "user:seating"
+          }
+        ]
+      }
+    }
+  ],
+  "task_scenarios": [
+    {
+      "name": "Standalone table booking preserves a party of seven",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "table_booking",
+            "input": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "capture_party",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-7"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "status": "booking_confirmed",
+                  "reference": "TR-DEMO-2044"
+                },
+                "party_size": 7,
+                "requested_time": "2026-10-10 19:00",
+                "large_party_policy": true,
+                "slot_suggestions_requested": false
+              }
+            }
+          ],
+          "operations": {
+            "operation-3": "succeeded"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Standalone public menu enquiry",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "menu_info",
+            "input": {
+              "question": "What is the large-party policy?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_menu",
+            "args": {
+              "question": "What is the large-party policy?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "source": "Trattoria Rustica controlled menu and policy sheet",
+                  "dishes": [
+                    {
+                      "name": "Tomato pasta",
+                      "contains": [
+                        "wheat"
+                      ],
+                      "vegetarian": true
+                    },
+                    {
+                      "name": "Mushroom risotto",
+                      "contains": [
+                        "milk"
+                      ],
+                      "vegetarian": true
+                    }
+                  ],
+                  "allergen_note": "Shared kitchen; staff must confirm individual allergy requirements. No allergen-free guarantee.",
+                  "large_party_policy": "Parties of six or more use the demo set menu."
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Standalone verified reservation lookup",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "reservation_management",
+            "input": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_reservation_contact",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_reservation",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "finish_reservation_lookup",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "status": "reservation_found",
+                  "reference": "TR-DEMO-2044",
+                  "details": "Controlled example reservation. Replace the adapter before accessing guest records."
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Reservation change checks availability and waits for exact approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "reservation_management",
+            "input": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_reservation_contact",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_reservation",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_change_availability",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044",
+              "party_size": 4,
+              "requested_time": "2026-10-11 20:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "change_reservation",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee",
+              "party_size": 4,
+              "requested_time": "2026-10-11 20:00",
+              "request_id": "change-demo-4"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-4": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-4",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "status": "reservation_changed",
+                  "receipt": "CHANGE-DEMO-1"
+                }
+              }
+            }
+          ],
+          "operations": {
+            "operation-4": "succeeded"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Verified reservation cancellation needs approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "reservation_management",
+            "input": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_reservation_contact",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_reservation",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "cancel_reservation",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee",
+              "reason": "Plans changed",
+              "request_id": "cancel-demo-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "status": "reservation_cancelled",
+                  "receipt": "CANCEL-DEMO-1"
+                }
+              }
+            }
+          ],
+          "operations": {
+            "operation-3": "succeeded"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Private-event enquiry exports a request receipt not a booking",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "private_event",
+            "input": {
+              "event_date": "2026-11-01",
+              "party_size": 18,
+              "contact_name": "Jordan Lee",
+              "contact_email": "jordan@example.test"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_event_options",
+            "args": {
+              "event_date": "2026-11-01",
+              "party_size": 18
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "submit_event_request",
+            "args": {
+              "event_date": "2026-11-01",
+              "party_size": 18,
+              "contact_name": "Jordan Lee",
+              "contact_email": "jordan@example.test",
+              "request_id": "event-demo-18"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-2": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-2",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "status": "event_request_received",
+                  "reference": "EVENT-DEMO-1",
+                  "booking_confirmed": false,
+                  "next_step": "An event coordinator would review the request; no venue is reserved by this demo."
+                }
+              }
+            }
+          ],
+          "operations": {
+            "operation-2": "succeeded"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Standalone verified memory preference lookup",
+      "steps": [
+        {
+          "event": "memory",
+          "skill": "preference_lookup",
+          "values": {
+            "user:diet": "pescatarian",
+            "user:seating": "quiet indoor table"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "preference_lookup",
+            "input": {
+              "guest_id": "GUEST-DEMO-1",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_guest_profile",
+            "args": {
+              "guest_id": "GUEST-DEMO-1",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "recall_context",
+            "args": {
+              "query": "dietary and seating preferences"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "user:diet": "pescatarian",
+                "user:seating": "quiet indoor table"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Menu child returns to the booking with availability preserved",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "table_booking",
+            "input": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "capture_party",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "menu_info",
+            "input": {
+              "question": "Does the pasta contain wheat?"
+            },
+            "parent": "task-1"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "lookup_menu",
+            "args": {
+              "question": "Does the pasta contain wheat?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-2",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "gather",
+                "check"
+              ],
+              "active": [
+                "book"
+              ]
+            },
+            {
+              "task": "task-2",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "source": "Trattoria Rustica controlled menu and policy sheet",
+                  "dishes": [
+                    {
+                      "name": "Tomato pasta",
+                      "contains": [
+                        "wheat"
+                      ],
+                      "vegetarian": true
+                    },
+                    {
+                      "name": "Mushroom risotto",
+                      "contains": [
+                        "milk"
+                      ],
+                      "vegetarian": true
+                    }
+                  ],
+                  "allergen_note": "Shared kitchen; staff must confirm individual allergy requirements. No allergen-free guarantee.",
+                  "large_party_policy": "Parties of six or more use the demo set menu."
+                }
+              }
+            }
+          ],
+          "foreground": "task-1"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-7"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-4",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "status": "booking_confirmed",
+                  "reference": "TR-DEMO-2044"
+                },
+                "party_size": 7,
+                "requested_time": "2026-10-10 19:00",
+                "large_party_policy": true,
+                "slot_suggestions_requested": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Premature booking creates no proposal",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "table_booking",
+            "input": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-7"
+            }
+          },
+          "expected_error": "book_table"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "active": [
+                "gather"
+              ]
+            }
+          ]
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          },
+          "expected_error": "governance has not completed"
+        }
+      ]
+    },
+    {
+      "name": "Unavailable tables return alternatives and cannot book",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "table_booking",
+            "input": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "capture_party",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_unavailable_date",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-7"
+            }
+          },
+          "expected_error": "book_table"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "offer_alternative_slots",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "status": "no_table_booked",
+                  "alternative_times": [
+                    "19:30",
+                    "21:00"
+                  ],
+                  "next_step": "Revise the task inputs for another time and check availability again."
+                },
+                "party_size": 7,
+                "requested_time": "2026-10-10 19:00",
+                "large_party_policy": true,
+                "slot_suggestions_requested": false
+              }
+            }
+          ],
+          "operations": {
+            "operation-3": "succeeded"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Denied booking cannot report a reservation",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "table_booking",
+            "input": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "capture_party",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-7"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": false
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          },
+          "expected_error": "governance has not completed"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "gather",
+                "check"
+              ],
+              "active": [
+                "book"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-3": "declined"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cancelled booking invalidates its pending approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "table_booking",
+            "input": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "capture_party",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-7"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "cancel",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          },
+          "expected_error": "approval is no longer pending"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "cancelled"
+            }
+          ],
+          "operations": {
+            "operation-3": "declined"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stable booking key retries the receipt without a second approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "table_booking",
+            "input": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "capture_party",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-7"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-7"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "succeeded",
+            "operation-4": "succeeded"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 8,
+              "requested_time": "2026-10-10 19:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-7"
+            }
+          },
+          "expected_error": "different arguments"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "status": "booking_confirmed",
+                  "reference": "TR-DEMO-2044"
+                },
+                "party_size": 7,
+                "requested_time": "2026-10-10 19:00",
+                "large_party_policy": true,
+                "slot_suggestions_requested": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Private reservation operations cannot borrow another tasks verification",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "preference_lookup",
+            "input": {
+              "guest_id": "GUEST-DEMO-1",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_guest_profile",
+            "args": {
+              "guest_id": "GUEST-DEMO-1",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "reservation_management",
+            "input": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "cancel_reservation",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee",
+              "reason": "Plans changed",
+              "request_id": "cancel-demo-1"
+            }
+          },
+          "expected_error": "cancel_reservation"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "lookup_reservation",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044"
+            }
+          },
+          "expected_error": "lookup_reservation"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "suspended"
+            },
+            {
+              "task": "task-2",
+              "status": "running",
+              "active": [
+                "verify"
+              ]
+            }
+          ],
+          "foreground": "task-2"
+        }
+      ]
+    },
+    {
+      "name": "Rejected contact reveals no reservation details",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "reservation_management",
+            "input": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "reject_reservation_contact",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_reservation",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044"
+            }
+          },
+          "expected_error": "lookup_reservation"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "cancel_reservation",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee",
+              "reason": "Plans changed",
+              "request_id": "cancel-demo-1"
+            }
+          },
+          "expected_error": "cancel_reservation"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "report_unverified_contact",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "status": "verification_required",
+                  "private_details_returned": false
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "A reservation lookup is not an availability check for a change",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "reservation_management",
+            "input": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_reservation_contact",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_reservation",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "change_reservation",
+            "args": {
+              "reservation_reference": "TR-DEMO-2044",
+              "contact_name": "Jordan Lee",
+              "party_size": 4,
+              "requested_time": "2026-10-11 20:00",
+              "request_id": "change-demo-4"
+            }
+          },
+          "expected_error": "change_reservation"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "active": [
+                "resolve"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Revised booking discards approval and requires new availability",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "table_booking",
+            "input": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "capture_party",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-7"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "revise",
+            "task": "task-1",
+            "expected_revision": 1,
+            "input": {
+              "party_size": 4,
+              "requested_time": "2026-10-11 20:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          },
+          "expected_error": "approval is no longer pending"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 4,
+              "requested_time": "2026-10-11 20:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-revised"
+            }
+          },
+          "expected_error": "book_table"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "revision": 2,
+              "active": [
+                "gather"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-3": "declined"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "capture_party",
+            "args": {
+              "party_size": 4,
+              "requested_time": "2026-10-11 20:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "party_size": 4,
+              "requested_time": "2026-10-11 20:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 4,
+              "requested_time": "2026-10-11 20:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-revised"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-6",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "revision": 2,
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "status": "booking_confirmed",
+                  "reference": "TR-DEMO-2044"
+                },
+                "party_size": 4,
+                "requested_time": "2026-10-11 20:00",
+                "large_party_policy": false,
+                "slot_suggestions_requested": false
+              }
+            }
+          ],
+          "operations": {
+            "operation-6": "succeeded"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Unknown memory preferences remain unknown",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "preference_lookup",
+            "input": {
+              "guest_id": "GUEST-DEMO-1",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_guest_profile",
+            "args": {
+              "guest_id": "GUEST-DEMO-1",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "recall_context",
+            "args": {
+              "query": "dietary and seating preferences"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Memory recall cannot bypass guest verification",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "preference_lookup",
+            "input": {
+              "guest_id": "GUEST-DEMO-1",
+              "contact_name": "Jordan Lee"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "recall_context",
+            "args": {
+              "query": "dietary preferences"
+            }
+          },
+          "expected_error": "recall_context"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "active": [
+                "verify"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Four owned undecided turns request help and retain large-party policy",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "table_booking",
+            "input": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "Could we eat earlier?",
+          "model": ""
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I need to check with my friends.",
+          "model": ""
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "We have not settled on a time.",
+          "model": ""
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "Can you suggest a time?",
+          "model": ""
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "capture_party",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "book_table",
+            "args": {
+              "party_size": 7,
+              "requested_time": "2026-10-10 19:00",
+              "guest_name": "Jordan Lee",
+              "contact": "jordan@example.test",
+              "request_id": "booking-demo-7"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "fixture": "restaurant-demo",
+                  "status": "booking_confirmed",
+                  "reference": "TR-DEMO-2044"
+                },
+                "party_size": 7,
+                "requested_time": "2026-10-10 19:00",
+                "large_party_policy": true,
+                "slot_suggestions_requested": true
+              }
+            }
+          ],
+          "operations": {
+            "operation-3": "succeeded"
+          }
+        }
+      ]
+    }
+  ]
 }

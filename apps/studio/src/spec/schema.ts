@@ -130,9 +130,7 @@ export interface Variant {
   make(): Json;
 }
 
-/** The alternatives of a `oneOf`/`anyOf`, each able to recognize its own
- * values and to make a fresh one (externally tagged enums serialize as a
- * string or as an object with a single key). */
+/** Recognize and create schema alternatives, including internally and externally tagged enums. */
 export function variants(root: RootSchema, schema: SchemaLike | undefined): Variant[] {
   const s = resolve(root, schema);
   const alternatives = (s.oneOf ?? s.anyOf ?? []).map((a) => resolve(root, a));
@@ -151,6 +149,23 @@ export function variants(root: RootSchema, schema: SchemaLike | undefined): Vari
       continue;
     }
     const keys = Object.keys(alt.properties ?? {});
+    const discriminator = (alt.required ?? []).find((key) => alternatives.every((candidate) => {
+      const tag = resolve(root, candidate.properties?.[key]);
+      return candidate.required?.includes(key) && tag.enum?.length === 1 && typeof tag.enum[0] === 'string';
+    }));
+    if (discriminator) {
+      const tag = resolve(root, alt.properties?.[discriminator]).enum?.[0];
+      if (typeof tag === 'string') {
+        out.push({
+          label: tag,
+          description: alt.description,
+          schema: alt,
+          matches: (value) => isObject(value) && value[discriminator] === tag,
+          make: () => defaultFor(root, alt),
+        });
+        continue;
+      }
+    }
     if (kindOf(root, alt) === 'object' && alt.required?.length === 1 && keys.length === 1) {
       const key = keys[0]!;
       out.push({

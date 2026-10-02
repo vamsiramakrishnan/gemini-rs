@@ -88,7 +88,7 @@ pub trait DspStage: Send {
 }
 
 /// Wrap a legacy integer-domain [`InputAudioProcessor`] (e.g. the RNNoise
-/// [`Denoiser`](crate::voice::Denoiser) or [`NoiseGate`](crate::voice::NoiseGate))
+/// `Denoiser` with the `denoise` feature, or [`NoiseGate`](crate::voice::NoiseGate))
 /// as a [`DspStage`]. This is the *one* deliberate int boundary in a float
 /// chain — the cost of reusing a proven stage unchanged.
 pub struct IntStage<P: InputAudioProcessor> {

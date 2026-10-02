@@ -63,6 +63,7 @@ pub struct LiveSessionBuilder {
     telemetry_interval: Option<std::time::Duration>,
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
     flow: Option<crate::flow::FlowStack>,
+    tasks: Option<crate::tasks::TaskRuntime>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
     clock: Option<crate::clock::SharedClock>,
     lockstep: Option<Arc<super::processor::Lockstep>>,
@@ -94,10 +95,20 @@ impl LiveSessionBuilder {
             telemetry_interval: None,
             middleware: Vec::new(),
             flow: None,
+            tasks: None,
             redactor: None,
             clock: None,
             lockstep: None,
         }
+    }
+
+    /// Install a catalog of independently owned tasks in this voice session.
+    ///
+    /// Task commands and completions run on the control lane. A task session
+    /// cannot also install session-wide governance or state-changing pipelines.
+    pub fn tasks(mut self, tasks: crate::tasks::TaskRuntime) -> Self {
+        self.tasks = Some(tasks);
+        self
     }
 
     /// Replay lockstep: the router waits for both lanes to handle each event
@@ -397,6 +408,25 @@ impl LiveSessionBuilder {
     /// spawning any tasks. It is unit-testable without a live connection.
     pub(crate) fn into_plan(self) -> Result<SessionPlan, AgentError> {
         // Build-time validations
+        if self.tasks.is_some()
+            && (self.flow.is_some()
+                || self.phase_machine.is_some()
+                || self.dispatcher.is_some()
+                || !self.config.tools.is_empty()
+                || !self.extractors.is_empty()
+                || self.computed.is_some()
+                || self.watchers.is_some()
+                || self
+                    .temporal
+                    .as_ref()
+                    .is_some_and(|temporal| !temporal.is_empty())
+                || self.callbacks.on_tool_call.is_some()
+                || !self.middleware.is_empty())
+        {
+            return Err(AgentError::Config(
+                "task sessions own their tools, state and governance; configure these inside skills".into(),
+            ));
+        }
         if let Some(ref pm) = self.phase_machine {
             pm.validate()?;
         }
@@ -406,6 +436,19 @@ impl LiveSessionBuilder {
 
         // Apply NON_BLOCKING behavior to tool declarations for background tools
         let mut config = self.config;
+        if let Some(tasks) = &self.tasks {
+            config.tools.extend(super::task_tools::declarations(tasks));
+            let catalog = super::task_tools::catalog_instruction(tasks);
+            let instruction = config.system_instruction.get_or_insert_with(|| {
+                gemini_genai_rs::prelude::Content {
+                    role: None,
+                    parts: Vec::new(),
+                }
+            });
+            instruction
+                .parts
+                .push(gemini_genai_rs::prelude::Part::Text { text: catalog });
+        }
         for (tool_name, mode) in &self.execution_modes {
             if matches!(
                 mode,
@@ -465,6 +508,7 @@ impl LiveSessionBuilder {
             telemetry_interval: self.telemetry_interval,
             middleware: self.middleware,
             flow: self.flow,
+            tasks: self.tasks,
             redactor: self.redactor,
             clock: self.clock,
             lockstep: self.lockstep,
@@ -507,6 +551,7 @@ pub(crate) struct SessionPlan {
     telemetry_interval: Option<std::time::Duration>,
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
     flow: Option<crate::flow::FlowStack>,
+    tasks: Option<crate::tasks::TaskRuntime>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
     clock: Option<crate::clock::SharedClock>,
     lockstep: Option<Arc<super::processor::Lockstep>>,
@@ -556,6 +601,10 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
     // Share the governed-flow stack between the control lane (which
     // advances it) and the LiveHandle (which snapshots explain).
     let flow_monitor = plan.flow.map(crate::flow::FlowStack::into_shared);
+    let task_status = plan
+        .tasks
+        .as_ref()
+        .map(|tasks| Arc::new(parking_lot::Mutex::new(tasks.snapshot())));
     let mut callbacks = plan.callbacks;
     let on_usage_cb = callbacks.on_usage.take();
     let callbacks = Arc::new(callbacks);
@@ -613,6 +662,8 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
             Arc::new(chain)
         },
         flow: flow_monitor.clone(),
+        tasks: plan.tasks,
+        task_status,
         redactor: plan.redactor,
         lockstep: plan.lockstep,
         playback: super::playback::PlaybackClock::new(state.clock()),
@@ -755,6 +806,7 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
     // Spawn fast + control lanes (no session_signals, no transcript mutex)
     let greeting_writer = rt.user_writer.clone();
     let playback = rt.control_plane.playback.clone();
+    let task_status = rt.control_plane.task_status.clone();
     let (fast_handle, ctrl_handle, ctrl_tx) = spawn_event_processor(
         rt.event_rx,
         rt.callbacks,
@@ -840,7 +892,8 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
         rt.telem_cancel,
     )
     .with_control_sender(ctrl_tx)
-    .with_playback(playback))
+    .with_playback(playback)
+    .with_task_status(task_status))
 }
 
 #[cfg(test)]

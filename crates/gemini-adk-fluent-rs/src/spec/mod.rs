@@ -6,7 +6,7 @@
 //! fills the state guards read, data-driven phases and watchers over the same
 //! closed [`Guard`] vocabulary, reusable flow fragments, and an embedded test
 //! suite that replays scripted conversations through the real
-//! [`FlowMonitor`](gemini_adk_rs::flow::FlowMonitor) offline.
+//! [`FlowStack`](gemini_adk_rs::flow::FlowStack) offline.
 //!
 //! The invariants:
 //! - **What serializes, runs.** [`SessionSpec::apply`] configures a
@@ -23,10 +23,16 @@
 mod codegen;
 pub mod project;
 mod simulate;
+mod skills;
 pub mod store;
 
 pub use project::{ProjectFile, ProjectLanguage, ProjectOptions, SdkSource};
 pub use store::{BundleRef, BundleStore, BundleVersion, StoreError, open_store};
+
+pub use skills::{
+    SkillSpec, SkillToolSpec, TaskExpectation, TaskObservationKind, TaskScenario, TaskStep,
+    TaskTraceSnapshot,
+};
 
 pub use simulate::{
     SimEvent, SimSnapshot, SpecTest, TestExpectation, TestReport, TestStepResult, trace_test,
@@ -844,6 +850,12 @@ pub struct SessionSpec {
     /// resolvers bind to the declared `tools` by name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation: Option<crate::conversation::ConversationSpec>,
+    /// Reusable capabilities, each with task-private state and operations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<SkillSpec>,
+    /// Model-free journeys through skill activation, approval and cancellation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub task_scenarios: Vec<TaskScenario>,
     /// Scenarios run against `conversation` by
     /// [`SessionSpec::run_scenarios`]: model-free, deterministic.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -877,13 +889,33 @@ pub struct SpecValidation {
 /// above this crate (`gemini-memory-rs` implements this trait over its
 /// `MemorySession`). `apply` calls [`install`](Self::install) once to wire
 /// tools/ingestion/slots, and routes every [`EffectSpec::Remember`] through
-/// [`remember`](Self::remember).
+/// [`remember`](Self::remember) for a root conversation. Skills instead bind
+/// owned services through [`task_memory`](Self::task_memory), contextual tools
+/// through [`task_tools`](Self::task_tools), and one shared task lifecycle.
 pub trait MemoryBinding: Send + Sync {
     /// Wire the memory subsystem onto the builder per the spec's declaration.
     fn install(&self, live: Live, memory: &MemorySpec) -> Live;
     /// Durably remember a note (fire-and-forget; implementations may commit
     /// asynchronously).
     fn remember(&self, note: String);
+    /// Bind task-local projections to this session's existing memory backend.
+    /// Implementations must not capture a task's authoritative state.
+    fn task_memory(
+        &self,
+        _memory: &MemorySpec,
+    ) -> Result<Arc<dyn gemini_adk_rs::tasks::TaskMemoryService>, String> {
+        Err("this memory binding does not support task-owned memory services".into())
+    }
+    /// Existing memory operations, bound to owned task invocation contexts.
+    /// The task compiler supplies their read/commit policy and ambient admission.
+    fn task_tools(&self) -> Vec<Arc<dyn ToolFunction>> {
+        Vec::new()
+    }
+    /// Install shared session teardown once, without global extractors or tools.
+    /// Serialize teardown with started effects and reject writes after sealing.
+    fn install_task_lifecycle(&self, live: Live) -> Live {
+        live
+    }
 }
 
 /// What a spec written by someone else may reach when it runs.
@@ -977,7 +1009,7 @@ pub const MEMORY_TOOL_NAMES: [&str; 2] = ["recall_context", "manage_memory"];
 
 /// External resources a spec cannot carry: model handles and capability
 /// bindings.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SpecResources {
     /// The OOB model backing `extract` entries. Required when any are present.
     pub extraction_llm: Option<Arc<dyn BaseLlm>>,
@@ -993,6 +1025,13 @@ pub struct SpecResources {
 }
 
 impl SpecResources {
+    /// Bind an implementation to one skill, even when skills reuse a tool name.
+    pub fn implement_skill(mut self, skill: &str, tool: impl ToolFunction + 'static) -> Self {
+        self.tools
+            .insert(format!("{skill}/{}", tool.name()), Arc::new(tool));
+        self
+    }
+
     /// Implement the declared tool of the same name with `tool`.
     pub fn implement(mut self, tool: impl ToolFunction + 'static) -> Self {
         self.tools.insert(tool.name().to_string(), Arc::new(tool));
@@ -1001,6 +1040,43 @@ impl SpecResources {
 }
 
 impl SessionSpec {
+    /// Whether root or task definitions need an out-of-band extraction model.
+    pub fn requires_extraction(&self) -> bool {
+        !self.extract.is_empty()
+            || self.conversation.as_ref().is_some_and(|conversation| {
+                conversation
+                    .stages
+                    .iter()
+                    .chain(
+                        conversation
+                            .overlays
+                            .iter()
+                            .flat_map(|overlay| &overlay.stages),
+                    )
+                    .any(|stage| stage.frame.is_some())
+            })
+            || self.skills.iter().any(|skill| {
+                !skill.extract.is_empty()
+                    || skill.conversation.as_ref().is_some_and(|conversation| {
+                        conversation
+                            .stages
+                            .iter()
+                            .chain(
+                                conversation
+                                    .overlays
+                                    .iter()
+                                    .flat_map(|overlay| &overlay.stages),
+                            )
+                            .any(|stage| stage.frame.is_some())
+                    })
+            })
+    }
+
+    /// Whether root or task definitions use the contextual memory binding.
+    pub fn requires_memory(&self) -> bool {
+        self.memory.is_some() || self.skills.iter().any(|skill| skill.memory.is_some())
+    }
+
     /// Parse a spec from a JSON value. Accepts a full document or a *bare
     /// flow* (`{"steps": [...]}`), which is wrapped in a default spec.
     pub fn from_value(value: Value) -> Result<Self, String> {
@@ -1261,8 +1337,91 @@ impl SessionSpec {
     /// registry), fragment splicing, phase-guard restrictions, HTTP-binding
     /// support, and the read/write state-key diff.
     pub fn validate(&self) -> SpecValidation {
+        self.validate_with_http_support(true)
+    }
+
+    /// Validate for scripted offline replay, where declared tools use mock
+    /// effects and never open HTTP or MCP connections.
+    ///
+    /// Checks the original document, including conflicting tool bindings.
+    /// Only the requirement to compile HTTP transport support is omitted.
+    pub fn validate_for_replay(&self) -> SpecValidation {
+        self.validate_with_http_support(false)
+    }
+
+    fn validate_with_http_support(&self, require_http_support: bool) -> SpecValidation {
+        self.validate_parts(require_http_support, false, &Default::default())
+    }
+
+    fn validate_definition(
+        &self,
+        require_http_support: bool,
+        activation_inputs: &std::collections::BTreeSet<String>,
+    ) -> SpecValidation {
+        self.validate_parts(require_http_support, true, activation_inputs)
+    }
+
+    fn validate_parts(
+        &self,
+        require_http_support: bool,
+        allow_ungoverned: bool,
+        activation_inputs: &std::collections::BTreeSet<String>,
+    ) -> SpecValidation {
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
+        let mut skill_tools = Vec::new();
+        let mut skill_steps = 0;
+        let mut written = self.state_keys_written();
+        written.extend(activation_inputs.iter().cloned());
+
+        if !self.skills.is_empty() {
+            if self.flow.is_some()
+                || self.conversation.is_some()
+                || !self.phases.is_empty()
+                || !self.tools.is_empty()
+                || !self.mcp.is_empty()
+                || !self.extract.is_empty()
+                || !self.computed.is_empty()
+                || !self.watch.is_empty()
+                || !self.patterns.is_empty()
+                || !self.use_fragments.is_empty()
+                || self.memory.is_some()
+                || !self.state.is_empty()
+            {
+                errors.push("skills own their state, tools and governance; do not combine them with a session-level pipeline".into());
+            }
+            let mut names = std::collections::BTreeSet::new();
+            for skill in &self.skills {
+                if !names.insert(&skill.name) {
+                    errors.push(format!(
+                        "skill '{}' is installed more than once",
+                        skill.name
+                    ));
+                }
+                let validation = skill.validation(require_http_support);
+                skill_steps += validation.steps;
+                skill_tools.extend(
+                    skill
+                        .tools
+                        .iter()
+                        .map(|tool| format!("{}__{}", skill.name, tool.tool.name)),
+                );
+                errors.extend(
+                    validation
+                        .errors
+                        .into_iter()
+                        .map(|problem| format!("skill '{}': {problem}", skill.name)),
+                );
+                warnings.extend(
+                    validation
+                        .warnings
+                        .into_iter()
+                        .map(|warning| format!("skill '{}': {warning}", skill.name)),
+                );
+            }
+        } else if !self.task_scenarios.is_empty() {
+            errors.push("task_scenarios require skills".into());
+        }
 
         // Fragment namespace validation: must be non-empty to create valid step ids.
         for use_frag in &self.use_fragments {
@@ -1299,7 +1458,7 @@ impl SessionSpec {
         let steps = flow.steps.len();
         let has_flow = !flow.steps.is_empty();
 
-        if !has_flow && self.phases.is_empty() {
+        if !has_flow && self.phases.is_empty() && self.skills.is_empty() && !allow_ungoverned {
             errors.push("spec has neither a flow nor phases — nothing to run".into());
         }
         if !self.phases.is_empty() && self.initial_phase.is_none() {
@@ -1357,7 +1516,7 @@ impl SessionSpec {
                 ));
             }
         }
-        if cfg!(not(feature = "http-tools")) {
+        if require_http_support && cfg!(not(feature = "http-tools")) {
             for t in &self.tools {
                 if t.http.is_some() {
                     errors.push(format!(
@@ -1460,8 +1619,8 @@ impl SessionSpec {
             let declared: std::collections::BTreeSet<&str> =
                 self.state.keys().map(String::as_str).collect();
             let mut undeclared = std::collections::BTreeSet::new();
-            for key in self.state_keys_written() {
-                let bare = key.strip_prefix("derived:").unwrap_or(&key);
+            for key in &written {
+                let bare = key.strip_prefix("derived:").unwrap_or(key);
                 if !declared.contains(bare) && !self.computed.iter().any(|c| c.key == bare) {
                     undeclared.insert(key.clone());
                 }
@@ -1476,7 +1635,6 @@ impl SessionSpec {
         // Computed inputs: like guard reads, a dependency nothing writes can
         // never produce a value.
         {
-            let written = self.state_keys_written();
             for c in &self.computed {
                 for dep in c.from.keys_read() {
                     let bare = dep.strip_prefix("derived:").unwrap_or(&dep);
@@ -1610,7 +1768,6 @@ impl SessionSpec {
         if valid_flow && has_flow {
             // Read/write state-key diff — the guard-key analogue of the
             // unknown-tool check.
-            let written = self.state_keys_written();
             for key in flow.state_keys_read() {
                 if written.contains(&key) || RUNTIME_WRITTEN.iter().any(|p| key.starts_with(p)) {
                     continue;
@@ -1659,8 +1816,8 @@ impl SessionSpec {
             errors,
             warnings,
             mermaid,
-            tools: referenced,
-            steps,
+            tools: referenced.into_iter().chain(skill_tools).collect(),
+            steps: steps + skill_steps,
         }
     }
 
@@ -1721,9 +1878,17 @@ impl SessionSpec {
     }
 
     /// Run the embedded test suite offline (no model, no network) — scripted
-    /// events replayed through the real [`FlowMonitor`](gemini_adk_rs::flow::FlowMonitor).
+    /// events replayed through the real [`FlowStack`](gemini_adk_rs::flow::FlowStack).
+    /// Includes installed skill workflow tests, named `skill/test`.
     pub fn run_tests(&self) -> Vec<TestReport> {
-        simulate::run_tests(self)
+        let mut reports = simulate::run_tests(self);
+        for skill in &self.skills {
+            reports.extend(skill.run_tests().into_iter().map(|mut report| {
+                report.name = format!("{}/{}", skill.name, report.name);
+                report
+            }));
+        }
+        reports
     }
 
     /// A copy of this spec that reaches only what `allow` permits, and one
@@ -1737,6 +1902,11 @@ impl SessionSpec {
     pub fn sandboxed(&self, allow: &BindingAllowlist) -> (SessionSpec, Vec<String>) {
         let mut spec = self.clone();
         let mut notes = Vec::new();
+        for skill in &mut spec.skills {
+            let (sandboxed, disabled) = skill.sandboxed(allow);
+            *skill = sandboxed;
+            notes.extend(disabled);
+        }
         spec.mcp.retain(|params| {
             let keep = allow.allows_mcp(params);
             if !keep {
@@ -1797,19 +1967,23 @@ impl SessionSpec {
                 validation.errors.join("; ")
             ));
         }
-        if !self.extract.is_empty() && resources.extraction_llm.is_none() {
+        if self.requires_extraction() && resources.extraction_llm.is_none() {
             return Err(
                 "spec declares extraction but SpecResources.extraction_llm is not set".into(),
             );
         }
-        if self.memory.is_some() && resources.memory.is_none() {
+        if self.requires_memory() && resources.memory.is_none() {
             return Err("spec declares memory but SpecResources.memory is not set".into());
         }
-        if let Some(name) = resources
-            .tools
-            .keys()
-            .find(|name| !self.tools.iter().any(|t| &&t.name == name))
-        {
+        if let Some(name) = resources.tools.keys().find(|name| {
+            !self.tools.iter().any(|t| &&t.name == name)
+                && !self.skills.iter().any(|skill| {
+                    skill.tools.iter().any(|tool| {
+                        *name == &tool.tool.name
+                            || **name == format!("{}/{}", skill.name, tool.tool.name)
+                    })
+                })
+        }) {
             return Err(format!(
                 "SpecResources implements tool '{name}', which the spec does not declare"
             ));
@@ -1833,6 +2007,16 @@ impl SessionSpec {
             SpecModality::Text => live.text_only(),
             SpecModality::Audio => live.voice(resolve_voice(self.voice.as_deref())),
         };
+
+        if !self.skills.is_empty() {
+            let runtime = self.compile_tasks(resources)?;
+            live = live.tasks(runtime);
+            if self.skills.iter().any(|skill| skill.memory.is_some())
+                && let Some(binding) = &resources.memory
+            {
+                live = binding.install_task_lifecycle(live);
+            }
+        }
 
         // Tools: declared (mock/HTTP) via the dispatcher, MCP merged on top.
         // A conversation's resolvers call the same bound tools.
@@ -1901,16 +2085,7 @@ impl SessionSpec {
         // Extraction.
         if let Some(llm) = &resources.extraction_llm {
             for e in &self.extract {
-                let mut extractor =
-                    LlmExtractor::new(e.name.clone(), llm.clone(), e.instruction.clone(), e.window)
-                        .with_schema(e.schema.clone())
-                        .with_min_words(3)
-                        .with_trigger(e.trigger.to_trigger());
-                if !e.promote.is_empty() {
-                    extractor = extractor
-                        .with_promotions(e.promote.iter().map(PromoteSpec::to_rule).collect());
-                }
-                live = live.extractor(Arc::new(extractor));
+                live = live.extractor(Arc::new(compile_extractor(e, llm.clone())));
             }
         }
 
@@ -2011,6 +2186,19 @@ impl SessionSpec {
         }
 
         Ok(live)
+    }
+}
+
+/// Shared extractor lowering for session and task-owned services.
+fn compile_extractor(e: &ExtractSpec, llm: Arc<dyn BaseLlm>) -> LlmExtractor {
+    let extractor = LlmExtractor::new(e.name.clone(), llm, e.instruction.clone(), e.window)
+        .with_schema(e.schema.clone())
+        .with_min_words(3)
+        .with_trigger(e.trigger.to_trigger());
+    if e.promote.is_empty() {
+        extractor
+    } else {
+        extractor.with_promotions(e.promote.iter().map(PromoteSpec::to_rule).collect())
     }
 }
 

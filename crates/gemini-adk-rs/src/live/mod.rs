@@ -109,3 +109,5 @@ pub use temporal::{
 pub use transcript::{ToolCallSummary, TranscriptBuffer, TranscriptTurn, TranscriptWindow};
 pub use turn_commit::{TurnCommitConfig, TurnCommitPolicy, TurnSignal};
 pub use watcher::{PredicateFn, WatchPredicate, Watcher, WatcherRegistry};
+
+mod task_tools;

@@ -8,6 +8,9 @@ export function FlowState({ status }: { status: FlowStatus }) {
   return (
     <div className="flow-state">
       <dl>
+        <dt>Status</dt>
+        <dd>{status.terminated ? 'Terminated' : status.complete ? 'Complete' : 'In progress'}</dd>
+        {status.overlay_path.length > 0 && <><dt>Digression</dt><dd>{status.overlay_path.join(' → ')}</dd></>}
         <dt>Active</dt>
         <dd>{status.active?.join(', ') || '—'}</dd>
         <dt>Tools allowed</dt>

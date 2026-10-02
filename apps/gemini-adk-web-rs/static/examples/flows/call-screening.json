@@ -1,122 +1,2336 @@
 {
   "name": "call-screening",
-  "description": "Front-desk call screening: identify the caller and intent, filter spam, then transfer or take a message — transfer hard-gated on the spam verdict.",
-  "instruction": "You are the screening assistant for the office of Dr. Elena Ruiz. Find out who is calling and why. Politely end sales and robocalls. Transfer genuine calls; otherwise take a message.",
-  "greeting": "Answer as Dr. Ruiz's office and ask who is calling and what it concerns.",
-  "modality": "text",
-  "tools": [
+  "version": "2.0.0",
+  "description": "Office assistant with call screening, public information, callbacks, message status and appointment requests. Task-owned transcript extraction keeps spam verdicts sticky; tools use controlled demo services.",
+  "instruction": "You assist the office of Dr. Elena Ruiz. Select the relevant skill from what the caller needs. Collect its required business inputs, then start it. Screen before proposing a transfer. Use office_info as a child for public questions during screening and complete the child to resume. Private capabilities perform their own checks. Call commit tools to create proposals and ask for approval in the application, then wait for receipts. Tool responses are controlled demo fixtures, not real phone, calendar or messaging integrations. A spam verdict is task-local; do not claim global call classification or that a transfer occurred before its approved receipt.",
+  "greeting": "Welcome the caller to Dr. Ruiz's office. Offer help reaching someone, requesting a callback, checking a message, requesting an appointment or answering an office question.",
+  "modality": "audio",
+  "voice": "Kore",
+  "skills": [
     {
-      "name": "record_caller",
-      "description": "Record the caller's name and stated reason.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "caller_name": { "type": "string" },
-          "reason": { "type": "string" }
+      "name": "screen_call",
+      "version": "2.0.0",
+      "description": "Screen a caller, check recipient availability, then transfer, take a message or decline spam.",
+      "instruction": "Use the caller name and reason supplied as inputs. Do not invent verified identity. All directory/calendar answers are controlled demo fixtures. A spam verdict is sticky for this activation and always blocks transfer and message delivery. For office questions start office_info as a child, then return here. Call a commit tool to create its proposal before asking for approval in the application. Transcript extraction classifies sales and spam for this task. Newly accepted spam revokes an unexecuted transfer proposal; ask for a fresh permitted action.",
+      "inputs": {
+        "caller_name": {
+          "type": "string"
         },
-        "required": ["caller_name", "reason"]
-      },
-      "response": { "recorded": true },
-      "set_state": { "caller_recorded": true }
-    },
-    {
-      "name": "mark_legitimate",
-      "description": "Mark the call as legitimate (not spam or sales).",
-      "response": { "ok": true },
-      "set_state": { "screened_ok": true }
-    },
-    {
-      "name": "transfer_call",
-      "description": "Transfer the caller through to Dr. Ruiz.",
-      "response": { "transferred": true }
-    },
-    {
-      "name": "take_message",
-      "description": "Take a message for a callback.",
-      "parameters": {
-        "type": "object",
-        "properties": { "message": { "type": "string" } }
-      },
-      "response": { "saved": true },
-      "set_state": { "message_taken": true }
-    }
-  ],
-  "extract": [
-    {
-      "name": "screening",
-      "instruction": "Classify the call: is this a sales, robocall, or solicitation attempt?",
-      "schema": {
-        "type": "object",
-        "properties": {
-          "is_spam": { "type": "boolean" },
-          "intent": { "type": "string" }
+        "reason": {
+          "type": "string"
         }
       },
-      "promote": [
-        { "field": "is_spam", "policy": "true_only" }
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "record_caller",
+          "description": "Record the caller and stated purpose in this task using the activation inputs. Controlled demo capture.",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "recorded": true
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "caller_name": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "caller_name",
+              "reason"
+            ]
+          },
+          "set_state": {
+            "caller_recorded": true
+          }
+        },
+        {
+          "name": "lookup_contact",
+          "description": "Check the caller against the controlled office directory. A production adapter must verify directory results.",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "known_contact": true,
+            "organization": "Demo partner"
+          },
+          "set_state": {
+            "contact_checked": true
+          }
+        },
+        {
+          "name": "mark_legitimate",
+          "description": "Accept the controlled screening check only after caller and directory checks. This cannot clear a spam flag.",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "screened": true
+          },
+          "set_state": {
+            "screened_ok": true
+          }
+        },
+        {
+          "name": "flag_spam",
+          "description": "Latch a spam or sales verdict for this task. This flag is never cleared by another tool.",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "flagged": true
+          },
+          "set_state": {
+            "is_spam": true
+          }
+        },
+        {
+          "name": "check_availability",
+          "description": "Check the requested recipient in the controlled calendar before any transfer.",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "available": true,
+            "recipient": "Dr. Elena Ruiz"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "recipient": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "recipient"
+            ]
+          },
+          "set_state": {
+            "recipient_available": true
+          }
+        },
+        {
+          "name": "transfer_call",
+          "description": "Create a transfer proposal for the screened caller. Only application approval executes this demo transfer.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "transferred": true,
+            "reference": "TRANSFER-DEMO"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "recipient": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "recipient"
+            ]
+          },
+          "save_response_as": "result"
+        },
+        {
+          "name": "take_message",
+          "description": "Create a message proposal when a genuine caller prefers a callback. Do not claim delivery before approval and receipt.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "saved": true,
+            "message_reference": "MSG-DEMO"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "caller_name": {
+                "type": "string"
+              },
+              "callback_number": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "caller_name",
+              "callback_number",
+              "message"
+            ]
+          },
+          "set_state": {
+            "message_taken": true
+          },
+          "save_response_as": "result"
+        },
+        {
+          "name": "decline_call",
+          "description": "Create an end-call proposal for a flagged sales or spam caller; do not transfer that caller.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "closed": true,
+            "reason": "screening_declined"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "caller_recorded": {
+          "type": "boolean"
+        },
+        "contact_checked": {
+          "type": "boolean"
+        },
+        "screened_ok": {
+          "type": "boolean",
+          "default": false
+        },
+        "is_spam": {
+          "type": "boolean",
+          "default": false
+        },
+        "recipient_available": {
+          "type": "boolean",
+          "default": false
+        },
+        "message_taken": {
+          "type": "boolean"
+        },
+        "screening": {
+          "type": "object",
+          "description": "Latest accepted structured extraction for this task."
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "screen",
+            "allow": [
+              "record_caller",
+              "lookup_contact",
+              "mark_legitimate",
+              "flag_spam"
+            ],
+            "done": {
+              "all": [
+                {
+                  "is_true": "caller_recorded"
+                },
+                {
+                  "any": [
+                    {
+                      "is_true": "screened_ok"
+                    },
+                    {
+                      "is_true": "is_spam"
+                    }
+                  ]
+                }
+              ]
+            },
+            "posture": "Record the caller and reason. Check the directory before clearing a genuine caller. Flag sales or spam explicitly; do not clear the flag."
+          },
+          {
+            "id": "route",
+            "after": [
+              "screen"
+            ],
+            "allow": [
+              "check_availability",
+              "transfer_call",
+              "take_message",
+              "decline_call"
+            ],
+            "done": {
+              "any": [
+                {
+                  "called_ok": "transfer_call"
+                },
+                {
+                  "is_true": "message_taken"
+                },
+                {
+                  "called_ok": "decline_call"
+                }
+              ]
+            },
+            "posture": "For a cleared caller, check recipient availability and propose a transfer or take a message. For spam, propose ending the call. Wait for application approval and the resulting receipt."
+          },
+          {
+            "id": "goodbye",
+            "after": [
+              "route"
+            ],
+            "terminal": true
+          }
+        ],
+        "ambient": [
+          "flag_spam"
+        ],
+        "constraints": [
+          {
+            "never_until": {
+              "tool": "lookup_contact",
+              "until": {
+                "is_true": "caller_recorded"
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "mark_legitimate",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "caller_recorded"
+                  },
+                  {
+                    "is_true": "contact_checked"
+                  },
+                  {
+                    "not": {
+                      "is_true": "is_spam"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "transfer_call",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "screened_ok"
+                  },
+                  {
+                    "not": {
+                      "is_true": "is_spam"
+                    }
+                  },
+                  {
+                    "is_true": "recipient_available"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "take_message",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "screened_ok"
+                  },
+                  {
+                    "not": {
+                      "is_true": "is_spam"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "decline_call",
+              "until": {
+                "is_true": "is_spam"
+              }
+            }
+          },
+          {
+            "once": "transfer_call"
+          },
+          {
+            "once": "take_message"
+          },
+          {
+            "once": "decline_call"
+          },
+          {
+            "require": [
+              "goodbye"
+            ]
+          }
+        ]
+      },
+      "tests": [
+        {
+          "name": "genuine caller gets transferred after directory and availability checks",
+          "script": [
+            {
+              "tool": "record_caller"
+            },
+            {
+              "tool": "lookup_contact"
+            },
+            {
+              "tool": "mark_legitimate"
+            },
+            {
+              "tool": "check_availability"
+            },
+            {
+              "tool": "transfer_call"
+            },
+            {
+              "expect": {
+                "done": [
+                  "screen",
+                  "route",
+                  "goodbye"
+                ],
+                "complete": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "spam can never be transferred and has a closing branch",
+          "script": [
+            {
+              "tool": "record_caller"
+            },
+            {
+              "tool": "flag_spam"
+            },
+            {
+              "tool": "transfer_call"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "transfer_call",
+                  "take_message"
+                ]
+              }
+            },
+            {
+              "tool": "decline_call"
+            },
+            {
+              "expect": {
+                "done": [
+                  "route",
+                  "goodbye"
+                ],
+                "complete": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "unscreened calls cannot transfer",
+          "script": [
+            {
+              "tool": "record_caller"
+            },
+            {
+              "tool": "transfer_call"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "transfer_call"
+                ],
+                "complete": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "a late spam verdict vetoes a previously cleared transfer",
+          "script": [
+            {
+              "tool": "record_caller"
+            },
+            {
+              "tool": "lookup_contact"
+            },
+            {
+              "tool": "mark_legitimate"
+            },
+            {
+              "tool": "check_availability"
+            },
+            {
+              "tool": "flag_spam"
+            },
+            {
+              "tool": "transfer_call"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "transfer_call",
+                  "take_message"
+                ],
+                "complete": false
+              }
+            }
+          ]
+        }
+      ],
+      "extract": [
+        {
+          "name": "screening",
+          "instruction": "Classify the call: is this a sales, robocall, or solicitation attempt?",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "is_spam": {
+                "type": "boolean"
+              },
+              "intent": {
+                "type": "string"
+              }
+            }
+          },
+          "promote": [
+            {
+              "field": "is_spam",
+              "policy": "true_only"
+            }
+          ]
+        }
       ]
+    },
+    {
+      "name": "office_info",
+      "version": "2.0.0",
+      "description": "Answer public questions about office hours, address and contacting the office.",
+      "instruction": "Retrieve public office facts. Do not grant screening clearance or claim a private record lookup. If this is a child task, complete it after answering so the parent resumes.",
+      "inputs": {
+        "question": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "lookup_office_information",
+          "description": "Retrieve controlled public office facts.",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "hours": "Monday to Friday, 09:00 to 17:00",
+            "location": "100 Example Avenue",
+            "appointments": "Requests need office confirmation"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "question": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "question"
+            ]
+          },
+          "save_response_as": "result"
+        }
+      ]
+    },
+    {
+      "name": "callback_request",
+      "version": "2.0.0",
+      "description": "Request a callback with a preferred window and a verified contact number.",
+      "instruction": "Collect the declared business inputs. Run this capability's own check; another task does not grant authorization. The service answers are controlled demo fixtures. Call the submission tool to create the exact approval proposal. Complete only after its successful receipt.",
+      "inputs": {
+        "caller_name": {
+          "type": "string"
+        },
+        "callback_number": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "preferred_window": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "check_callback_contact",
+          "description": "Check callback contact details with the controlled contact-verification adapter.",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "checked": true
+          },
+          "set_state": {
+            "checked": true
+          }
+        },
+        {
+          "name": "schedule_callback",
+          "description": "Create a proposal with the exact requested details, then wait for application approval and receipt.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "scheduled": true,
+            "reference": "CALLBACK-DEMO"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "caller_name": {
+                "type": "string"
+              },
+              "callback_number": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "preferred_window": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "caller_name",
+              "callback_number",
+              "reason",
+              "preferred_window"
+            ]
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "checked": {
+          "type": "boolean"
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "allow": [
+              "check_callback_contact"
+            ],
+            "done": {
+              "called_ok": "check_callback_contact"
+            },
+            "posture": "Use check_callback_contact and wait for its receipt."
+          },
+          {
+            "id": "submit",
+            "after": [
+              "verify"
+            ],
+            "allow": [
+              "schedule_callback"
+            ],
+            "done": {
+              "called_ok": "schedule_callback"
+            },
+            "posture": "Use schedule_callback and wait for its receipt."
+          },
+          {
+            "id": "done",
+            "after": [
+              "submit"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "never_until": {
+              "tool": "schedule_callback",
+              "until": {
+                "is_true": "checked"
+              }
+            }
+          },
+          {
+            "once": "schedule_callback"
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "message_status",
+      "version": "2.0.0",
+      "description": "Check delivery status of an existing message after verifying access.",
+      "instruction": "Verify the reference and contact number in this capability before looking up private message status. These are controlled demo fixtures. Do not reuse screening clearance as message access.",
+      "inputs": {
+        "message_reference": {
+          "type": "string"
+        },
+        "callback_number": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_message_access",
+          "description": "Verify access to the requested message through the controlled verification adapter.",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "verified": true
+          },
+          "set_state": {
+            "access_verified": true
+          }
+        },
+        {
+          "name": "lookup_message_status",
+          "description": "Look up the verified message delivery status; this does not send another message.",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "message_reference": "MSG-DEMO",
+            "status": "delivered",
+            "callback_pending": true
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "access_verified": {
+          "type": "boolean"
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "allow": [
+              "verify_message_access"
+            ],
+            "done": {
+              "called_ok": "verify_message_access"
+            },
+            "posture": "Use verify_message_access and wait for its receipt."
+          },
+          {
+            "id": "lookup",
+            "after": [
+              "verify"
+            ],
+            "allow": [
+              "lookup_message_status"
+            ],
+            "done": {
+              "called_ok": "lookup_message_status"
+            },
+            "posture": "Use lookup_message_status and wait for its receipt."
+          },
+          {
+            "id": "done",
+            "after": [
+              "lookup"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "never_until": {
+              "tool": "lookup_message_status",
+              "until": {
+                "is_true": "access_verified"
+              }
+            }
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "appointment_request",
+      "version": "2.0.0",
+      "description": "Submit an appointment request to the office without promising a confirmed booking.",
+      "instruction": "Collect the declared business inputs. Run this capability's own check; another task does not grant authorization. The service answers are controlled demo fixtures. Call the submission tool to create the exact approval proposal. Complete only after its successful receipt.",
+      "inputs": {
+        "caller_name": {
+          "type": "string"
+        },
+        "preferred_time": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "check_request_details",
+          "description": "Check request details against the controlled office request policy.",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "checked": true
+          },
+          "set_state": {
+            "checked": true
+          }
+        },
+        {
+          "name": "submit_appointment_request",
+          "description": "Create a proposal with the exact requested details, then wait for application approval and receipt.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "submitted": true,
+            "request_reference": "REQUEST-DEMO",
+            "status": "awaiting_office_confirmation"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "caller_name": {
+                "type": "string"
+              },
+              "preferred_time": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "caller_name",
+              "preferred_time",
+              "reason"
+            ]
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "checked": {
+          "type": "boolean"
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "allow": [
+              "check_request_details"
+            ],
+            "done": {
+              "called_ok": "check_request_details"
+            },
+            "posture": "Use check_request_details and wait for its receipt."
+          },
+          {
+            "id": "submit",
+            "after": [
+              "verify"
+            ],
+            "allow": [
+              "submit_appointment_request"
+            ],
+            "done": {
+              "called_ok": "submit_appointment_request"
+            },
+            "posture": "Use submit_appointment_request and wait for its receipt."
+          },
+          {
+            "id": "done",
+            "after": [
+              "submit"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "never_until": {
+              "tool": "submit_appointment_request",
+              "until": {
+                "is_true": "checked"
+              }
+            }
+          },
+          {
+            "once": "submit_appointment_request"
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      }
     }
   ],
-  "flow": {
-    "steps": [
-      {
-        "id": "screen",
-        "posture": "Get the caller's name and reason. Record them. Decide if the call is genuine; mark it legitimate only when you are confident.",
-        "allow": ["record_caller", "mark_legitimate"],
-        "done": { "all": [
-          { "is_true": "caller_recorded" },
-          { "any": [{ "is_true": "screened_ok" }, { "is_true": "is_spam" }] }
-        ] }
-      },
-      {
-        "id": "route",
-        "after": ["screen"],
-        "posture": "Transfer a legitimate call; take a message otherwise. Never transfer a call you have not cleared.",
-        "allow": ["transfer_call", "take_message"],
-        "done": { "any": [{ "called_ok": "transfer_call" }, { "is_true": "message_taken" }] },
-        "ground": "Screening: {screened_ok?cleared:not cleared}{is_spam? — flagged as spam:}."
-      },
-      {
-        "id": "goodbye",
-        "after": ["route"],
-        "terminal": true
-      }
-    ],
-    "constraints": [
-      { "never_until": { "tool": "transfer_call", "until": { "all": [{ "is_true": "screened_ok" }, { "not": { "is_true": "is_spam" } }] } } },
-      { "once": "transfer_call" },
-      { "require": ["goodbye"] }
-    ]
-  },
-  "tests": [
+  "task_scenarios": [
     {
-      "name": "genuine caller gets transferred",
-      "script": [
-        { "tool": "record_caller" },
-        { "tool": "mark_legitimate" },
-        { "expect": { "done": ["screen"], "allowed": ["transfer_call"] } },
-        { "tool": "transfer_call" },
-        { "expect": { "done": ["route", "goodbye"], "complete": true } }
+      "name": "Screened transfer completes only after exact application approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "screen_call",
+            "input": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_caller",
+            "args": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_contact",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "mark_legitimate",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "recipient": "Dr. Elena Ruiz"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "transfer_call",
+            "args": {
+              "recipient": "Dr. Elena Ruiz",
+              "request_id": "transfer-demo-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running"
+            }
+          ],
+          "operations": {
+            "operation-5": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-5",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "transferred": true,
+                  "reference": "TRANSFER-DEMO"
+                }
+              }
+            }
+          ]
+        }
       ]
     },
     {
-      "name": "spam can never be transferred",
-      "script": [
-        { "tool": "record_caller" },
-        { "tool": "mark_legitimate" },
-        { "set": { "is_spam": true } },
-        { "tool": "transfer_call" },
-        { "expect": { "blocked": ["transfer_call"] } },
-        { "tool": "take_message" },
-        { "expect": { "done": ["route", "goodbye"], "complete": true } }
+      "name": "Genuine caller leaves a message instead of transferring",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "screen_call",
+            "input": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_caller",
+            "args": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_contact",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "mark_legitimate",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "recipient": "Dr. Elena Ruiz"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "take_message",
+            "args": {
+              "caller_name": "Jane Demo",
+              "callback_number": "+12025550123",
+              "message": "Please call tomorrow",
+              "request_id": "message-demo-1"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-5",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "saved": true,
+                  "message_reference": "MSG-DEMO"
+                }
+              }
+            }
+          ]
+        }
       ]
     },
     {
-      "name": "unscreened calls cannot transfer",
-      "script": [
-        { "tool": "record_caller" },
-        { "tool": "transfer_call" },
-        { "expect": { "blocked": ["transfer_call"], "complete": false } }
+      "name": "Spam closes without transfer or message delivery",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "screen_call",
+            "input": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_caller",
+            "args": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "flag_spam",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "transfer_call",
+            "args": {
+              "recipient": "Dr. Elena Ruiz",
+              "request_id": "transfer-demo-1"
+            }
+          },
+          "expected_error": "not"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "decline_call",
+            "args": {
+              "reason": "Unsolicited sales",
+              "request_id": "decline-demo-1"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "closed": true,
+                  "reason": "screening_declined"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Unscreened transfer is rejected",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "screen_call",
+            "input": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "transfer_call",
+            "args": {
+              "recipient": "Dr. Elena Ruiz",
+              "request_id": "transfer-demo-1"
+            }
+          },
+          "expected_error": "not"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Late spam stays latched across an office-information child task",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "screen_call",
+            "input": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_caller",
+            "args": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_contact",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "mark_legitimate",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "recipient": "Dr. Elena Ruiz"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "flag_spam",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "office_info",
+            "input": {
+              "question": "What are your hours?"
+            },
+            "parent": "task-1"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "lookup_office_information",
+            "args": {
+              "question": "What are your hours?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-2"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "screen"
+              ]
+            }
+          ],
+          "foreground": "task-1"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "transfer_call",
+            "args": {
+              "recipient": "Dr. Elena Ruiz",
+              "request_id": "transfer-demo-1"
+            }
+          },
+          "expected_error": "not"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "take_message",
+            "args": {
+              "request_id": "blocked-message"
+            }
+          },
+          "expected_error": "not"
+        }
+      ]
+    },
+    {
+      "name": "Office questions complete independently",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "office_info",
+            "input": {
+              "question": "Where is the office?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_office_information",
+            "args": {
+              "question": "Where is the office?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "hours": "Monday to Friday, 09:00 to 17:00",
+                  "location": "100 Example Avenue",
+                  "appointments": "Requests need office confirmation"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Office-information child preserves screening progress and returns",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "screen_call",
+            "input": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_caller",
+            "args": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_contact",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "mark_legitimate",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "recipient": "Dr. Elena Ruiz"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "office_info",
+            "input": {
+              "question": "When do you close?"
+            },
+            "parent": "task-1"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "lookup_office_information",
+            "args": {
+              "question": "When do you close?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-2"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "screen"
+              ]
+            }
+          ],
+          "foreground": "task-1"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "transfer_call",
+            "args": {
+              "recipient": "Dr. Elena Ruiz",
+              "request_id": "transfer-demo-1"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-6",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "transferred": true,
+                  "reference": "TRANSFER-DEMO"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Callback request performs its own check and approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "callback_request",
+            "input": {
+              "caller_name": "Jane Demo",
+              "callback_number": "+12025550123",
+              "reason": "Follow-up",
+              "preferred_window": "Tomorrow morning"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_callback_contact",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "schedule_callback",
+            "args": {
+              "caller_name": "Jane Demo",
+              "callback_number": "+12025550123",
+              "reason": "Follow-up",
+              "preferred_window": "Tomorrow morning",
+              "request_id": "callback-demo-1"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-2",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "scheduled": true,
+                  "reference": "CALLBACK-DEMO"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Appointment request is submitted without claiming a booking",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "appointment_request",
+            "input": {
+              "caller_name": "Jane Demo",
+              "preferred_time": "Tomorrow afternoon",
+              "reason": "Office consultation"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_request_details",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "submit_appointment_request",
+            "args": {
+              "caller_name": "Jane Demo",
+              "preferred_time": "Tomorrow afternoon",
+              "reason": "Office consultation",
+              "request_id": "appointment-demo-1"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-2",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "submitted": true,
+                  "request_reference": "REQUEST-DEMO",
+                  "status": "awaiting_office_confirmation"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Message status verifies access before revealing delivery status",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "message_status",
+            "input": {
+              "message_reference": "MSG-DEMO",
+              "callback_number": "+12025550123"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_message_status",
+            "args": {}
+          },
+          "expected_error": "not"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_message_access",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_message_status",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "message_reference": "MSG-DEMO",
+                  "status": "delivered",
+                  "callback_pending": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Denied transfer does not produce a success receipt",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "screen_call",
+            "input": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_caller",
+            "args": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_contact",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "mark_legitimate",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "recipient": "Dr. Elena Ruiz"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "transfer_call",
+            "args": {
+              "recipient": "Dr. Elena Ruiz",
+              "request_id": "transfer-demo-1"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-5",
+            "approve": false
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running"
+            }
+          ],
+          "operations": {
+            "operation-5": "declined"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          },
+          "expected_error": "governance"
+        }
+      ]
+    },
+    {
+      "name": "Cancelled callback cannot accept a stale approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "callback_request",
+            "input": {
+              "caller_name": "Jane Demo",
+              "callback_number": "+12025550123",
+              "reason": "Follow-up",
+              "preferred_window": "Tomorrow morning"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_callback_contact",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "schedule_callback",
+            "args": {
+              "caller_name": "Jane Demo",
+              "callback_number": "+12025550123",
+              "reason": "Follow-up",
+              "preferred_window": "Tomorrow morning",
+              "request_id": "callback-cancel"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "cancel",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-2",
+            "approve": true
+          },
+          "expected_error": "no longer pending"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "cancelled"
+            }
+          ],
+          "operations": {
+            "operation-2": "declined"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transfer retry reuses the original operation receipt",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "screen_call",
+            "input": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_caller",
+            "args": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_contact",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "mark_legitimate",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "recipient": "Dr. Elena Ruiz"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "transfer_call",
+            "args": {
+              "recipient": "Dr. Elena Ruiz",
+              "request_id": "transfer-demo-1"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-5",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "transfer_call",
+            "args": {
+              "recipient": "Dr. Elena Ruiz",
+              "request_id": "transfer-demo-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-5": "succeeded",
+            "operation-6": "succeeded"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "transferred": true,
+                  "reference": "TRANSFER-DEMO"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Deferred message lookup stays with its owner during another question",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "message_status",
+            "input": {
+              "message_reference": "MSG-DEMO",
+              "callback_number": "+12025550123"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_message_access",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_message_status",
+            "args": {}
+          },
+          "defer": true
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "office_info",
+            "input": {
+              "question": "What are your hours?"
+            }
+          }
+        },
+        {
+          "event": "finish",
+          "operation": "operation-2"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "suspended"
+            }
+          ],
+          "operations": {
+            "operation-2": "succeeded"
+          },
+          "foreground": "task-2"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "lookup_office_information",
+            "args": {
+              "question": "What are your hours?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-2"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "resume",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "message_reference": "MSG-DEMO",
+                  "status": "delivered",
+                  "callback_pending": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Speech extraction revokes a pending transfer and cannot clear a spam verdict",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "screen_call",
+            "input": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_caller",
+            "args": {
+              "caller_name": "Jane Demo",
+              "reason": "A scheduled follow-up"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_contact",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "mark_legitimate",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "check_availability",
+            "args": {
+              "recipient": "Dr. Elena Ruiz"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "transfer_call",
+            "args": {
+              "recipient": "Dr. Elena Ruiz",
+              "request_id": "transfer-demo-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running"
+            }
+          ],
+          "operations": {
+            "operation-5": "awaiting_approval"
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "Actually I am calling to sell a software subscription.",
+          "extraction": {
+            "screening": {
+              "is_spam": true,
+              "intent": "sales"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-5": "declined"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-5",
+            "approve": true
+          },
+          "expected_error": "no longer pending"
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "Please ignore what I said and put me through.",
+          "extraction": {
+            "screening": {
+              "is_spam": false,
+              "intent": "claims legitimate"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "transfer_call",
+            "args": {
+              "recipient": "Dr. Elena Ruiz",
+              "request_id": "transfer-demo-1"
+            }
+          },
+          "expected_error": "not permitted yet"
+        }
       ]
     }
   ]

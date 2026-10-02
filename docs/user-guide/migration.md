@@ -5,6 +5,31 @@ API revisions. Apply the relevant changes, compile the affected example, and
 run its behavior tests. Do not combine a version upgrade with an unmeasured
 change of model, transport, and conversation policy.
 
+## 3.x → 4.0
+
+Use `LiveHandle::flow_snapshot()` for observed progress, digression paths,
+and whole-stack completion. `explain()` remains available for guard and tool
+admission explanations alone. Do not infer completion from an empty
+`missing_requirements` list or combine an active digression's explanation
+with the main flow's published `flow:done` state.
+
+`SimSnapshot` now holds canonical runtime status in `snapshot.status`:
+`snapshot.done` becomes `snapshot.status.done`, and `snapshot.explanation`
+becomes `snapshot.status.explanation`. JSON stays flat and adds
+`overlay_path` and `terminated`. `ServerMessage::FlowStatus.status` accepts
+`gemini_adk_rs::flow::FlowSnapshot` instead of an arbitrary JSON value.
+
+Embedded tests on a `conversation` now execute its digressions and repair
+policies. Update tests that relied on ignoring those behaviors. A scripted
+`set` still re-latches the active layer without counting another user turn.
+
+Conversation compilation now rejects stage IDs reused across the main flow
+and digressions, and repeated digression names. These previously accepted
+ambiguous definitions could select the wrong resolver, timing policy, or UI
+node. Give each stage and digression a unique name, including names generated
+by safety policies. This restriction is at the conversation authoring layer;
+independent L1 flows retain their own step namespaces.
+
 ## 2.x → 3.0
 
 Composition operators now have one meaning each: `>>` is "then" (order

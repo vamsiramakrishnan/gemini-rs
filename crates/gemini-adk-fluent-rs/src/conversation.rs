@@ -216,7 +216,7 @@ pub struct CommitSpec {
 /// One authored conversation stage.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct StageSpec {
-    /// Unique stage id.
+    /// Stage id, unique across the main flow and every overlay.
     pub id: String,
     /// Instruction projected as steering while the stage is active. Serialized
     /// as `say` for compatibility; `instruction` is accepted on input.
@@ -283,7 +283,8 @@ use gemini_adk_rs::flow::{Overlay, correction_flag, escalate_flag, verbatim_flag
 /// `trigger` holds, runs to completion, then resumes per `resume`.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OverlaySpec {
-    /// Overlay name.
+    /// Overlay name, unique across the conversation. The safety-handoff policy
+    /// generates an overlay named `safety`.
     pub name: String,
     /// The guard that activates this overlay (e.g. an `intent:*` flag).
     pub trigger: Guard,
@@ -1001,9 +1002,6 @@ fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, 
         return Err(ConversationError::Empty);
     }
     let ids: BTreeSet<&str> = stages.iter().map(|s| s.id.as_str()).collect();
-    if ids.len() != stages.len() {
-        return Err(ConversationError::Spec("duplicate stage ids".into()));
-    }
     for s in stages {
         for t in &s.next {
             if !ids.contains(t.to.as_str()) {
@@ -1141,6 +1139,7 @@ fn compile_spec(
     mut spec: ConversationSpec,
     resolvers: Vec<StageResolver>,
 ) -> Result<CompiledConversation, ConversationError> {
+    let authored_overlay_count = spec.overlays.len();
     // Apply cross-cutting policies. SafetyHandoff lowers to a `safety` digression
     // (terminate on intent); Redact/Commit are carried for the runtime.
     for policy in spec.policies.clone() {
@@ -1164,6 +1163,37 @@ fn compile_spec(
                 require: Vec::new(),
                 resume: Resume::Terminate,
             });
+        }
+    }
+
+    // Stage ids also key resolver routing, timing, verbatim policies, and the
+    // Studio graph. Their identity spans the whole conversation, not one layer.
+    let mut overlay_names = BTreeSet::new();
+    for overlay in &spec.overlays {
+        if !overlay_names.insert(overlay.name.as_str()) {
+            return Err(ConversationError::Spec(format!(
+                "duplicate overlay name '{}'",
+                overlay.name
+            )));
+        }
+    }
+    let mut stage_layers = BTreeMap::new();
+    let layers = std::iter::once(("main flow".to_string(), spec.stages.as_slice())).chain(
+        spec.overlays.iter().map(|overlay| {
+            (
+                format!("overlay '{}'", overlay.name),
+                overlay.stages.as_slice(),
+            )
+        }),
+    );
+    for (layer, stages) in layers {
+        for stage in stages {
+            if let Some(previous) = stage_layers.insert(stage.id.as_str(), layer.clone()) {
+                return Err(ConversationError::Spec(format!(
+                    "duplicate stage ids: '{}' appears in {previous} and {layer}",
+                    stage.id
+                )));
+            }
         }
     }
 
@@ -1191,14 +1221,13 @@ fn compile_spec(
     // Main flow.
     let flow = lower_flow(&spec.stages, &spec.require)?;
 
-    // Resolver bindings must reference a known stage — main or overlay. For a
-    // stage id that appears in both, the main flow wins (ids are expected to be
-    // globally unique across a spec).
+    // Resolver bindings must reference a known, uniquely owned stage — main
+    // or overlay, as validated above.
     let ids: BTreeSet<&str> = spec.stages.iter().map(|s| s.id.as_str()).collect();
     let mut overlay_of: BTreeMap<&str, usize> = BTreeMap::new();
     for (i, ov) in spec.overlays.iter().enumerate() {
         for s in &ov.stages {
-            overlay_of.entry(s.id.as_str()).or_insert(i);
+            overlay_of.insert(s.id.as_str(), i);
         }
     }
     for r in &resolvers {
@@ -1313,6 +1342,9 @@ fn compile_spec(
     }
 
     let policies = spec.policies.clone();
+    // Generated overlays belong to the compiled runtime. Keep the stored spec
+    // re-compilable: its policies will generate these overlays again.
+    spec.overlays.truncate(authored_overlay_count);
 
     Ok(CompiledConversation {
         flow,
@@ -2355,5 +2387,129 @@ mod tests {
             .compile()
             .expect_err("unguarded commit must fail");
         assert!(matches!(err, ConversationError::Compile(_)));
+    }
+
+    #[test]
+    fn stage_ids_must_be_unique_across_main_and_overlays() {
+        let error = Conversation::new("collision")
+            .stage("shared")
+            .terminal()
+            .overlay("faq")
+            .trigger(Guard::is_true("intent:faq"))
+            .stage("shared")
+            .terminal()
+            .end_overlay()
+            .compile()
+            .expect_err("a stage cannot have two owners");
+        assert!(matches!(error, ConversationError::Spec(message)
+            if message.contains("duplicate stage ids")
+                && message.contains("shared")
+                && message.contains("main flow")
+                && message.contains("overlay 'faq'")));
+    }
+
+    #[test]
+    fn stage_ids_must_be_unique_between_overlays() {
+        let error = Conversation::new("collision")
+            .stage("main")
+            .terminal()
+            .overlay("faq")
+            .trigger(Guard::is_true("intent:faq"))
+            .stage("shared")
+            .terminal()
+            .end_overlay()
+            .overlay("clarify")
+            .trigger(Guard::is_true("intent:clarify"))
+            .stage("shared")
+            .terminal()
+            .end_overlay()
+            .compile()
+            .expect_err("overlays cannot share stage identity");
+        assert!(matches!(error, ConversationError::Spec(message)
+            if message.contains("shared")
+                && message.contains("overlay 'faq'")
+                && message.contains("overlay 'clarify'")));
+    }
+
+    #[test]
+    fn overlay_names_must_be_unique() {
+        let error = Conversation::new("collision")
+            .stage("main")
+            .terminal()
+            .overlay("faq")
+            .trigger(Guard::is_true("intent:faq"))
+            .stage("answer")
+            .terminal()
+            .end_overlay()
+            .overlay("faq")
+            .trigger(Guard::is_true("intent:other_faq"))
+            .stage("other_answer")
+            .terminal()
+            .end_overlay()
+            .compile()
+            .expect_err("overlay names select active layers");
+        assert!(matches!(error, ConversationError::Spec(message)
+            if message == "duplicate overlay name 'faq'"));
+    }
+
+    #[test]
+    fn generated_safety_overlay_cannot_collide_with_authored_names_or_stages() {
+        use crate::policy::Policy;
+
+        let error = Conversation::new("collision")
+            .stage("main")
+            .terminal()
+            .overlay("safety")
+            .trigger(Guard::is_true("intent:custom_safety"))
+            .stage("custom_handoff")
+            .terminal()
+            .end_overlay()
+            .policy(Policy::safety_handoff(["self_harm"]))
+            .compile()
+            .expect_err("generated safety overlay requires a unique name");
+        assert!(matches!(error, ConversationError::Spec(message)
+            if message == "duplicate overlay name 'safety'"));
+
+        let error = Conversation::new("collision")
+            .stage("safety_handoff")
+            .terminal()
+            .policy(Policy::safety_handoff(["self_harm"]))
+            .compile()
+            .expect_err("generated safety stage requires a unique id");
+        assert!(matches!(error, ConversationError::Spec(message)
+            if message.contains("safety_handoff")
+                && message.contains("main flow")
+                && message.contains("overlay 'safety'")));
+    }
+
+    #[test]
+    fn duplicate_stage_ids_within_one_layer_remain_invalid() {
+        let error = Conversation::new("collision")
+            .stage("shared")
+            .terminal()
+            .stage("shared")
+            .terminal()
+            .compile()
+            .expect_err("local duplicate stages remain invalid");
+        assert!(matches!(error, ConversationError::Spec(message)
+            if message.contains("duplicate stage ids")));
+    }
+
+    #[test]
+    fn compiled_safety_spec_can_be_serialized_and_compiled_again() {
+        use crate::policy::Policy;
+
+        let compiled = Conversation::new("safety")
+            .stage("main")
+            .terminal()
+            .policy(Policy::safety_handoff(["self_harm"]))
+            .compile()
+            .expect("compiles");
+        assert_eq!(compiled.overlays().len(), 1);
+        let value = serde_json::to_value(compiled.spec()).expect("serializes");
+        let spec = serde_json::from_value(value).expect("parses");
+        let recompiled = Conversation::from_spec(spec).expect("recompiles");
+        assert_eq!(recompiled.overlays().len(), 1);
+        assert_eq!(recompiled.overlays()[0].name, "safety");
     }
 }

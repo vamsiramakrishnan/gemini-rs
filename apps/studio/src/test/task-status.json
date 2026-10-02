@@ -1,0 +1,66 @@
+{
+  "foreground": "task-1",
+  "skills": [
+    {
+      "key": {
+        "name": "support",
+        "version": "1.2.3"
+      },
+      "description": "Support tasks",
+      "input_schema": {
+        "type": "object"
+      },
+      "output_schema": {
+        "type": "object"
+      },
+      "tools": [
+        {
+          "name": "save",
+          "description": "Save",
+          "parameters": null,
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          }
+        }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "services_pending": false,
+      "service_errors": [],
+      "id": "task-1",
+      "parent": null,
+      "skill": {
+        "name": "support",
+        "version": "1.2.3"
+      },
+      "revision": 1,
+      "status": "running",
+      "flow": null,
+      "pending": "operation-1",
+      "output": null
+    }
+  ],
+  "operations": [
+    {
+      "id": "operation-1",
+      "owner": {
+        "task": "task-1",
+        "revision": 1,
+        "operation": "operation-1"
+      },
+      "tool": "save",
+      "args": {
+        "request_id": "example-purchase",
+        "value": 42
+      },
+      "idempotency_key": "example-purchase",
+      "status": "awaiting_approval",
+      "cancellation_requested": false,
+      "result": null,
+      "error": null
+    }
+  ]
+}

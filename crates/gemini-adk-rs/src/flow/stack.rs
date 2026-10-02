@@ -25,7 +25,8 @@ use serde::{Deserialize, Serialize};
 
 use super::timing::{VOICE_TIMING_KEY, VoiceTiming};
 use super::{
-    CompiledFlow, Enforcement, Flow, FlowExplanation, FlowMonitor, Guard, Marking, Step, StepAction,
+    CompiledFlow, Enforcement, Flow, FlowExplanation, FlowMonitor, FlowSnapshot, Guard, Marking,
+    Step, StepAction,
 };
 use crate::state::State;
 
@@ -329,6 +330,28 @@ impl FlowStack {
     /// Add several digressions, in trigger-priority order.
     pub fn with_overlays(mut self, overlays: impl IntoIterator<Item = Overlay>) -> Self {
         self.overlays.extend(overlays);
+        self
+    }
+
+    /// Admit installed service tools in the main flow and every digression.
+    /// Tool-specific constraints still apply. Call this after adding overlays
+    /// when constructing a stack, before it starts processing events.
+    pub fn with_ambient_tools(mut self, tools: impl IntoIterator<Item = String>) -> Self {
+        let tools: Vec<_> = tools.into_iter().collect();
+        let extend = |flow: &mut Flow| {
+            for name in &tools {
+                if !flow.ambient.contains(name) {
+                    flow.ambient.push(name.clone());
+                }
+            }
+        };
+        extend(&mut self.main.flow);
+        for overlay in &mut self.overlays {
+            extend(&mut overlay.flow);
+        }
+        for active in &mut self.active {
+            extend(&mut active.monitor.flow);
+        }
         self
     }
 
@@ -912,6 +935,40 @@ impl FlowStack {
         ex
     }
 
+    /// Observe the current layer and whole-stack lifecycle together.
+    ///
+    /// Callers holding a shared stack lock get one consistent marking and
+    /// overlay path. Guard evaluation reads `State`, which may change
+    /// independently; this is not a transaction across all session state.
+    pub fn snapshot(&self, state: &State) -> FlowSnapshot {
+        FlowSnapshot {
+            explanation: self.explain(state),
+            done: self.marking().done.iter().cloned().collect(),
+            complete: self.is_complete(),
+            overlay_path: self.overlay_path().into_iter().map(str::to_owned).collect(),
+            terminated: self.is_terminated(),
+        }
+    }
+
+    /// Re-evaluate the current layer after directly setting state.
+    ///
+    /// This does not count a turn, trigger or resume digressions, or advance
+    /// repair policies. Use [`on_turn`](Self::on_turn) for a user turn.
+    pub fn relatch(&mut self, state: &State) {
+        if self.is_terminated() {
+            return;
+        }
+        match self.active.last_mut() {
+            Some(active) => active.monitor.relatch(state),
+            None => {
+                for step in self.main.apply_resets(state) {
+                    self.clear_repair(&step, state);
+                }
+                self.main.relatch(state);
+            }
+        }
+    }
+
     /// The active layer's marking (the last driving layer's, after
     /// termination — kept for audit).
     pub fn marking(&self) -> &Marking {
@@ -1034,6 +1091,62 @@ mod tests {
             .compile()
             .expect("compiles");
         Overlay::new(name, Guard::is_true(trigger), flow, resume)
+    }
+
+    #[test]
+    fn snapshot_keeps_layer_progress_separate_from_stack_completion() {
+        let state = State::new();
+        let mut stack =
+            FlowStack::new(main_flow(), Enforcement::Enforce).with_overlay(faq_overlay());
+        let _ = state.set("a_done", true);
+        stack.on_turn(&state);
+        let _ = state.set("intent:faq", true);
+        stack.on_turn(&state);
+        let _ = state.set("faq_answered", true);
+        stack.on_turn(&state);
+
+        let snapshot = stack.snapshot(&state);
+        assert_eq!(snapshot.done, ["answer", "faq_end"]);
+        assert_eq!(snapshot.overlay_path, ["faq"]);
+        assert!(snapshot.explanation.missing_requirements.is_empty());
+        assert!(!snapshot.complete, "a closing digression is still active");
+        assert!(!snapshot.terminated);
+        assert!(stack.main().marking().done.contains("a"));
+
+        let _ = state.set("intent:faq", false);
+        stack.on_turn(&state);
+        let snapshot = stack.snapshot(&state);
+        assert_eq!(snapshot.done, ["a", "b"]);
+        assert!(snapshot.overlay_path.is_empty());
+        assert!(snapshot.complete);
+    }
+
+    #[test]
+    fn snapshot_reports_termination_without_inventing_main_progress() {
+        let state = State::new();
+        let mut stack = FlowStack::new(main_flow(), Enforcement::Enforce).with_overlay(overlay(
+            "cancel",
+            "cancel",
+            "cancelled",
+            Resume::Terminate,
+        ));
+        let _ = state.set("cancel", true);
+        let _ = state.set("cancelled", true);
+        stack.on_turn(&state);
+        assert!(
+            !stack.snapshot(&state).terminated,
+            "closing turn comes first"
+        );
+        stack.on_turn(&state);
+        let snapshot = stack.snapshot(&state);
+        assert!(snapshot.terminated);
+        assert!(snapshot.complete);
+        assert!(snapshot.explanation.active.is_empty());
+        assert!(snapshot.explanation.allowed_tools.is_empty());
+        assert!(snapshot.done.is_empty(), "main task was never completed");
+        let _ = state.set("a_done", true);
+        stack.relatch(&state);
+        assert!(stack.snapshot(&state).done.is_empty());
     }
 
     #[test]
@@ -1614,6 +1727,36 @@ mod tests {
         stack.on_turn(&state);
         assert_eq!(stack.explain(&state).active, ["handoff"]);
         assert_eq!(state.get::<bool>(&escalate_flag("collect")), Some(true));
+    }
+
+    #[test]
+    fn state_only_reset_clears_repair_without_counting_a_turn() {
+        let state = State::new();
+        let main = Flow::new()
+            .step("collect")
+            .done(Guard::is_true(escalate_flag("collect")))
+            .reset(["collect"])
+            .when(Guard::is_true("retry"))
+            .build()
+            .unwrap()
+            .compile()
+            .unwrap();
+        let mut stack = FlowStack::new(main, Enforcement::Enforce)
+            .with_repair("collect", RepairPolicy::new(1, 2));
+        stack.on_turn(&state);
+        stack.on_turn(&state);
+        assert!(stack.marking().done.contains("collect"));
+
+        let _ = state.set("retry", true);
+        stack.relatch(&state);
+        assert_eq!(stack.marking().turns, 2);
+        assert!(!stack.marking().done.contains("collect"));
+        assert_eq!(state.get::<bool>(&escalate_flag("collect")), Some(false));
+        assert_eq!(state.get::<bool>(&reprompt_flag("collect")), Some(false));
+        stack.on_turn(&state);
+        assert!(!stack.marking().done.contains("collect"));
+        stack.on_turn(&state);
+        assert!(stack.marking().done.contains("collect"));
     }
 
     /// A reset can be gated on a *tool*, not just a state flag — `reset(..)

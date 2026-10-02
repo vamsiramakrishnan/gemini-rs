@@ -1,305 +1,1774 @@
 {
   "name": "telco-support",
-  "description": "Telecom technical support: authenticate, run a line diagnostic, resolve or raise a ticket \u2014 diagnostics gated behind authentication.",
-  "instruction": "You are the technical support assistant for Northwire Broadband. Authenticate the account first, then diagnose before promising anything. Raise a ticket when the line test fails.",
-  "greeting": "Greet the caller, say you're Northwire support, and ask for their account number and postcode.",
-  "modality": "text",
-  "tools": [
+  "version": "2.0.0",
+  "description": "Northwire voice support: governed diagnostics and repair, independent outage lookup, verified ticket status and plan information. Controlled demo fixtures.",
+  "instruction": "You are one voice assistant. Route to the relevant independently usable capability; start its task with real business inputs. Do not activate an unrelated workflow just to answer a public question. A public information capability may be a child task; complete it and resume its parent without repeating finished work. Private tasks verify their own account/order. All service responses are controlled demo fixtures; no real account lookup, payment, transfer or persistent change occurs. Commits require exact proposals and explicit approval in the application, never spoken consent. Wait for a successful receipt before claiming a demo action finished.",
+  "greeting": "Introduce Northwire support and ask whether the caller needs connection troubleshooting, outage information, ticket progress or plan information.",
+  "modality": "audio",
+  "voice": "Kore",
+  "skills": [
     {
-      "name": "authenticate_account",
-      "description": "Verify the caller against account number and postcode.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "account_number": {
-            "type": "string"
+      "name": "technical_support",
+      "version": "2.0.0",
+      "description": "You are the technical support assistant for Northwire Broadband. Authenticate the account first, then diagnose before promising anything. Raise a ticket when the line test fails.",
+      "instruction": "You are the technical support assistant for Northwire Broadband. Authenticate the account first, then diagnose before promising anything. Raise a ticket when the line test fails. These are controlled demo data, not live account records or persistent actions. Ask for the declared business inputs. Do not reuse another task’s verification. Use the tool receipt for the answer and complete with the declared result. A commit creates an exact proposal: explain its arguments, wait for application approval, then report only its successful receipt. Spoken consent does not approve an operation.",
+      "inputs": {
+        "account_number": {
+          "type": "string"
+        },
+        "postcode": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "authenticate_account",
+          "description": "Verify the account number and postcode in the successful demo record. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
           },
-          "postcode": {
-            "type": "string"
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_number": {
+                "type": "string"
+              },
+              "postcode": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_number",
+              "postcode"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "authenticated": true,
+            "plan": "Fibre 500"
+          },
+          "set_state": {
+            "authenticated": true
           }
         },
-        "required": [
-          "account_number"
+        {
+          "name": "run_line_test",
+          "description": "Run the demo diagnostic for the specified account and line. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_number": {
+                "type": "string"
+              },
+              "line_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_number",
+              "line_id"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "status": "degraded",
+            "sync_speed_mbps": 61,
+            "expected_mbps": 500
+          },
+          "set_state": {
+            "line_tested": true,
+            "line_ok": false,
+            "retest_requested": false
+          }
+        },
+        {
+          "name": "send_reset_signal",
+          "description": "Propose a reset of the specified account router line. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_number": {
+                "type": "string"
+              },
+              "line_id": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_number",
+              "line_id",
+              "request_id"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "sent": true,
+            "line_id": "LINE-44"
+          },
+          "set_state": {
+            "reset_sent": true
+          }
+        },
+        {
+          "name": "create_ticket",
+          "description": "Propose an engineer ticket containing this line and diagnostic summary. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_number": {
+                "type": "string"
+              },
+              "line_id": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_number",
+              "line_id",
+              "summary",
+              "request_id"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "ticket": "NW-88412",
+            "sla_hours": 48
+          },
+          "set_state": {
+            "ticket_raised": true
+          },
+          "save_response_as": "result"
+        },
+        {
+          "name": "request_retest",
+          "description": "Record a task-local request to reopen the diagnostic after a power cycle. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "response": {
+            "queued": true
+          },
+          "set_state": {
+            "retest_requested": true
+          }
+        },
+        {
+          "name": "reject_account",
+          "description": "Read the separate failed-verification fixture; this does not authenticate the account. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_number": {
+                "type": "string"
+              },
+              "postcode": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_number",
+              "postcode"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "authenticated": false,
+            "reason": "Account details do not match"
+          },
+          "set_state": {
+            "authentication_failed": true
+          }
+        }
+      ],
+      "flow": {
+        "steps": [
+          {
+            "id": "authenticate",
+            "posture": "Authenticate the account before discussing line details.",
+            "allow": [
+              "authenticate_account",
+              "reject_account"
+            ],
+            "done": {
+              "is_true": "authenticated"
+            }
+          },
+          {
+            "id": "diagnose",
+            "after": [
+              "authenticate"
+            ],
+            "posture": "Run the line test and read the result back honestly — never promise a fix before the diagnostic.",
+            "allow": [
+              "run_line_test"
+            ],
+            "done": {
+              "called_ok": "run_line_test"
+            },
+            "ground": "Line test {line_tested?complete:not yet run}."
+          },
+          {
+            "id": "resolve",
+            "after": [
+              "diagnose"
+            ],
+            "posture": "Try a remote reset first. If the line is still degraded, raise an engineer ticket and give the reference and SLA.",
+            "allow": [
+              "send_reset_signal",
+              "create_ticket"
+            ],
+            "done": {
+              "any": [
+                {
+                  "is_true": "line_ok"
+                },
+                {
+                  "is_true": "ticket_raised"
+                }
+              ]
+            }
+          },
+          {
+            "id": "wrap_up",
+            "after": [
+              "resolve"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "once": "create_ticket"
+          },
+          {
+            "never_until": {
+              "tool": "create_ticket",
+              "until": {
+                "is_true": "line_tested"
+              }
+            }
+          },
+          {
+            "require": [
+              "wrap_up"
+            ]
+          },
+          {
+            "reset": {
+              "steps": [
+                "diagnose"
+              ],
+              "when": {
+                "is_true": "retest_requested"
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "run_line_test",
+              "until": {
+                "is_true": "authenticated"
+              }
+            }
+          },
+          {
+            "never_until": {
+              "tool": "send_reset_signal",
+              "until": {
+                "is_true": "line_tested"
+              }
+            }
+          }
+        ],
+        "ambient": [
+          "request_retest"
         ]
       },
-      "response": {
-        "authenticated": true,
-        "plan": "Fibre 500"
-      },
-      "set_state": {
-        "authenticated": true
-      }
-    },
-    {
-      "name": "run_line_test",
-      "description": "Run a remote diagnostic on the caller's line.",
-      "response": {
-        "status": "degraded",
-        "sync_speed_mbps": 61,
-        "expected_mbps": 500
-      },
-      "set_state": {
-        "line_tested": true,
-        "line_ok": false,
-        "retest_requested": false
-      }
-    },
-    {
-      "name": "send_reset_signal",
-      "description": "Push a remote reset to the caller's router.",
-      "response": {
-        "sent": true
-      },
-      "set_state": {
-        "reset_sent": true
-      }
-    },
-    {
-      "name": "create_ticket",
-      "description": "Raise an engineer ticket with the diagnostic attached.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "summary": {
-            "type": "string"
-          }
-        }
-      },
-      "response": {
-        "ticket": "NW-88412",
-        "sla_hours": 48
-      },
-      "set_state": {
-        "ticket_raised": true
-      }
-    },
-    {
-      "name": "request_retest",
-      "description": "Re-run the line diagnostic (e.g. after the customer power-cycles the router).",
-      "response": {
-        "queued": true
-      },
-      "set_state": {
-        "retest_requested": true
-      }
-    }
-  ],
-  "flow": {
-    "steps": [
-      {
-        "id": "authenticate",
-        "posture": "Authenticate the account before discussing line details.",
-        "allow": [
-          "authenticate_account"
-        ],
-        "done": {
-          "is_true": "authenticated"
-        }
-      },
-      {
-        "id": "diagnose",
-        "after": [
-          "authenticate"
-        ],
-        "posture": "Run the line test and read the result back honestly \u2014 never promise a fix before the diagnostic.",
-        "allow": [
-          "run_line_test"
-        ],
-        "done": {
-          "called_ok": "run_line_test"
+      "state": {
+        "authenticated": {
+          "type": "boolean",
+          "default": false
         },
-        "ground": "Line test {line_tested?complete:not yet run}."
+        "line_tested": {
+          "type": "boolean",
+          "default": false
+        },
+        "line_ok": {
+          "type": "boolean",
+          "default": false
+        },
+        "retest_requested": {
+          "type": "boolean",
+          "default": false
+        },
+        "reset_sent": {
+          "type": "boolean",
+          "default": false
+        },
+        "ticket_raised": {
+          "type": "boolean",
+          "default": false
+        },
+        "authentication_failed": {
+          "type": "boolean",
+          "default": false
+        }
       },
-      {
-        "id": "resolve",
-        "after": [
-          "diagnose"
-        ],
-        "posture": "Try a remote reset first. If the line is still degraded, raise an engineer ticket and give the reference and SLA.",
-        "allow": [
-          "send_reset_signal",
-          "create_ticket"
-        ],
-        "done": {
-          "any": [
+      "tests": [
+        {
+          "name": "degraded line ends in a ticket",
+          "script": [
             {
-              "is_true": "line_ok"
+              "expect": {
+                "active": [
+                  "authenticate"
+                ],
+                "blocked": [
+                  "create_ticket"
+                ]
+              }
             },
             {
-              "is_true": "ticket_raised"
+              "tool": "authenticate_account"
+            },
+            {
+              "tool": "run_line_test"
+            },
+            {
+              "expect": {
+                "done": [
+                  "authenticate",
+                  "diagnose"
+                ],
+                "active": [
+                  "resolve"
+                ]
+              }
+            },
+            {
+              "tool": "send_reset_signal"
+            },
+            {
+              "tool": "create_ticket"
+            },
+            {
+              "expect": {
+                "done": [
+                  "resolve",
+                  "wrap_up"
+                ],
+                "complete": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "no ticket without a diagnostic",
+          "script": [
+            {
+              "tool": "authenticate_account"
+            },
+            {
+              "tool": "create_ticket"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "create_ticket"
+                ],
+                "complete": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "ticket is single-use",
+          "script": [
+            {
+              "tool": "authenticate_account"
+            },
+            {
+              "tool": "run_line_test"
+            },
+            {
+              "tool": "create_ticket"
+            },
+            {
+              "tool": "create_ticket"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "create_ticket"
+                ],
+                "done": [
+                  "resolve"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "retest reopens the diagnostic",
+          "script": [
+            {
+              "tool": "authenticate_account"
+            },
+            {
+              "tool": "run_line_test"
+            },
+            {
+              "expect": {
+                "done": [
+                  "diagnose"
+                ]
+              }
+            },
+            {
+              "tool": "request_retest"
+            },
+            {
+              "expect": {
+                "active": [
+                  "diagnose"
+                ]
+              }
+            },
+            {
+              "tool": "run_line_test"
+            },
+            {
+              "expect": {
+                "done": [
+                  "diagnose"
+                ]
+              }
             }
           ]
         }
-      },
-      {
-        "id": "wrap_up",
-        "after": [
-          "resolve"
-        ],
-        "terminal": true
-      }
-    ],
-    "constraints": [
-      {
-        "once": "create_ticket"
-      },
-      {
-        "never_until": {
-          "tool": "create_ticket",
-          "until": {
-            "is_true": "line_tested"
-          }
+      ]
+    },
+    {
+      "name": "outage_lookup",
+      "version": "2.0.0",
+      "description": "Look up public network outages by postcode without requesting account authentication.",
+      "instruction": "Look up public network outages by postcode without requesting account authentication. These are controlled demo data, not live account records or persistent actions. Ask for the declared business inputs. Do not reuse another task’s verification. Use the tool receipt for the answer and complete with the declared result. A commit creates an exact proposal: explain its arguments, wait for application approval, then report only its successful receipt. Spoken consent does not approve an operation.",
+      "inputs": {
+        "postcode": {
+          "type": "string"
         }
       },
-      {
-        "require": [
-          "wrap_up"
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "lookup_outage",
+          "description": "Read the public outage fixture for the stated postcode. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "postcode": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "postcode"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "postcode": "NW1 4AB",
+            "status": "known_outage",
+            "reference": "OUT-12",
+            "estimated_restore": "18:00 demo time"
+          },
+          "save_response_as": "result"
+        }
+      ]
+    },
+    {
+      "name": "ticket_status",
+      "version": "2.0.0",
+      "description": "Verify an account and look up an existing engineer ticket; do not create or modify tickets.",
+      "instruction": "Verify an account and look up an existing engineer ticket; do not create or modify tickets. These are controlled demo data, not live account records or persistent actions. Ask for the declared business inputs. Do not reuse another task’s verification. Use the tool receipt for the answer and complete with the declared result. A commit creates an exact proposal: explain its arguments, wait for application approval, then report only its successful receipt. Spoken consent does not approve an operation.",
+      "inputs": {
+        "account_number": {
+          "type": "string"
+        },
+        "postcode": {
+          "type": "string"
+        },
+        "ticket_reference": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_ticket_account",
+          "description": "Check ownership of the ticket against account and postcode in the demo record. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_number": {
+                "type": "string"
+              },
+              "postcode": {
+                "type": "string"
+              },
+              "ticket_reference": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_number",
+              "postcode",
+              "ticket_reference"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "verified": true
+          },
+          "set_state": {
+            "verified": true
+          }
+        },
+        {
+          "name": "lookup_ticket_status",
+          "description": "Retrieve the verified ticket progress fixture. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_number": {
+                "type": "string"
+              },
+              "ticket_reference": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_number",
+              "ticket_reference"
+            ],
+            "additionalProperties": false
+          },
+          "response": {
+            "ticket": "NW-88412",
+            "status": "engineer_assigned",
+            "appointment": "Thursday 09:00–12:00 demo slot"
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "posture": "Use the admitted tools and report their controlled demo result.",
+            "allow": [
+              "verify_ticket_account"
+            ],
+            "done": {
+              "is_true": "verified"
+            }
+          },
+          {
+            "id": "lookup",
+            "posture": "Use the admitted tools and report their controlled demo result.",
+            "allow": [
+              "lookup_ticket_status"
+            ],
+            "done": {
+              "called_ok": "lookup_ticket_status"
+            },
+            "after": [
+              "verify"
+            ]
+          },
+          {
+            "id": "done",
+            "after": [
+              "lookup"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "never_until": {
+              "tool": "lookup_ticket_status",
+              "until": {
+                "is_true": "verified"
+              }
+            }
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
         ]
       },
-      {
-        "reset": {
-          "steps": [
-            "diagnose"
-          ],
-          "when": {
-            "is_true": "retest_requested"
-          }
+      "state": {
+        "verified": {
+          "type": "boolean",
+          "default": false
         }
       }
-    ],
-    "ambient": [
-      "request_retest"
-    ]
-  },
-  "tests": [
+    },
     {
-      "name": "degraded line ends in a ticket",
-      "script": [
+      "name": "plan_information",
+      "version": "2.0.0",
+      "description": "Explain public plan features and advertised prices without changing the customer’s plan.",
+      "instruction": "Explain public plan features and advertised prices without changing the customer’s plan. These are controlled demo data, not live account records or persistent actions. Ask for the declared business inputs. Do not reuse another task’s verification. Use the tool receipt for the answer and complete with the declared result. A commit creates an exact proposal: explain its arguments, wait for application approval, then report only its successful receipt. Spoken consent does not approve an operation.",
+      "inputs": {
+        "plan_name": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
         {
-          "expect": {
-            "active": [
-              "authenticate"
+          "name": "lookup_plan",
+          "description": "Read the requested public plan fixture, including its source. Controlled demo fixture; no external service is contacted.",
+          "effect": {
+            "kind": "read"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "plan_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "plan_name"
             ],
-            "blocked": [
-              "create_ticket"
-            ]
+            "additionalProperties": false
+          },
+          "response": {
+            "plan": "Fibre 500",
+            "download_mbps": 500,
+            "upload_mbps": 75,
+            "monthly_price_gbp": 35,
+            "contract_months": 12,
+            "source": "Northwire demo plan catalogue"
+          },
+          "save_response_as": "result"
+        }
+      ]
+    }
+  ],
+  "task_scenarios": [
+    {
+      "name": "technical support completes after approved router reset and ticket",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "technical_support",
+            "input": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
           }
         },
         {
-          "tool": "authenticate_account"
-        },
-        {
-          "tool": "run_line_test"
-        },
-        {
-          "expect": {
-            "done": [
-              "authenticate",
-              "diagnose"
-            ],
-            "active": [
-              "resolve"
-            ]
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "authenticate_account",
+            "args": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
           }
         },
         {
-          "tool": "send_reset_signal"
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "run_line_test",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44"
+            }
+          }
         },
         {
-          "tool": "create_ticket"
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "send_reset_signal",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44",
+              "request_id": "reset-44"
+            }
+          }
         },
         {
-          "expect": {
-            "done": [
-              "resolve",
-              "wrap_up"
-            ],
-            "complete": true
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "create_ticket",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44",
+              "summary": "Degraded line after router reset",
+              "request_id": "ticket-44"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-4": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-4",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "ticket": "NW-88412",
+                  "sla_hours": 48
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public outage lookup completes independently",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "outage_lookup",
+            "input": {
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_outage",
+            "args": {
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "postcode": "NW1 4AB",
+                  "status": "known_outage",
+                  "reference": "OUT-12",
+                  "estimated_restore": "18:00 demo time"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "verified ticket status completes independently",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "ticket_status",
+            "input": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB",
+              "ticket_reference": "NW-88412"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_ticket_account",
+            "args": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB",
+              "ticket_reference": "NW-88412"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_ticket_status",
+            "args": {
+              "account_number": "NW-2044",
+              "ticket_reference": "NW-88412"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "ticket": "NW-88412",
+                  "status": "engineer_assigned",
+                  "appointment": "Thursday 09:00–12:00 demo slot"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public plan information completes independently",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "plan_information",
+            "input": {
+              "plan_name": "Fibre 500"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_plan",
+            "args": {
+              "plan_name": "Fibre 500"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "plan": "Fibre 500",
+                  "download_mbps": 500,
+                  "upload_mbps": 75,
+                  "monthly_price_gbp": 35,
+                  "contract_months": 12,
+                  "source": "Northwire demo plan catalogue"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "outage child resumes completed account verification",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "technical_support",
+            "input": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "authenticate_account",
+            "args": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "outage_lookup",
+            "input": {
+              "postcode": "NW1 4AB"
+            },
+            "parent": "task-1"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "lookup_outage",
+            "args": {
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-2"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "authenticate"
+              ],
+              "active": [
+                "diagnose"
+              ]
+            },
+            {
+              "task": "task-2",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "postcode": "NW1 4AB",
+                  "status": "known_outage",
+                  "reference": "OUT-12",
+                  "estimated_restore": "18:00 demo time"
+                }
+              }
+            }
+          ],
+          "foreground": "task-1"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "run_line_test",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "create_ticket",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44",
+              "summary": "Degraded line after router reset",
+              "request_id": "ticket-44"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-4",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "ticket": "NW-88412",
+                  "sla_hours": 48
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ticket proposal is rejected before a diagnostic",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "technical_support",
+            "input": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "authenticate_account",
+            "args": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "create_ticket",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44",
+              "summary": "Degraded line after router reset",
+              "request_id": "ticket-44"
+            }
+          },
+          "expected_error": "create_ticket"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "authenticate"
+              ],
+              "active": [
+                "diagnose"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-1": "succeeded"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          },
+          "expected_error": "governance has not completed"
+        }
+      ]
+    },
+    {
+      "name": "denied ticket approval does not finish support",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "technical_support",
+            "input": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "authenticate_account",
+            "args": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "run_line_test",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "create_ticket",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44",
+              "summary": "Degraded line after router reset",
+              "request_id": "ticket-44"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": false
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          },
+          "expected_error": "governance has not completed"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "active": [
+                "resolve"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-3": "declined"
           }
         }
       ]
     },
     {
-      "name": "no ticket without a diagnostic",
-      "script": [
+      "name": "cancelling a queued reset revokes its exact approval",
+      "steps": [
         {
-          "tool": "authenticate_account"
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "technical_support",
+            "input": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
         },
         {
-          "tool": "create_ticket"
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "authenticate_account",
+            "args": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
         },
         {
-          "expect": {
-            "blocked": [
-              "create_ticket"
-            ],
-            "complete": false
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "run_line_test",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "send_reset_signal",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44",
+              "request_id": "reset-44"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "cancel",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          },
+          "expected_error": "no longer pending"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "cancelled"
+            }
+          ],
+          "operations": {
+            "operation-3": "declined"
           }
         }
       ]
     },
     {
-      "name": "ticket is single-use",
-      "script": [
+      "name": "stable ticket key replays the receipt without a second approval",
+      "steps": [
         {
-          "tool": "authenticate_account"
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "technical_support",
+            "input": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
         },
         {
-          "tool": "run_line_test"
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "authenticate_account",
+            "args": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
         },
         {
-          "tool": "create_ticket"
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "run_line_test",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44"
+            }
+          }
         },
         {
-          "tool": "create_ticket"
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "create_ticket",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44",
+              "summary": "Degraded line after router reset",
+              "request_id": "ticket-44"
+            }
+          }
         },
         {
-          "expect": {
-            "blocked": [
-              "create_ticket"
-            ],
-            "done": [
-              "resolve"
-            ]
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "create_ticket",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44",
+              "summary": "Degraded line after router reset",
+              "request_id": "ticket-44"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "resolve",
+                "wrap_up"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-3": "succeeded",
+            "operation-4": "succeeded"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "ticket": "NW-88412",
+                  "sla_hours": 48
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "retest reopens diagnostic without losing account verification",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "technical_support",
+            "input": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "authenticate_account",
+            "args": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "run_line_test",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "send_reset_signal",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44",
+              "request_id": "reset-44"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "request_retest",
+            "args": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "authenticate"
+              ],
+              "active": [
+                "diagnose"
+              ]
+            }
+          ]
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "run_line_test",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "create_ticket",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44",
+              "summary": "Degraded line after router reset",
+              "request_id": "ticket-44"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-6",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "2.0.0",
+              "output": {
+                "result": {
+                  "ticket": "NW-88412",
+                  "sla_hours": 48
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "failed account verification cannot disclose line details",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "technical_support",
+            "input": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "reject_account",
+            "args": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "run_line_test",
+            "args": {
+              "account_number": "NW-2044",
+              "line_id": "LINE-44"
+            }
+          },
+          "expected_error": "run_line_test"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          },
+          "expected_error": "governance has not completed"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "active": [
+                "authenticate"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-1": "succeeded"
           }
         }
       ]
     },
     {
-      "name": "retest reopens the diagnostic",
-      "script": [
+      "name": "ticket status cannot inherit another task account verification",
+      "steps": [
         {
-          "tool": "authenticate_account"
-        },
-        {
-          "tool": "run_line_test"
-        },
-        {
-          "expect": {
-            "done": [
-              "diagnose"
-            ]
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "technical_support",
+            "input": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
           }
         },
         {
-          "tool": "request_retest"
-        },
-        {
-          "expect": {
-            "active": [
-              "diagnose"
-            ]
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "authenticate_account",
+            "args": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB"
+            }
           }
         },
         {
-          "tool": "run_line_test"
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "ticket_status",
+            "input": {
+              "account_number": "NW-2044",
+              "postcode": "NW1 4AB",
+              "ticket_reference": "NW-88412"
+            }
+          }
         },
         {
-          "expect": {
-            "done": [
-              "diagnose"
-            ]
-          }
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "lookup_ticket_status",
+            "args": {
+              "account_number": "NW-2044",
+              "ticket_reference": "NW-88412"
+            }
+          },
+          "expected_error": "lookup_ticket_status"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "suspended"
+            },
+            {
+              "task": "task-2",
+              "status": "running",
+              "active": [
+                "verify"
+              ]
+            }
+          ],
+          "foreground": "task-2"
         }
       ]
     }

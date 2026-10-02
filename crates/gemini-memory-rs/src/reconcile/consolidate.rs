@@ -57,6 +57,14 @@ pub fn consolidate(sealed: &SealedSessionLedger) -> ConsolidationOutput {
         }
     }
 
+    // A deletion also covers facts learned in this same session. Those records
+    // do not exist in the repository yet, so the committer cannot find them.
+    output.proposals.retain(|proposal| {
+        !output
+            .deletions
+            .iter()
+            .any(|selector| selector.matches_proposal(proposal))
+    });
     output
 }
 
@@ -156,7 +164,7 @@ fn derive_tags(candidate: &SessionCandidate) -> Vec<String> {
 /// A bare "forget that" with no topic is ambiguous, and deleting on an
 /// ambiguous instruction is not recoverable — so it targets nothing and the
 /// caller is expected to ask.
-fn deletion_selector(candidate: &SessionCandidate) -> Option<MemorySelector> {
+pub(crate) fn deletion_selector(candidate: &SessionCandidate) -> Option<MemorySelector> {
     let topic = candidate.value.display();
     let topic = topic.trim();
     if topic.is_empty() || topic.split_whitespace().count() > 12 {

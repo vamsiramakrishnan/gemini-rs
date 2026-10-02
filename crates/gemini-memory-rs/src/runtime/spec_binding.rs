@@ -19,7 +19,12 @@ use super::turn_extractor::MemorySlot;
 use crate::core::MutationIntent;
 use crate::engine::MemorySession;
 
-/// [`MemoryBinding`] over a [`MemorySession`].
+/// [`MemoryBinding`] over one [`MemorySession`] and authenticated memory subject.
+///
+/// Task activations share this session's backend, while each declares its own
+/// projected slots. Use one binding per logical Live session. Accepted task
+/// effects and contextual memory tools serialize with awaited reconciliation;
+/// task cancellation does not undo an effect that already started.
 ///
 /// ```no_run
 /// # use std::sync::Arc;
@@ -35,12 +40,16 @@ use crate::engine::MemorySession;
 /// ```
 pub struct SessionMemoryBinding {
     session: Arc<MemorySession>,
+    task_session: Arc<super::task_binding::TaskMemorySession>,
 }
 
 impl SessionMemoryBinding {
     /// Bind a memory session for spec-driven installation.
     pub fn new(session: Arc<MemorySession>) -> Self {
-        Self { session }
+        Self {
+            task_session: super::task_binding::TaskMemorySession::new(session.clone()),
+            session,
+        }
     }
 
     /// The underlying session.
@@ -72,6 +81,36 @@ impl MemoryBinding for SessionMemoryBinding {
                 .apply_explicit_command(MutationIntent::Remember, &note, turn)
                 .await;
         });
+    }
+
+    fn task_memory(
+        &self,
+        memory: &MemorySpec,
+    ) -> Result<Arc<dyn gemini_adk_rs::tasks::TaskMemoryService>, String> {
+        let slots = memory
+            .slots
+            .iter()
+            .map(|slot| {
+                MemorySlot::try_new(&slot.predicate, &slot.to).map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(self.task_session.view(slots))
+    }
+
+    fn task_tools(&self) -> Vec<Arc<dyn gemini_adk_rs::tool::ToolFunction>> {
+        self.task_session.tools()
+    }
+
+    fn install_task_lifecycle(&self, live: Live) -> Live {
+        let shared = self.task_session.clone();
+        live.on_teardown(move || {
+            let shared = shared.clone();
+            async move {
+                if let Err(error) = shared.finish().await {
+                    tracing::error!(%error, "task memory reconciliation failed");
+                }
+            }
+        })
     }
 }
 

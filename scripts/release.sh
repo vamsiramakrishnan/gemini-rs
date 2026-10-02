@@ -285,8 +285,12 @@ fi
 
 TODAY=$(date +%Y-%m-%d)
 
+# Keep the curated upgrade notes in the tag as well as CHANGELOG.md.
+UNRELEASED_NOTES=$(awk '/^## \[Unreleased\]/ { capture = 1; next } capture && /^## \[/ { exit } capture { print }' CHANGELOG.md)
+
 # Build release body (used for tag message and GitHub Release fallback)
 RELEASE_BODY="## v${VERSION} — $(date +%B\ %Y)
+${UNRELEASED_NOTES}
 ${CHANGELOG_BODY}
 
 ---
@@ -297,6 +301,7 @@ ${CHANGELOG_BODY}
 |-------|---------|---------|
 | [\`gemini-adk\`](https://crates.io/crates/gemini-adk) | ${VERSION} | \`cargo add gemini-adk@${VERSION}\` |
 | [\`gemini-genai-rs\`](https://crates.io/crates/gemini-genai-rs) | ${VERSION} | \`cargo add gemini-genai-rs@${VERSION}\` |
+| [\`gemini-adk-macros-rs\`](https://crates.io/crates/gemini-adk-macros-rs) | ${VERSION} | \`cargo add gemini-adk-macros-rs@${VERSION}\` |
 | [\`gemini-adk-rs\`](https://crates.io/crates/gemini-adk-rs) | ${VERSION} | \`cargo add gemini-adk-rs@${VERSION}\` |
 | [\`gemini-adk-fluent-rs\`](https://crates.io/crates/gemini-adk-fluent-rs) | ${VERSION} | \`cargo add gemini-adk-fluent-rs@${VERSION}\` |
 | [\`gemini-memory-rs\`](https://crates.io/crates/gemini-memory-rs) | ${VERSION} | \`cargo add gemini-memory-rs@${VERSION}\` |
@@ -368,6 +373,13 @@ if ! $DRY_RUN; then
   cargo update --workspace --quiet || die "Could not update Cargo.lock for the new version"
   ok "Cargo.lock updated (workspace members only)"
 
+  # The Python binding is excluded from the workspace and has its own lock.
+  # Its path dependencies still consume the bumped SDK crates.
+  sed -i "s/^version = \"${CURRENT}\"/version = \"${VERSION}\"/" \
+    crates/gemini-adk-py/Cargo.toml crates/gemini-adk-py/pyproject.toml
+  cargo update --workspace --manifest-path crates/gemini-adk-py/Cargo.toml --quiet \
+    || die "Could not update the Python binding lockfile"
+
   # Re-validate AFTER the bump.
   #
   # The validation suite above ran against the pre-bump tree, so without this
@@ -379,6 +391,8 @@ if ! $DRY_RUN; then
     || die "The bumped tree does not build — refusing to tag it"
   cargo test --workspace --locked \
     || die "The bumped tree fails its tests — refusing to tag it"
+  cargo check --manifest-path crates/gemini-adk-py/Cargo.toml --locked \
+    || die "The bumped Python binding does not build — refusing to tag it"
   ok "Bumped tree builds and passes its tests"
 fi
 
@@ -386,7 +400,9 @@ fi
 step "Committing and tagging"
 
 if ! $DRY_RUN; then
-  git add Cargo.toml Cargo.lock CHANGELOG.md
+  git add Cargo.toml Cargo.lock CHANGELOG.md \
+    crates/gemini-adk-py/Cargo.toml crates/gemini-adk-py/Cargo.lock \
+    crates/gemini-adk-py/pyproject.toml
   git commit -m "chore(release): ${TAG}
 
 Bump workspace version ${CURRENT} → ${VERSION}.
