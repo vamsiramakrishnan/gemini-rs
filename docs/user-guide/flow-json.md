@@ -522,8 +522,9 @@ The Studio is a drag-and-drop editor over exactly this document:
   next turn. A structural edit, load, undo, or redo stops these patches until
   the session restarts, so edits cannot reach an unrelated running document.
 
-Six examples ship with the Studio. See [the Studio guide](../flow-studio.md)
-for its current layout, gallery, replay, and project export workflows.
+The Studio ships seven skill catalogs and six reference flows. See
+[the Studio guide](../src/flow-studio.md) for its current layout, gallery,
+replay, and project export workflows.
 
 ### Validate endpoint
 
