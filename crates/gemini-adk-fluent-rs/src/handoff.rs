@@ -159,10 +159,10 @@ impl HandoffRecorder {
                 selected.insert(key.to_string(), value);
             }
         }
-        let flow = handle.explain().map(|explanation| HandoffFlowStatus {
-            done: state.get::<Vec<String>>("flow:done").unwrap_or_default(),
-            active: explanation.active,
-            missing: explanation.missing_requirements,
+        let flow = handle.flow_snapshot().map(|snapshot| HandoffFlowStatus {
+            done: snapshot.done,
+            active: snapshot.explanation.active,
+            missing: snapshot.explanation.missing_requirements,
         });
         HandoffPacket {
             summary: None,

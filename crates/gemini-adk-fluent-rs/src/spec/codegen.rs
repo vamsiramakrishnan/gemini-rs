@@ -21,6 +21,31 @@ use super::{
 impl SessionSpec {
     /// The complete `main.rs` this spec is equivalent to.
     pub fn to_rust(&self) -> String {
+        if !self.skills.is_empty() {
+            let document = serde_json::to_string_pretty(self).expect("session specs serialize");
+            let mut resources = String::from("    let resources = SpecResources {\n");
+            if self.requires_extraction() {
+                resources.push_str(
+                    "        extraction_llm: Some(std::sync::Arc::new(GeminiLlm::from_env()?)),\n",
+                );
+            }
+            if self.requires_memory() {
+                resources.push_str(
+                    "        memory: Some({\n            use gemini_memory_rs::prelude::{MemoryEngine, SessionId, UserId};\n            let engine = MemoryEngine::in_memory(UserId::new(\"user\"));\n            let session = std::sync::Arc::new(engine.begin_session(SessionId::new(\"session\")));\n            std::sync::Arc::new(gemini_memory_rs::runtime::SessionMemoryBinding::new(session))\n        }),\n",
+                );
+            }
+            resources.push_str("        ..SpecResources::default()\n    };\n");
+            let mut code = format!(
+                "use gemini_adk_fluent_rs::prelude::*;\nuse gemini_adk_fluent_rs::spec::{{SessionSpec, SpecResources}};\n\n#[tokio::main]\nasync fn main() -> Result<(), Box<dyn std::error::Error>> {{\n    let spec: SessionSpec = serde_json::from_str({})?;\n    let state = State::new();\n{resources}    let session = spec.apply(Live::builder(), &state, &resources)?\n        .on_text(|text| print!(\"{{text}}\"))\n        .connect_from_env().await?;\n",
+                rust_str(&document)
+            );
+            match self.modality {
+                SpecModality::Audio => code.push_str("    session.talk().await?;\n"),
+                SpecModality::Text => code.push_str("    let stdin = std::io::stdin();\n    let mut line = String::new();\n    while stdin.read_line(&mut line)? > 0 {\n        session.send_text(line.trim()).await?;\n        line.clear();\n    }\n    session.disconnect().await?;\n"),
+            }
+            code.push_str("    Ok(())\n}\n");
+            return code;
+        }
         let mut out = String::new();
         let name = if self.name.is_empty() {
             "app"
@@ -273,13 +298,28 @@ impl SessionSpec {
         } else {
             self.name.replace([' ', '_'], "-").to_lowercase()
         };
-        let features = if self.modality == SpecModality::Audio {
-            r#", features = ["gemini-llm", "voice-io"]"#
-        } else {
-            r#", features = ["gemini-llm"]"#
-        };
+        let mut feature_names = vec!["gemini-llm"];
+        if self.modality == SpecModality::Audio {
+            feature_names.push("voice-io");
+        }
+        if self.tools.iter().any(|tool| tool.http.is_some())
+            || self
+                .skills
+                .iter()
+                .any(|skill| skill.tools.iter().any(|tool| tool.tool.http.is_some()))
+        {
+            feature_names.push("http-tools");
+        }
+        let features = format!(
+            ", features = [{}]",
+            feature_names
+                .iter()
+                .map(|name| rust_str(name))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         let version = env!("CARGO_PKG_VERSION");
-        let memory_dep = if self.memory.is_some() {
+        let memory_dep = if self.requires_memory() {
             format!("gemini-memory-rs = \"{version}\"\n")
         } else {
             String::new()
@@ -1134,5 +1174,17 @@ mod tests {
             "const_name should prepend _ to digit-starting keys, got {name}"
         );
         assert_eq!(name, "_123ABC");
+    }
+    #[test]
+    fn skill_codegen_installs_the_full_serialized_definition() {
+        let spec: SessionSpec = serde_json::from_str(include_str!(
+            "../../../../apps/gemini-adk-web-rs/static/examples/flows/support-agent.json"
+        ))
+        .expect("parses");
+        let code = spec.to_rust();
+        assert!(code.contains("SessionSpec = serde_json::from_str"));
+        assert!(code.contains("spec.apply(Live::builder()"));
+        assert!(code.contains("submit_adjustment"));
+        assert!(code.contains("task_scenarios"));
     }
 }

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Multi-capability agents
+
+- One live session can run a catalog of skills, with separate task state,
+  suspension and resumption, child tasks, approvals, and execution receipts.
+  Task-owned extraction, computed state, watchers, temporal patterns, and
+  memory continue to belong to the task that started them after a switch.
+- Memory corrections and forgetting update current recall and task slots;
+  resumed tasks refresh derived memory without overwriting explicit input.
+  Commit approval waits for pending input and service work. Model tool calls
+  cannot grant their own approval.
+- Flow Studio can edit skills and their services, run offline task scenarios,
+  inspect task progress, and test live audio. Seven expanded catalogs cover
+  call screening, clinic intake, collections, telco support, returns,
+  restaurants, and general support. Six original flows remain as references.
+- Rust, Python, and Go project exports include nested skill tools and scoped
+  tool names. The gallery has 139 deterministic checks across 13 examples.
+- **Breaking:** `SimSnapshot` uses `status: FlowSnapshot`; Rust callers move
+  `done` and `explanation` reads under `status`. Conversation stage IDs and
+  digression names must be unique. See the [migration guide](docs/user-guide/migration.md)
+  and [skills and tasks guide](docs/user-guide/skills-and-tasks.md).
+
 ### Security
 
 - **Flow Studio ran commands from a posted spec.** A live run on

@@ -206,25 +206,16 @@ impl ToolDispatcher {
 
     /// Call a regular function tool by name within a session: the tool
     /// receives `ctx` (see [`ToolContext`](super::ToolContext)). The default
-    /// timeout applies, and cancelling `ctx.cancel` drops the call with
-    /// [`ToolError::Cancelled`].
+    /// timeout covers confirmation and execution. Cancelling `ctx.cancel`
+    /// drops either wait with [`ToolError::Cancelled`].
     pub async fn call_function_in(
         &self,
         name: &str,
         args: serde_json::Value,
         ctx: super::ToolContext,
     ) -> Result<serde_json::Value, ToolError> {
-        let func = self.function(name)?;
-        self.ensure_confirmed(&func, &args).await?;
-        let timeout = self.default_timeout;
-        let cancel = ctx.cancel.clone();
-        tokio::select! {
-            biased;
-            () = cancel.cancelled() => Err(ToolError::Cancelled),
-            result = tokio::time::timeout(timeout, func.call_with_context(args, ctx)) => {
-                result.unwrap_or(Err(ToolError::Timeout(timeout)))
-            }
-        }
+        self.call_function_with_context_timeout(name, args, ctx, self.default_timeout)
+            .await
     }
 
     /// The regular function tool registered as `name`.
@@ -240,65 +231,56 @@ impl ToolDispatcher {
 
     /// Call a regular function tool by name with an explicit timeout.
     ///
-    /// If the tool does not complete within the given duration, its future is
-    /// dropped (cancelling it) and `ToolError::Timeout` is returned.
+    /// The duration includes confirmation and execution. When it expires,
+    /// the pending future is dropped and `ToolError::Timeout` is returned.
     pub async fn call_function_with_timeout(
         &self,
         name: &str,
         args: serde_json::Value,
         timeout: Duration,
     ) -> Result<serde_json::Value, ToolError> {
-        let func = match self.tools.get(name) {
-            Some(ToolKind::Function(f)) => f.clone(),
-            Some(_) => {
-                return Err(ToolError::Other(format!(
-                    "{name} is not a regular function tool"
-                )));
-            }
-            None => return Err(ToolError::NotFound(name.to_string())),
-        };
-
-        self.ensure_confirmed(&func, &args).await?;
-
-        match tokio::time::timeout(
-            timeout,
-            func.call_with_context(args, super::ToolContext::detached()),
-        )
-        .await
-        {
-            Ok(result) => result,
-            Err(_elapsed) => Err(ToolError::Timeout(timeout)),
-        }
+        self.call_function_with_context_timeout(name, args, super::ToolContext::detached(), timeout)
+            .await
     }
 
     /// Call a regular function tool by name, racing against a cancellation token.
     ///
-    /// If the token is cancelled before the tool completes, its future is
-    /// dropped and `ToolError::Cancelled` is returned.
+    /// The default timeout covers confirmation and execution. If the token
+    /// is cancelled during either wait, its future is dropped and
+    /// `ToolError::Cancelled` is returned.
     pub async fn call_function_with_cancel(
         &self,
         name: &str,
         args: serde_json::Value,
         cancel: CancellationToken,
     ) -> Result<serde_json::Value, ToolError> {
-        let func = match self.tools.get(name) {
-            Some(ToolKind::Function(f)) => f.clone(),
-            Some(_) => {
-                return Err(ToolError::Other(format!(
-                    "{name} is not a regular function tool"
-                )));
-            }
-            None => return Err(ToolError::NotFound(name.to_string())),
-        };
+        self.call_function_in(
+            name,
+            args,
+            super::ToolContext::detached().with_cancel(cancel),
+        )
+        .await
+    }
 
-        self.ensure_confirmed(&func, &args).await?;
-
+    async fn call_function_with_context_timeout(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+        ctx: super::ToolContext,
+        timeout: Duration,
+    ) -> Result<serde_json::Value, ToolError> {
+        let func = self.function(name)?;
+        let cancel = ctx.cancel.clone();
         tokio::select! {
-            result = func.call_with_context(
-                args,
-                super::ToolContext::detached().with_cancel(cancel.clone()),
-            ) => result,
-            _ = cancel.cancelled() => Err(ToolError::Cancelled),
+            biased;
+            () = cancel.cancelled() => Err(ToolError::Cancelled),
+            result = tokio::time::timeout(timeout, async {
+                self.ensure_confirmed(&func, &args).await?;
+                if cancel.is_cancelled() {
+                    return Err(ToolError::Cancelled);
+                }
+                func.call_with_context(args, ctx).await
+            }) => result.unwrap_or(Err(ToolError::Timeout(timeout))),
         }
     }
 
@@ -462,6 +444,195 @@ mod confirmation_tests {
         let out = d.call_function("danger", json!({})).await.unwrap();
         assert_eq!(out["ok"], true);
         assert_eq!(runs.load(Ordering::SeqCst), 1);
+    }
+
+    fn awaiting_confirmation(timeout: Duration) -> (ToolDispatcher, Arc<AtomicUsize>) {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let mut dispatcher = ToolDispatcher::new().with_timeout(timeout);
+        dispatcher.register_function(confirm_tool(runs.clone()));
+        dispatcher.set_confirmation_provider(Arc::new(
+            |_: crate::confirmation::ConfirmationRequest| {
+                std::future::pending::<crate::confirmation::ToolConfirmation>()
+            },
+        ));
+        (dispatcher, runs)
+    }
+
+    #[tokio::test]
+    async fn session_cancellation_stops_pending_confirmation() {
+        let (dispatcher, runs) = awaiting_confirmation(Duration::from_secs(30));
+        let cancel = CancellationToken::new();
+        let ctx = crate::tool::ToolContext::detached().with_cancel(cancel.clone());
+        let mut call =
+            tokio_test::task::spawn(dispatcher.call_function_in("danger", json!({}), ctx));
+        tokio_test::assert_pending!(call.poll());
+
+        cancel.cancel();
+
+        assert!(matches!(
+            tokio_test::assert_ready!(call.poll()),
+            Err(ToolError::Cancelled)
+        ));
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn token_cancellation_stops_pending_confirmation() {
+        let (dispatcher, runs) = awaiting_confirmation(Duration::from_secs(30));
+        let cancel = CancellationToken::new();
+        let mut call = tokio_test::task::spawn(dispatcher.call_function_with_cancel(
+            "danger",
+            json!({}),
+            cancel.clone(),
+        ));
+        tokio_test::assert_pending!(call.poll());
+
+        cancel.cancel();
+
+        assert!(matches!(
+            tokio_test::assert_ready!(call.poll()),
+            Err(ToolError::Cancelled)
+        ));
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+    }
+
+    async fn assert_confirmation_timeout(
+        call: impl std::future::Future<Output = Result<serde_json::Value, ToolError>>,
+        timeout: Duration,
+    ) {
+        let mut call = tokio_test::task::spawn(call);
+        tokio_test::assert_pending!(call.poll());
+        tokio::time::advance(timeout).await;
+        assert!(matches!(
+            tokio_test::assert_ready!(call.poll()),
+            Err(ToolError::Timeout(elapsed)) if elapsed == timeout
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn session_timeout_includes_pending_confirmation() {
+        let timeout = Duration::from_secs(5);
+        let (dispatcher, runs) = awaiting_confirmation(timeout);
+        assert_confirmation_timeout(
+            dispatcher.call_function_in("danger", json!({}), crate::tool::ToolContext::detached()),
+            timeout,
+        )
+        .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancellable_call_timeout_includes_pending_confirmation() {
+        let timeout = Duration::from_secs(5);
+        let (dispatcher, runs) = awaiting_confirmation(timeout);
+        assert_confirmation_timeout(
+            dispatcher.call_function_with_cancel("danger", json!({}), CancellationToken::new()),
+            timeout,
+        )
+        .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn explicit_timeout_includes_pending_confirmation() {
+        let timeout = Duration::from_secs(5);
+        let (dispatcher, runs) = awaiting_confirmation(Duration::from_secs(30));
+        assert_confirmation_timeout(
+            dispatcher.call_function_with_timeout("danger", json!({}), timeout),
+            timeout,
+        )
+        .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_approval_prevents_execution() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let cancel = CancellationToken::new();
+        let approval_cancel = cancel.clone();
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register_function(confirm_tool(runs.clone()));
+        dispatcher.set_confirmation_provider(Arc::new(
+            move |_: crate::confirmation::ConfirmationRequest| {
+                let cancel = approval_cancel.clone();
+                async move {
+                    cancel.cancel();
+                    crate::confirmation::ToolConfirmation::confirmed()
+                }
+            },
+        ));
+
+        let result = dispatcher
+            .call_function_in(
+                "danger",
+                json!({}),
+                crate::tool::ToolContext::detached().with_cancel(cancel),
+            )
+            .await;
+        assert!(matches!(result, Err(ToolError::Cancelled)));
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn pending_confirmation_can_approve_execution() {
+        let runs = Arc::new(AtomicUsize::new(0));
+        let approve = Arc::new(tokio::sync::Notify::new());
+        let approval = approve.clone();
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register_function(confirm_tool(runs.clone()));
+        dispatcher.set_confirmation_provider(Arc::new(
+            move |_: crate::confirmation::ConfirmationRequest| {
+                let approve = approval.clone();
+                async move {
+                    approve.notified().await;
+                    crate::confirmation::ToolConfirmation::confirmed()
+                }
+            },
+        ));
+        let mut call = tokio_test::task::spawn(dispatcher.call_function_with_cancel(
+            "danger",
+            json!({}),
+            CancellationToken::new(),
+        ));
+        tokio_test::assert_pending!(call.poll());
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+
+        approve.notify_one();
+
+        let result = tokio_test::assert_ready!(call.poll()).unwrap();
+        assert_eq!(result["ok"], true);
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn approval_and_execution_share_one_timeout_budget() {
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register(PolicyTool::new(
+            Arc::new(SimpleTool::new(
+                "danger",
+                "slow operation",
+                None,
+                |_| async {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    Ok(json!({ "ok": true }))
+                },
+            )),
+            ToolPolicy::new().with_confirm(None),
+        ));
+        dispatcher.set_confirmation_provider(Arc::new(
+            |_: crate::confirmation::ConfirmationRequest| async {
+                tokio::time::sleep(Duration::from_secs(4)).await;
+                crate::confirmation::ToolConfirmation::confirmed()
+            },
+        ));
+
+        let timeout = Duration::from_secs(5);
+        let started = tokio::time::Instant::now();
+        let result = dispatcher
+            .call_function_with_timeout("danger", json!({}), timeout)
+            .await;
+        assert!(matches!(result, Err(ToolError::Timeout(elapsed)) if elapsed == timeout));
+        assert_eq!(started.elapsed(), timeout);
     }
 
     #[tokio::test]

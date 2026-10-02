@@ -4,35 +4,77 @@
       "file": "collections.json",
       "title": "Debt collection",
       "industry": "Financial services",
-      "summary": "Verify, disclose, negotiate, take payment \u2014 charge gated on a confirmed promise to pay; extraction fills the amount and date from speech."
+      "summary": "Payment resolution, hardship, disputes, history and help. Speech corrections clear the old confirmation before a new payment approval."
     },
     {
       "file": "clinic-intake.json",
       "title": "Patient intake",
       "industry": "Healthcare",
-      "summary": "Identify, triage, schedule \u2014 scheduling hard-blocked on an emergency verdict; escalation stays ambient in every step."
+      "summary": "Intake, appointment management, information, nurse callbacks and documents. Caller-reported urgency from speech revokes routine booking proposals."
     },
     {
       "file": "telco-support.json",
       "title": "Line support",
       "industry": "Telecom",
-      "summary": "Authenticate, run a line diagnostic, reset or raise a single-use engineer ticket \u2014 no ticket without a diagnostic."
+      "summary": "Line diagnostics, outages, ticket status and account support, with preserved retest progress and approved service changes."
     },
     {
       "file": "call-screening.json",
       "title": "Call screening",
       "industry": "Front desk",
-      "summary": "Identify the caller and intent, filter spam, transfer or take a message \u2014 transfer gated on the spam verdict from extraction."
+      "summary": "Screen and route calls, answer office questions, arrange callbacks, check message status and request appointments. Independent tasks and approved demo effects."
     },
     {
       "file": "returns-desk.json",
       "title": "Returns desk",
       "industry": "E-commerce",
-      "summary": "Locate the order, check eligibility, refund once or offer credit \u2014 the refund is a single-use commit behind eligibility."
+      "summary": "Return resolution, shipment tracking, exchanges and policy questions, with eligibility checks and approved refunds."
     },
     {
       "file": "restaurant.json",
       "title": "Table booking",
+      "industry": "Hospitality",
+      "summary": "Reservations, menu questions, private events and memory-backed preferences. Party policy and reminders use task-owned computed fields, watchers and patterns."
+    },
+    {
+      "file": "support-agent.json",
+      "title": "Support assistant",
+      "industry": "Customer support",
+      "summary": "Billing, FAQ, diagnostics and human handoff in one voice session, with independent task progress and explicit approval."
+    },
+    {
+      "file": "reference/collections.json",
+      "title": "Debt collection (workflow reference)",
+      "industry": "Financial services",
+      "summary": "Verify, disclose, negotiate, take payment — charge gated on a confirmed promise to pay; extraction fills the amount and date from speech."
+    },
+    {
+      "file": "reference/clinic-intake.json",
+      "title": "Patient intake (workflow reference)",
+      "industry": "Healthcare",
+      "summary": "Identify, triage, schedule — scheduling hard-blocked on an emergency verdict; escalation stays ambient in every step."
+    },
+    {
+      "file": "reference/telco-support.json",
+      "title": "Line support (workflow reference)",
+      "industry": "Telecom",
+      "summary": "Authenticate, run a line diagnostic, reset or raise a single-use engineer ticket — no ticket without a diagnostic."
+    },
+    {
+      "file": "reference/call-screening.json",
+      "title": "Call screening (workflow reference)",
+      "industry": "Front desk",
+      "summary": "Identify the caller and intent, filter spam, transfer or take a message — transfer gated on the spam verdict from extraction."
+    },
+    {
+      "file": "reference/returns-desk.json",
+      "title": "Returns desk (workflow reference)",
+      "industry": "E-commerce",
+      "summary": "Locate the order, check eligibility, refund once or offer credit — the refund is a single-use commit behind eligibility."
+    },
+    {
+      "file": "reference/restaurant.json",
+      "title": "Table booking (workflow reference)",
       "industry": "Hospitality",
       "summary": "Booking with durable memory: remembered diet and seating fill governed slots, a computed large-party flag steers the model, and booking stays gated on a real availability check."
     }

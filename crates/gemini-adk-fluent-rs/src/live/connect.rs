@@ -154,6 +154,24 @@ impl Live {
         // with a `T::confirm` tool that nothing can confirm (agent and MCP
         // tools resolved below are never gated, so this check is complete).
         let mut issues = std::mem::take(&mut self.config_errors);
+        if self.tasks.is_some()
+            && (!self.config.tools.is_empty()
+                || self.flow.is_some()
+                || !self.phases.is_empty()
+                || self
+                    .dispatcher
+                    .as_ref()
+                    .is_some_and(|dispatcher| !dispatcher.is_empty())
+                || !self.deferred_tools.is_empty()
+                || !self.deferred_agent_tools.is_empty()
+                || !self.extractors.is_empty()
+                || !self.policies.is_empty())
+        {
+            issues.push(
+                "task skills cannot be combined with a session-level tool or governance pipeline"
+                    .into(),
+            );
+        }
         let unconfirmed = self.unconfirmed_tools();
         if !unconfirmed.is_empty() {
             issues.push(
@@ -199,6 +217,9 @@ impl Live {
         // Config-level tool declarations, captured before `config` moves.
         let builder_config_tools = self.config.tools.clone();
         let mut builder = LiveSessionBuilder::new(self.config);
+        if let Some(runtime) = self.tasks.take() {
+            builder = builder.tasks(runtime);
+        }
 
         // The session's `State`. A caller-supplied one is used as-is so tools
         // they already built around it write where the flow monitor and phase
@@ -399,7 +420,7 @@ impl Live {
 
 /// Enforce `policies` on a session: mark redacted keys on its state and
 /// wrap each commit tool in a [`CommitGuard`](gemini_adk_rs::tool::CommitGuard).
-fn apply_policies(
+pub(crate) fn apply_policies(
     policies: &[crate::policy::Policy],
     state: &gemini_adk_rs::State,
     dispatcher: &mut Option<gemini_adk_rs::tool::ToolDispatcher>,

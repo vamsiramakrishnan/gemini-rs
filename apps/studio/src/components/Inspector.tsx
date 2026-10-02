@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { pathKey, useStudio } from '../store';
-import { disconnect, graphOf, modeOf, nodePath, removeNode, renameNode, toConversation, type Spec } from '../spec/graph';
+import { disconnect, graphOf, isSkillsOnly, modeOf, nodePath, removeNode, renameNode, toConversation, type Spec } from '../spec/graph';
 import { getIn, isObject, setIn, type Json, type JsonObject, type Path } from '../spec/paths';
 import { describe, resolve, unwrapNullable, type RootSchema, type Schema } from '../spec/schema';
 import { namesIn } from '../spec/hints';
@@ -22,6 +22,7 @@ export interface Section {
 
 export const SECTIONS: Section[] = [
   { key: 'agent', label: 'Agent', fields: ['name', 'description', 'version', 'instruction', 'greeting', 'modality', 'voice', 'initial_phase'] },
+  { key: 'skills', label: 'Skills', property: 'skills' },
   { key: 'conversation', label: 'Conversation', property: 'conversation', omit: ['stages'] },
   { key: 'flow', label: 'Flow', property: 'flow', omit: ['steps'] },
   { key: 'tools', label: 'Tools', property: 'tools' },
@@ -36,10 +37,19 @@ export const SECTIONS: Section[] = [
   { key: 'mcp', label: 'MCP servers', property: 'mcp' },
   { key: 'tests', label: 'Flow tests', property: 'tests' },
   { key: 'scenarios', label: 'Scenarios', property: 'scenarios' },
+  { key: 'task_scenarios', label: 'Task scenarios', property: 'task_scenarios' },
   { key: 'fragments', label: 'Fragments', property: 'fragments' },
 ];
 
 export function visibleSections(spec: Spec): Section[] {
+  if (isSkillsOnly(spec)) {
+    return SECTIONS.filter((section) => {
+      if (['agent', 'skills', 'runtime', 'task_scenarios'].includes(section.key)) return true;
+      // Keep existing fields reachable for repair, but author new services inside skills.
+      const value = section.property ? spec[section.property] : undefined;
+      return Array.isArray(value) ? value.length > 0 : isObject(value) && Object.keys(value).length > 0;
+    });
+  }
   const mode = modeOf(spec);
   return SECTIONS.filter((s) => (mode === 'flow' ? s.key !== 'conversation' : s.key !== 'flow'));
 }
@@ -60,6 +70,7 @@ export function Inspector() {
   let body;
   if (selection?.kind === 'node') body = <NodeInspector id={selection.id} root={schema} names={names} />;
   else if (selection?.kind === 'edge') body = <EdgeInspector id={selection.id} root={schema} names={names} />;
+  else if (selection?.kind === 'skill') body = <SkillInspector index={selection.index} root={schema} />;
   else {
     const key = selection?.kind === 'section' ? selection.section : 'agent';
     const section = SECTIONS.find((s) => s.key === key) ?? SECTIONS[0]!;
@@ -69,6 +80,24 @@ export function Inspector() {
 }
 
 type Names = ReturnType<typeof namesIn>;
+
+function SkillInspector({ index, root }: { index: number; root: RootSchema }) {
+  const spec = useStudio((state) => state.spec);
+  const editAt = useEditAt();
+  const skill = Array.isArray(spec.skills) ? spec.skills[index] : undefined;
+  if (!isObject(skill)) return <p className="hint">This skill no longer exists.</p>;
+  const skillSchema = resolve(root, { $ref: '#/definitions/SkillSpec' });
+  const primaryFields = ['name', 'version', 'description', 'instruction', 'inputs', 'outputs', 'state', 'tools', 'conversation', 'flow', 'tests'];
+  const fields = [...primaryFields, ...Object.keys(skillSchema.properties ?? {}).filter((key) => !primaryFields.includes(key))];
+  return <div className="inspector-body">
+    <div className="inspector-title"><h2>{typeof skill.name === 'string' ? skill.name : 'Skill'}</h2><button type="button" className="danger" onClick={() => {
+      editAt(['skills', index], undefined);
+      useStudio.getState().select({ kind: 'section', section: 'skills' });
+    }}>Delete skill</button></div>
+    <p className="hint">Reusable definition. Each task gets its own inputs, progress, and tool bindings.</p>
+    {skillSchema.properties ? <ObjectForm root={root} schema={skillSchema} only={fields} value={skill} names={namesIn(skill)} required onChange={(value) => editAt(['skills', index], value)} /> : <p className="error">The server schema does not include skills. Restart the web server with the current SDK.</p>}
+  </div>;
+}
 
 function useEditAt() {
   const spec = useStudio((s) => s.spec);
@@ -194,14 +223,19 @@ function NodeInspector({ id, root, names }: { id: string; root: RootSchema; name
         value={value}
         onChange={(next) => {
           const full = { ...(isObject(next) ? next : {}), id } as JsonObject;
+          const previousRevision = useStudio.getState().revision;
           edit(setIn(spec, path, full), pathKey(path));
-          // A running session takes posture and grounding edits live.
           if (mode === 'flow' && isObject(value)) {
+            const keys = new Set([...Object.keys(value), ...Object.keys(full)]);
+            const onlyPrompts = [...keys].every((key) => key === 'posture' || key === 'ground' || JSON.stringify(value[key]) === JSON.stringify(full[key]));
+            if (!onlyPrompts) return;
             const postures: Record<string, string> = {};
             const grounds: Record<string, string> = {};
             if (full.posture !== value.posture) postures[id] = typeof full.posture === 'string' ? full.posture : '';
             if (full.ground !== value.ground) grounds[id] = typeof full.ground === 'string' ? full.ground : '';
-            if (Object.keys(postures).length || Object.keys(grounds).length) sendPostures(postures, grounds);
+            if (Object.keys(postures).length || Object.keys(grounds).length) {
+              sendPostures({ postures, grounds, previousRevision, revision: useStudio.getState().revision });
+            }
           }
         }}
         names={names}

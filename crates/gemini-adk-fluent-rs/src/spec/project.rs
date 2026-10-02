@@ -116,11 +116,68 @@ impl SessionSpec {
 
 /// The tools a project implements: those with neither an HTTP nor an MCP
 /// binding, i.e. the spec's mocks.
-fn stubbed_tools(spec: &SessionSpec) -> Vec<&ToolSpec> {
-    spec.tools
-        .iter()
-        .filter(|t| t.http.is_none() && t.mcp.is_none())
+struct ProjectTool {
+    declaration: ToolSpec,
+    skill: Option<String>,
+    ident: String,
+    type_ident: String,
+}
+impl std::ops::Deref for ProjectTool {
+    type Target = ToolSpec;
+    fn deref(&self) -> &ToolSpec {
+        &self.declaration
+    }
+}
+
+fn stubbed_tools(spec: &SessionSpec) -> Vec<ProjectTool> {
+    let declarations =
+        spec.tools
+            .iter()
+            .map(|tool| (None, tool.clone()))
+            .chain(spec.skills.iter().flat_map(|skill| {
+                skill.tools.iter().map(move |tool| {
+                    let mut declaration = tool.tool.clone();
+                    if let Ok(parameters) = super::skills::task_parameters(tool) {
+                        declaration.parameters = parameters;
+                    }
+                    (Some(skill.name.clone()), declaration)
+                })
+            }));
+    let mut identifiers = std::collections::BTreeSet::new();
+    let mut types = std::collections::BTreeSet::new();
+    declarations
+        .filter(|(_, tool)| tool.http.is_none() && tool.mcp.is_none())
+        .map(|(skill, declaration)| {
+            let stem = skill.as_ref().map_or_else(
+                || declaration.name.clone(),
+                |skill| format!("{skill}_{}", declaration.name),
+            );
+            let base = snake(&stem);
+            let mut ident = base.clone();
+            let mut type_ident = pascal(&ident);
+            let mut suffix = 2;
+            while identifiers.contains(&ident) || types.contains(&type_ident) {
+                ident = format!("{base}_{suffix}");
+                type_ident = pascal(&ident);
+                suffix += 1;
+            }
+            identifiers.insert(ident.clone());
+            types.insert(type_ident.clone());
+            ProjectTool {
+                declaration,
+                skill,
+                ident,
+                type_ident,
+            }
+        })
         .collect()
+}
+
+fn scoped_server(server: &str, skill: Option<&str>) -> String {
+    skill.map_or_else(
+        || server.into(),
+        |skill| format!("{server} --skill {skill}"),
+    )
 }
 
 /// `agent.json` with each stubbed tool bound to `server`.
@@ -130,6 +187,13 @@ fn spec_bound_to(spec: &SessionSpec, server: Option<&str>) -> String {
         for tool in &mut spec.tools {
             if tool.http.is_none() && tool.mcp.is_none() {
                 tool.mcp = Some(server.to_string());
+            }
+        }
+        for skill in &mut spec.skills {
+            for tool in &mut skill.tools {
+                if tool.tool.http.is_none() && tool.tool.mcp.is_none() {
+                    tool.tool.mcp = Some(scoped_server(server, Some(&skill.name)));
+                }
             }
         }
     }
@@ -255,11 +319,14 @@ fn snake(name: &str) -> String {
         if c.is_ascii_uppercase() && i > 0 && !out.ends_with('_') {
             out.push('_');
         }
-        out.push(if c.is_ascii_alphanumeric() {
+        let mapped = if c.is_ascii_alphanumeric() {
             c.to_ascii_lowercase()
         } else {
             '_'
-        });
+        };
+        if mapped != '_' || !out.ends_with('_') {
+            out.push(mapped);
+        }
     }
     if out.is_empty() || out.starts_with(|c: char| c.is_ascii_digit()) {
         out.insert(0, '_');
@@ -324,7 +391,7 @@ fn rust_type(kind: Kind) -> &'static str {
 
 fn rust_project(
     spec: &SessionSpec,
-    tools: &[&ToolSpec],
+    tools: &[ProjectTool],
     options: &ProjectOptions,
 ) -> Vec<ProjectFile> {
     vec![
@@ -342,7 +409,12 @@ fn rust_cargo_toml(spec: &SessionSpec, options: &ProjectOptions) -> String {
     if spec.modality == SpecModality::Audio {
         features.push("voice-io");
     }
-    if spec.tools.iter().any(|t| t.http.is_some()) {
+    if spec.tools.iter().any(|t| t.http.is_some())
+        || spec
+            .skills
+            .iter()
+            .any(|skill| skill.tools.iter().any(|tool| tool.tool.http.is_some()))
+    {
         features.push("http-tools");
     }
     let features = features
@@ -363,7 +435,7 @@ fn rust_cargo_toml(spec: &SessionSpec, options: &ProjectOptions) -> String {
         project_name(spec),
         source("gemini-adk-fluent-rs"),
     );
-    if spec.memory.is_some() {
+    if spec.requires_memory() {
         let _ = writeln!(
             out,
             "gemini-memory-rs = {{ {} }}",
@@ -390,7 +462,7 @@ fn rust_main(spec: &SessionSpec) -> String {
          //! declarations and tests. `src/tools.rs` implements its tools.\n\n\
          mod tools;\n\n",
     );
-    if spec.extract.is_empty() && spec.memory.is_none() {
+    if !spec.requires_extraction() && !spec.requires_memory() {
         out.push_str("use gemini_adk_fluent_rs::prelude::*;\n");
     } else {
         out.push_str("use std::sync::Arc;\n\nuse gemini_adk_fluent_rs::prelude::*;\n");
@@ -406,16 +478,16 @@ fn rust_main(spec: &SessionSpec) -> String {
          let spec = spec()?;\n    \
          let state = State::new();\n",
     );
-    let needs_more = !spec.extract.is_empty() || spec.memory.is_some();
+    let needs_more = spec.requires_extraction() || spec.requires_memory();
     if needs_more {
         out.push_str("    let resources = gemini_adk_fluent_rs::spec::SpecResources {\n");
-        if !spec.extract.is_empty() {
+        if spec.requires_extraction() {
             out.push_str(
                 "        // The out-of-band model behind the spec's `extract` entries.\n        \
                  extraction_llm: Some(Arc::new(GeminiLlm::from_env()?)),\n",
             );
         }
-        if spec.memory.is_some() {
+        if spec.requires_memory() {
             out.push_str(
                 "        // An in-memory engine; swap in a durable store for production.\n        \
                  memory: Some({\n            \
@@ -456,35 +528,65 @@ fn rust_main(spec: &SessionSpec) -> String {
         }
     }
     out.push_str(
-        "    Ok(())\n}\n\n\
-         #[cfg(test)]\nmod tests {\n    use super::*;\n\n    \
-         /// The spec validates, and its embedded tests and scenarios pass.\n    \
-         #[tokio::test]\n    \
-         async fn the_spec_holds() {\n        \
-         let spec = spec().unwrap();\n        \
-         let validation = spec.validate();\n        \
-         assert!(validation.valid, \"{:?}\", validation.errors);\n        \
-         for report in spec.run_tests() {\n            \
-         assert!(report.passed, \"test {}: {:?}\", report.name, report.failures);\n        }\n        \
-         for report in spec.run_scenarios().await {\n            \
-         assert!(\n                \
-         report.passed,\n                \
-         \"scenario {}: {:?}\",\n                \
-         report.name, report.error\n            \
-         );\n        }\n    }\n\n    \
-         /// Every implementation belongs to a tool the spec declares.\n    \
-         #[test]\n    \
-         fn every_implementation_is_declared() {\n        \
-         let spec = spec().unwrap();\n        \
-         for name in tools::resources().tools.keys() {\n            \
-         assert!(\n                \
-         spec.tools.iter().any(|t| &t.name == name),\n                \
-         \"{name} is not declared in agent.json\"\n            );\n        }\n    }\n}\n",
+        r#"    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The spec validates, and its embedded tests and scenarios pass.
+    #[tokio::test]
+    async fn the_spec_holds() {
+        let spec = spec().unwrap();
+        let validation = spec.validate();
+        assert!(validation.valid, "{:?}", validation.errors);
+        for report in spec.run_tests() {
+            assert!(report.passed, "test {}: {:?}", report.name, report.failures);
+        }
+        for report in spec.run_scenarios().await {
+            assert!(
+                report.passed,
+                "scenario {}: {:?}",
+                report.name, report.error
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn task_scenarios_hold() {
+        let spec = spec().unwrap();
+        for report in spec.run_task_scenarios().await {
+            assert!(
+                report.passed,
+                "task scenario {}: {:?}",
+                report.name, report.error
+            );
+        }
+    }
+
+    /// Every implementation belongs to a tool the spec declares.
+    #[test]
+    fn every_implementation_is_declared() {
+        let spec = spec().unwrap();
+        for name in tools::resources().tools.keys() {
+            assert!(
+                spec.tools.iter().any(|t| &t.name == name)
+                    || spec.skills.iter().any(|s| s
+                        .tools
+                        .iter()
+                        .any(|t| format!("{}/{}", s.name, t.tool.name) == *name)),
+                "{name} is not declared in agent.json"
+            );
+        }
+    }
+}
+"#,
     );
     out
 }
 
-fn rust_tools(tools: &[&ToolSpec]) -> String {
+fn rust_tools(tools: &[ProjectTool]) -> String {
     let mut out = String::from(
         "//! One function per tool `agent.json` declares as a mock.\n//!\n\
          //! Each returns the spec's mock response until you replace its body. The\n\
@@ -509,7 +611,7 @@ fn rust_tools(tools: &[&ToolSpec]) -> String {
          use serde_json::{Value, json};\n",
     );
     for tool in tools {
-        let args = format!("{}Args", pascal(&tool.name));
+        let args = format!("{}Args", tool.type_ident);
         let fields = fields(tool);
         let _ = writeln!(out, "\n/// Arguments of `{}`.", tool.name);
         out.push_str("#[derive(Debug, Clone, Deserialize)]\n");
@@ -545,7 +647,7 @@ fn rust_tools(tools: &[&ToolSpec]) -> String {
         if !tool.description.is_empty() {
             let _ = writeln!(out, "/// {}", one_line(&tool.description));
         }
-        let ident = rust_ident(&tool.name);
+        let ident = rust_ident(&tool.ident);
         let signature =
             format!("pub async fn {ident}(args: {args}) -> Result<Value, ToolError> {{");
         let signature = if signature.len() > 100 {
@@ -553,13 +655,31 @@ fn rust_tools(tools: &[&ToolSpec]) -> String {
         } else {
             signature
         };
+        // Keep token width independent of Unicode display width. These are Rust
+        // string escapes inside json!, so the returned JSON values are unchanged.
+        let literal: String = mock_response(tool)
+            .to_string()
+            .chars()
+            .map(|character| {
+                if character.is_ascii() {
+                    character.to_string()
+                } else {
+                    character.escape_unicode().to_string()
+                }
+            })
+            .collect();
+        let response = format!("json!({literal})");
+        let returned = if response.len() + 8 <= 100 {
+            format!("Ok({response})")
+        } else {
+            format!("Ok(\n        {response},\n    )")
+        };
         let _ = writeln!(
             out,
             "{signature}\n    \
              let _ = args;\n    \
              // The mock response from agent.json. Replace with the real call.\n    \
-             Ok(json!({}))\n}}",
-            mock_response(tool)
+             {returned}\n}}"
         );
     }
     out.push_str(
@@ -569,11 +689,25 @@ fn rust_tools(tools: &[&ToolSpec]) -> String {
     let calls: Vec<String> = tools
         .iter()
         .map(|t| {
-            format!(
-                ".implement(typed({}, {}))",
-                quoted(&t.name),
-                rust_ident(&t.name)
-            )
+            let function = rust_ident(&t.ident);
+            match &t.skill {
+                Some(skill) => {
+                    let typed_args = format!("{}, {function}", quoted(&t.name));
+                    let typed = format!("typed({typed_args})");
+                    let arguments = format!("{}, {typed}", quoted(skill));
+                    if arguments.len() <= 60 {
+                        format!(".implement_skill({arguments})")
+                    } else {
+                        let typed = if typed_args.len() <= 60 {
+                            typed
+                        } else {
+                            format!("typed(\n                {},\n                {function},\n            )",quoted(&t.name))
+                        };
+                        format!(".implement_skill(\n            {},\n            {typed},\n        )",quoted(skill))
+                    }
+                },
+                None => format!(".implement(typed({}, {function}))", quoted(&t.name)),
+            }
         })
         .collect();
     // rustfmt keeps a short chain on one line.
@@ -665,7 +799,7 @@ fn python_literal(value: &Value) -> String {
     }
 }
 
-fn python_project(spec: &SessionSpec, tools: &[&ToolSpec]) -> Vec<ProjectFile> {
+fn python_project(spec: &SessionSpec, tools: &[ProjectTool]) -> Vec<ProjectFile> {
     let name = project_name(spec);
     vec![
         ProjectFile::new("agent.json", spec_bound_to(spec, Some(PYTHON_TOOL_SERVER))),
@@ -687,7 +821,7 @@ fn python_project(spec: &SessionSpec, tools: &[&ToolSpec]) -> Vec<ProjectFile> {
     ]
 }
 
-fn python_tools(spec: &SessionSpec, tools: &[&ToolSpec]) -> String {
+fn python_tools(spec: &SessionSpec, tools: &[ProjectTool]) -> String {
     let mut body = String::new();
     let mut renamed = Vec::new();
     let mut uses_field = false;
@@ -710,12 +844,18 @@ fn python_tools(spec: &SessionSpec, tools: &[&ToolSpec]) -> String {
             }
         }
         if !names.is_empty() {
-            renamed.push((tool.name.clone(), names));
+            renamed.push((
+                tool.skill.as_ref().map_or_else(
+                    || tool.name.clone(),
+                    |skill| format!("{skill}/{}", tool.name),
+                ),
+                names,
+            ));
         }
         let _ = write!(
             body,
             "\n\ndef {}({}) -> dict[str, Any]:\n",
-            python_ident(&tool.name),
+            python_ident(&tool.ident),
             params.join(", ")
         );
         let mut doc = one_line(&tool.description);
@@ -765,8 +905,11 @@ fn python_tools(spec: &SessionSpec, tools: &[&ToolSpec]) -> String {
         let _ = writeln!(
             out,
             "    {}: {},",
-            quoted(&tool.name),
-            python_ident(&tool.name)
+            quoted(&tool.skill.as_ref().map_or_else(
+                || tool.name.clone(),
+                |skill| format!("{skill}/{}", tool.name)
+            )),
+            python_ident(&tool.ident)
         );
     }
     out.push_str("}\n");
@@ -801,20 +944,29 @@ fn python_server(name: &str) -> String {
     format!(
         "\"\"\"The MCP server agent.json points its tools at (stdio).\n\n\
          Run by the runtime as `{PYTHON_TOOL_SERVER}`. You don't need to edit this file.\n\"\"\"\n\n\
+         import argparse\n\
          import functools\n\n\
          from mcp.server.mcpserver import MCPServer\n\n\
          import tools\n\n\
-         server = MCPServer({})\n\n\n\
          def _renamed(fn, names):\n    \
          \"\"\"Call `fn` with the parameters `names` maps, under their Python names.\"\"\"\n\n    \
          @functools.wraps(fn)\n    \
          def call(**kwargs):\n        \
          return fn(**{{names.get(k, k): v for k, v in kwargs.items()}})\n\n    \
          return call\n\n\n\
-         for name, fn in tools.TOOLS.items():\n    \
-         names = tools.RENAMED.get(name)\n    \
-         server.add_tool(_renamed(fn, names) if names else fn, name=name)\n\n\
-         if __name__ == \"__main__\":\n    server.run()\n",
+         def build_server(skill=None):\n    \
+         server = MCPServer({})\n    \
+         for qualified, fn in tools.TOOLS.items():\n        \
+         owner, separator, local = qualified.partition(\"/\")\n        \
+         if (owner if separator else None) != skill:\n            continue\n        \
+         names = tools.RENAMED.get(qualified)\n        \
+         server.add_tool(_renamed(fn, names) if names else fn, name=local if separator else owner)\n    \
+         return server\n\n\
+         server = build_server()\n\n\
+         if __name__ == \"__main__\":\n    \
+         parser = argparse.ArgumentParser()\n    \
+         parser.add_argument(\"--skill\")\n    \
+         build_server(parser.parse_args().skill).run()\n",
         quoted(&format!("{name}-tools"))
     )
 }
@@ -832,8 +984,14 @@ fn python_test() -> String {
          def test_serves_every_tool_bound_to_it(self):\n        \
          bound = {{t[\"name\"] for t in SPEC.get(\"tools\", []) if t.get(\"mcp\") == {}}}\n        \
          served = {{t.name for t in asyncio.run(server.server.list_tools())}}\n        \
+         self.assertEqual(served, bound)\n        \
+         for skill in SPEC.get(\"skills\", []):\n            \
+         command = {} + \" --skill \" + skill[\"name\"]\n            \
+         bound = {{t[\"name\"] for t in skill.get(\"tools\", []) if t.get(\"mcp\") == command}}\n            \
+         served = {{t.name for t in asyncio.run(server.build_server(skill[\"name\"]).list_tools())}}\n            \
          self.assertEqual(served, bound)\n\n\n\
          if __name__ == \"__main__\":\n    unittest.main()\n",
+        quoted(PYTHON_TOOL_SERVER),
         quoted(PYTHON_TOOL_SERVER)
     )
 }
@@ -873,7 +1031,7 @@ fn go_literal(value: &Value) -> String {
     }
 }
 
-fn go_project(spec: &SessionSpec, tools: &[&ToolSpec]) -> Vec<ProjectFile> {
+fn go_project(spec: &SessionSpec, tools: &[ProjectTool]) -> Vec<ProjectFile> {
     let name = project_name(spec);
     vec![
         ProjectFile::new("agent.json", spec_bound_to(spec, Some(GO_TOOL_SERVER))),
@@ -900,7 +1058,7 @@ struct GoField {
     tag: String,
 }
 
-fn go_tools(spec: &SessionSpec, tools: &[&ToolSpec]) -> String {
+fn go_tools(spec: &SessionSpec, tools: &[ProjectTool]) -> String {
     let mut out = format!(
         "// Tools for {}: one function per tool agent.json declares as a mock.\n//\n\
          // Each returns the spec's mock response until you replace its body. The\n\
@@ -914,7 +1072,7 @@ fn go_tools(spec: &SessionSpec, tools: &[&ToolSpec]) -> String {
     }
     out.push_str("\nimport \"context\"\n");
     for tool in tools {
-        let fn_name = pascal(&tool.name);
+        let fn_name = tool.type_ident.clone();
         let _ = write!(
             out,
             "\n// {fn_name}Args are the arguments of {}.\ntype {fn_name}Args struct {{\n",
@@ -985,26 +1143,30 @@ fn go_tools(spec: &SessionSpec, tools: &[&ToolSpec]) -> String {
     out
 }
 
-fn go_main(name: &str, tools: &[&ToolSpec]) -> String {
+fn go_main(name: &str, tools: &[ProjectTool]) -> String {
     let mut out = format!(
         "// The MCP server agent.json points its tools at (stdio). Run by the\n\
          // runtime as `{GO_TOOL_SERVER}`. You don't need to edit this file.\n\
          package main\n\n\
-         import (\n\t\"context\"\n\t\"log\"\n\n\t\"github.com/modelcontextprotocol/go-sdk/mcp\"\n)\n\n\
+         import (\n\t\"context\"\n\t\"flag\"\n\t\"log\"\n\n\t\"github.com/modelcontextprotocol/go-sdk/mcp\"\n)\n\n\
          func main() {{\n\t\
-         if err := newServer().Run(context.Background(), &mcp.StdioTransport{{}}); err != nil {{\n\t\t\
+         skill := flag.String(\"skill\", \"\", \"Skill scope\")\n\tflag.Parse()\n\t\
+         if err := newServer(*skill).Run(context.Background(), &mcp.StdioTransport{{}}); err != nil {{\n\t\t\
          log.Fatal(err)\n\t}}\n}}\n\n\
          // newServer serves each tool by the name agent.json declares.\n\
-         func newServer() *mcp.Server {{\n\t\
+         func newServer(scopes ...string) *mcp.Server {{\n\t\
+         scope := \"\"\n\tif len(scopes) > 0 {{\n\t\tscope = scopes[0]\n\t}}\n\t\
+         _ = scope\n\t\
          server := mcp.NewServer(&mcp.Implementation{{Name: {}, Version: \"v0.1.0\"}}, nil)\n",
         quoted(&format!("{name}-tools"))
     );
     for tool in tools {
         let _ = writeln!(
             out,
-            "\tmcp.AddTool(server, &mcp.Tool{{Name: {}}}, serve({}))",
+            "\tif scope == {} {{\n\t\tmcp.AddTool(server, &mcp.Tool{{Name: {}}}, serve({}))\n\t}}",
+            quoted(tool.skill.as_deref().unwrap_or("")),
             quoted(&tool.name),
-            pascal(&tool.name)
+            tool.type_ident
         );
     }
     out.push_str(
@@ -1019,40 +1181,88 @@ fn go_main(name: &str, tools: &[&ToolSpec]) -> String {
 }
 
 fn go_test() -> String {
-    format!(
-        "package main\n\n\
-         import (\n\t\"context\"\n\t\"encoding/json\"\n\t\"os\"\n\t\"sort\"\n\t\"testing\"\n\n\t\
-         \"github.com/modelcontextprotocol/go-sdk/mcp\"\n)\n\n\
-         // The server serves exactly the tools agent.json binds to it.\n\
-         func TestServesEveryToolBoundToIt(t *testing.T) {{\n\t\
-         data, err := os.ReadFile(\"agent.json\")\n\t\
-         if err != nil {{\n\t\tt.Fatal(err)\n\t}}\n\t\
-         var spec struct {{\n\t\tTools []struct {{\n\t\t\tName string `json:\"name\"`\n\t\t\t\
-         MCP  string `json:\"mcp\"`\n\t\t}} `json:\"tools\"`\n\t}}\n\t\
-         if err := json.Unmarshal(data, &spec); err != nil {{\n\t\tt.Fatal(err)\n\t}}\n\t\
-         var bound []string\n\t\
-         for _, tool := range spec.Tools {{\n\t\t\
-         if tool.MCP == {} {{\n\t\t\tbound = append(bound, tool.Name)\n\t\t}}\n\t}}\n\n\t\
-         ctx := context.Background()\n\t\
-         clientTransport, serverTransport := mcp.NewInMemoryTransports()\n\t\
-         if _, err := newServer().Connect(ctx, serverTransport, nil); err != nil {{\n\t\tt.Fatal(err)\n\t}}\n\t\
-         client := mcp.NewClient(&mcp.Implementation{{Name: \"test\", Version: \"v0.0.0\"}}, nil)\n\t\
-         session, err := client.Connect(ctx, clientTransport, nil)\n\t\
-         if err != nil {{\n\t\tt.Fatal(err)\n\t}}\n\t\
-         defer session.Close()\n\t\
-         listed, err := session.ListTools(ctx, nil)\n\t\
-         if err != nil {{\n\t\tt.Fatal(err)\n\t}}\n\t\
-         var served []string\n\t\
-         for _, tool := range listed.Tools {{\n\t\tserved = append(served, tool.Name)\n\t}}\n\n\t\
-         sort.Strings(bound)\n\t\
-         sort.Strings(served)\n\t\
-         if len(bound) != len(served) {{\n\t\t\
-         t.Fatalf(\"agent.json binds %v, the server serves %v\", bound, served)\n\t}}\n\t\
-         for i := range bound {{\n\t\t\
-         if bound[i] != served[i] {{\n\t\t\t\
-         t.Fatalf(\"agent.json binds %v, the server serves %v\", bound, served)\n\t\t}}\n\t}}\n}}\n",
-        quoted(GO_TOOL_SERVER)
-    )
+    r#"package main
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"sort"
+	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// Each server scope serves exactly the tools agent.json binds to it.
+func TestServesEveryToolBoundToIt(t *testing.T) {
+	data, err := os.ReadFile("agent.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type tool struct {
+		Name string `json:"name"`
+		MCP  string `json:"mcp"`
+	}
+	var spec struct {
+		Tools  []tool `json:"tools"`
+		Skills []struct {
+			Name  string `json:"name"`
+			Tools []tool `json:"tools"`
+		} `json:"skills"`
+	}
+	if err := json.Unmarshal(data, &spec); err != nil {
+		t.Fatal(err)
+	}
+	scopes := map[string][]tool{"": spec.Tools}
+	for _, skill := range spec.Skills {
+		scopes[skill.Name] = skill.Tools
+	}
+	for scope, tools := range scopes {
+		t.Run(scope, func(t *testing.T) {
+			command := __SERVER__
+			if scope != "" {
+				command += " --skill " + scope
+			}
+			var bound []string
+			for _, tool := range tools {
+				if tool.MCP == command {
+					bound = append(bound, tool.Name)
+				}
+			}
+			ctx := context.Background()
+			clientTransport, serverTransport := mcp.NewInMemoryTransports()
+			if _, err := newServer(scope).Connect(ctx, serverTransport, nil); err != nil {
+				t.Fatal(err)
+			}
+			client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0.0.0"}, nil)
+			session, err := client.Connect(ctx, clientTransport, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+			listed, err := session.ListTools(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var served []string
+			for _, tool := range listed.Tools {
+				served = append(served, tool.Name)
+			}
+			sort.Strings(bound)
+			sort.Strings(served)
+			if len(bound) != len(served) {
+				t.Fatalf("agent.json binds %v, server serves %v", bound, served)
+			}
+			for i := range bound {
+				if bound[i] != served[i] {
+					t.Fatalf("agent.json binds %v, server serves %v", bound, served)
+				}
+			}
+		})
+	}
+}
+"#
+    .replace("__SERVER__", &quoted(GO_TOOL_SERVER))
 }
 
 // ── README ──────────────────────────────────────────────────────────────────
@@ -1065,7 +1275,7 @@ fn display_name(spec: &SessionSpec) -> String {
     }
 }
 
-fn readme(spec: &SessionSpec, language: ProjectLanguage, tools: &[&ToolSpec]) -> String {
+fn readme(spec: &SessionSpec, language: ProjectLanguage, tools: &[ProjectTool]) -> String {
     let mut out = format!("# {}\n\n", display_name(spec));
     if !spec.description.is_empty() {
         let _ = writeln!(out, "{}\n", one_line(&spec.description));
@@ -1082,7 +1292,13 @@ fn readme(spec: &SessionSpec, language: ProjectLanguage, tools: &[&ToolSpec]) ->
     if tools.is_empty() {
         out.push_str("The spec declares no mock tools, so there is nothing to implement.\n\n");
     } else {
-        let names: Vec<String> = tools.iter().map(|t| format!("`{}`", t.name)).collect();
+        let names: Vec<String> = tools
+            .iter()
+            .map(|t| match &t.skill {
+                Some(skill) => format!("`{skill}/{}`", t.name),
+                None => format!("`{}`", t.name),
+            })
+            .collect();
         let _ = writeln!(
             out,
             "{file} has one function per tool the spec declares as a mock ({}). Each\n\
@@ -1091,6 +1307,9 @@ fn readme(spec: &SessionSpec, language: ProjectLanguage, tools: &[&ToolSpec]) ->
              `set_state` and `save_response_as` still apply to what you return.\n",
             names.join(", ")
         );
+    }
+    if tools.iter().any(|tool| tool.skill.is_some()) {
+        out.push_str("Skill tools keep local names in `agent.json`. Generated functions include the skill scope; Rust binds them with `implement_skill`, and Python/Go bindings select the scope with `--skill`. Replace each scoped function independently. Commit argument types include the required idempotency key.\n\n");
     }
     match language {
         ProjectLanguage::Rust => out.push_str(
@@ -1103,10 +1322,7 @@ fn readme(spec: &SessionSpec, language: ProjectLanguage, tools: &[&ToolSpec]) ->
                 "The tools run as an MCP server: `agent.json` binds each of them to\n\
                  `{PYTHON_TOOL_SERVER}`, which a runtime starts from this directory.\n\n\
                  ```bash\npython3 -m venv .venv && . .venv/bin/activate\npip install -e .\n\
-                 python -m unittest              # the server serves what agent.json binds\n\
-                 adk spec test agent.json        # the spec's tests and scenarios\n\
-                 adk spec call agent.json <tool> '{{\"arg\": 1}}'   # one call, through the server\n\
-                 adk spec run agent.json         # a live session\n```\n"
+                 python -m unittest              # the server serves each declared scope\n"
             );
         }
         ProjectLanguage::Go => {
@@ -1116,11 +1332,23 @@ fn readme(spec: &SessionSpec, language: ProjectLanguage, tools: &[&ToolSpec]) ->
                  `{GO_TOOL_SERVER}`, which a runtime starts from this directory. For\n\
                  production, build a binary and point the bindings at it.\n\n\
                  ```bash\ngo mod tidy\n\
-                 go test ./...                   # the server serves what agent.json binds\n\
-                 adk spec test agent.json        # the spec's tests and scenarios\n\
-                 adk spec call agent.json <tool> '{{\"arg\": 1}}'   # one call, through the server\n\
-                 adk spec run agent.json         # a live session\n```\n"
+                 go test ./...                   # the server serves each declared scope\n"
             );
+        }
+    }
+    if language != ProjectLanguage::Rust {
+        out.push_str("adk spec test agent.json        # governed tests and task scenarios\n");
+        if spec.skills.is_empty() {
+            out.push_str("adk spec call agent.json <tool> '{\"arg\": 1}'   # one root tool call through the server\n");
+        }
+        if spec.requires_memory() {
+            out.push_str("adk spec codegen agent.json --lang rust --out host\ncargo run --manifest-path host/Cargo.toml\n```\n\n");
+            out.push_str("Run the Rust host from this tools-project directory so the existing MCP commands resolve here. The host configures the declared memory engine and preserves these MCP bindings. For an unreleased local SDK checkout, add `--sdk-path /path/to/gemini-rs` to `adk spec codegen`. Live sessions need `GEMINI_API_KEY` or Vertex AI settings.\n");
+        } else {
+            out.push_str("adk spec run agent.json         # a live session\n```\n");
+        }
+        if !spec.skills.is_empty() {
+            out.push_str("\nOpen `agent.json` in Flow Studio and use Tasks to start a skill, inspect admission, propose an operation, and approve or decline its exact arguments. `adk spec test` runs the controlled scenarios offline; direct `adk spec call` addresses root tools and is not a task-admission path.\n");
         }
     }
     out
@@ -1258,11 +1486,155 @@ mod tests {
     fn names_become_identifiers() {
         assert_eq!(snake("bookTable"), "book_table");
         assert_eq!(snake("book-table"), "book_table");
+        assert_eq!(snake("book--__table"), "book_table");
         assert_eq!(pascal("book_table"), "BookTable");
         assert_eq!(pascal("2fa"), "T2fa");
         assert_eq!(rust_ident("type"), "type_");
         assert_eq!(python_ident("class"), "class_");
         assert_eq!(project_name(&SessionSpec::default()), "agent");
         assert_eq!("PY".parse::<ProjectLanguage>(), Ok(ProjectLanguage::Python));
+    }
+    fn scoped_skills() -> SessionSpec {
+        SessionSpec::from_value(json!({"name":"support","skills":[
+            {"name":"billing","version":"2","tools":[
+                {"name":"lookup","effect":{"kind":"read"},"parameters":{"type":"object","properties":{"account":{"type":"string"}},"required":["account"]},"response":{"balance":75}},
+                {"name":"pay","effect":{"kind":"commit","idempotency_argument":"request_id"},"response":{"receipt":"paid"}},
+                {"name":"remote","effect":{"kind":"read"},"mcp":"original-server"}
+            ]},
+            {"name":"faq","version":"7","tools":[
+                {"name":"lookup","effect":{"kind":"read"},"response":{"answer":"hours"}}
+            ]}
+        ]})).expect("skill spec")
+    }
+
+    #[test]
+    fn rust_skill_projects_use_scoped_bindings_and_typed_commit_arguments() {
+        let spec = scoped_skills();
+        assert!(spec.validate().valid);
+        let files = spec.to_project(ProjectLanguage::Rust);
+        let tools = file(&files, "src/tools.rs");
+        assert!(tools.contains("pub async fn billing_lookup(args: BillingLookupArgs)"));
+        assert!(tools.contains("pub async fn faq_lookup(args: FaqLookupArgs)"));
+        assert!(tools.contains(".implement_skill(\"billing\", typed(\"lookup\", billing_lookup))"));
+        assert!(tools.contains(".implement_skill(\"faq\", typed(\"lookup\", faq_lookup))"));
+        assert!(tools.contains("pub request_id: String,"));
+        assert!(tools.contains("Ok(json!({\"balance\":75}))"));
+        assert!(tools.contains("Ok(json!({\"answer\":\"hours\"}))"));
+        assert!(
+            !tools.contains("billing_remote"),
+            "existing bindings are preserved"
+        );
+        let unchanged: Value = serde_json::from_str(file(&files, "agent.json")).expect("spec");
+        assert_eq!(unchanged, serde_json::to_value(spec).expect("spec"));
+        assert!(file(&files, "src/main.rs").contains("spec.skills.iter().any"));
+    }
+
+    #[test]
+    fn mcp_skill_exports_bind_local_names_to_separate_server_scopes() {
+        for (language, server, tools_file, main_file) in [
+            (
+                ProjectLanguage::Python,
+                PYTHON_TOOL_SERVER,
+                "tools.py",
+                "server.py",
+            ),
+            (ProjectLanguage::Go, GO_TOOL_SERVER, "tools.go", "main.go"),
+        ] {
+            let files = scoped_skills().to_project(language);
+            let value: Value = serde_json::from_str(file(&files, "agent.json")).expect("spec");
+            assert_eq!(value["skills"][0]["tools"][0]["name"], "lookup");
+            assert_eq!(
+                value["skills"][0]["tools"][0]["mcp"],
+                format!("{server} --skill billing")
+            );
+            assert_eq!(
+                value["skills"][1]["tools"][0]["mcp"],
+                format!("{server} --skill faq")
+            );
+            assert_eq!(value["skills"][0]["tools"][2]["mcp"], "original-server");
+            let bound = SessionSpec::from_value(value).expect("bound spec");
+            assert!(bound.validate().valid, "{:?}", bound.validate().errors);
+            let tools = file(&files, tools_file);
+            let main = file(&files, main_file);
+            match language {
+                ProjectLanguage::Python => {
+                    assert!(tools.contains("\"billing/lookup\": billing_lookup"));
+                    assert!(tools.contains("\"faq/lookup\": faq_lookup"));
+                    assert!(tools.contains("def billing_pay(request_id: str)"));
+                    assert!(main.contains("def build_server(skill=None):"));
+                    assert!(
+                        file(&files, "test_tools.py")
+                            .contains("for skill in SPEC.get(\"skills\", [])")
+                    );
+                }
+                ProjectLanguage::Go => {
+                    assert!(tools.contains("RequestId string"));
+                    assert!(main.contains("if scope == \"billing\" {\n\t\tmcp.AddTool(server, &mcp.Tool{Name: \"lookup\"}, serve(BillingLookup))\n\t}"));
+                    assert!(main.contains("if scope == \"faq\" {\n\t\tmcp.AddTool(server, &mcp.Tool{Name: \"lookup\"}, serve(FaqLookup))\n\t}"));
+                    assert!(
+                        file(&files, "main_test.go").contains("scopes[skill.Name] = skill.Tools")
+                    );
+                }
+                ProjectLanguage::Rust => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn generated_identifiers_do_not_collide_after_scope_normalization() {
+        let mut spec = scoped_skills();
+        spec.skills[0].name = "Faq".into();
+        let tools = stubbed_tools(&spec);
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| &tool.ident)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            tools.len()
+        );
+        assert_eq!(
+            tools
+                .iter()
+                .map(|tool| &tool.type_ident)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            tools.len()
+        );
+        let source = rust_tools(&tools);
+        assert!(source.contains(".implement_skill(\"Faq\", typed(\"lookup\", faq_lookup))"));
+        assert!(source.contains(".implement_skill(\"faq\", typed(\"lookup\", faq_lookup_2))"));
+    }
+    #[test]
+    fn long_mock_responses_wrap_the_result_without_changing_json() {
+        let mut spec = scoped_skills();
+        let response = json!({"answer":"A controlled answer with enough text to cross the generated Rust line width and require wrapping the Result constructor."});
+        spec.skills[0].tools[0].tool.response = Some(response.clone());
+        let files = spec.to_project(ProjectLanguage::Rust);
+        assert!(
+            file(&files, "src/tools.rs")
+                .contains(&format!("    Ok(\n        json!({response}),\n    )"))
+        );
+    }
+    #[test]
+    fn catalog_readmes_use_task_admission_and_memory_projects_use_a_rust_host() {
+        for language in [ProjectLanguage::Python, ProjectLanguage::Go] {
+            let mut spec = scoped_skills();
+            let project = spec.to_project(language);
+            let readme = file(&project, "README.md");
+            assert!(readme.contains("adk spec test agent.json"));
+            assert!(readme.contains("Flow Studio and use Tasks"));
+            assert!(!readme.contains("adk spec call agent.json <tool>"));
+            assert!(readme.contains("adk spec run agent.json"));
+            spec.skills[0].memory = Some(super::super::MemorySpec::default());
+            let project = spec.to_project(language);
+            let readme = file(&project, "README.md");
+            assert!(!readme.contains("adk spec run agent.json"));
+            assert!(readme.contains("adk spec codegen agent.json --lang rust --out host"));
+            assert!(readme.contains("cargo run --manifest-path host/Cargo.toml"));
+            assert!(readme.contains("--sdk-path /path/to/gemini-rs"));
+            assert!(readme.contains("preserves these MCP bindings"));
+            assert!(readme.contains("from this tools-project directory"));
+        }
     }
 }

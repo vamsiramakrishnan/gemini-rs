@@ -64,7 +64,7 @@ impl std::fmt::Debug for WatchPredicate {
 
 impl WatchPredicate {
     /// Evaluate whether this predicate matches the given old/new value pair.
-    fn matches(&self, old: &Value, new: &Value) -> bool {
+    pub(crate) fn matches(&self, old: &Value, new: &Value) -> bool {
         match self {
             WatchPredicate::Changed => true,
             WatchPredicate::ChangedTo(val) => new == val,

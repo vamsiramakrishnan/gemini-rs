@@ -71,6 +71,7 @@ pub(in crate::live) async fn run_control_lane(
     // Persists across tool-call events so inline and (later) background
     // completions dedupe by call_id.
     let mut tool_gate = ToolGate::new();
+    let mut task_lane = super::task_handler::TaskLane::default();
 
     // Accumulated transcript text for the current turn, used to synthesize the
     // `is_final = true` transcript callbacks at the turn boundary.
@@ -102,15 +103,125 @@ pub(in crate::live) async fn run_control_lane(
                 }
                 // -- Transcript accumulation (exclusive to control lane) --
                 ControlEvent::InputTranscript(text) => {
+                    if let Some(tasks) = &control_plane.tasks {
+                        task_lane.input(&text, tasks);
+                    }
                     transcript_buffer.push_input(&text);
                     accumulated_input.push_str(&text);
                 }
                 ControlEvent::OutputTranscript(text) => {
+                    if let Some(tasks) = &control_plane.tasks {
+                        task_lane.output(&text, tasks);
+                    }
                     transcript_buffer.push_output(&text);
                     accumulated_output.push_str(&text);
                 }
 
+                ControlEvent::TaskCommand { command, reply } => {
+                    let result = if let Some(tasks) = &mut control_plane.tasks {
+                        match task_lane
+                            .check_settled_command(&command, tasks)
+                            .and_then(|()| tasks.command(command))
+                        {
+                            Ok(invocation) => {
+                                if let Some(invocation) = invocation {
+                                    super::task_handler::TaskLane::execute(
+                                        invocation,
+                                        &completion_tx,
+                                    );
+                                }
+                                task_lane
+                                    .publish(
+                                        tasks,
+                                        &control_plane.task_status,
+                                        &writer,
+                                        &completion_tx,
+                                        &event_tx,
+                                    )
+                                    .await;
+                                Ok(tasks.snapshot())
+                            }
+                            Err(error) => Err(error.to_string()),
+                        }
+                    } else {
+                        Err("this session has no installed skills".into())
+                    };
+                    let _ = reply.send(result);
+                }
+                ControlEvent::ShutdownTasks(reply) => {
+                    if let Some(tasks) = &mut control_plane.tasks {
+                        tasks.shutdown();
+                        let snapshot = tasks.snapshot();
+                        if let Some(cache) = &control_plane.task_status {
+                            *cache.lock() = snapshot.clone();
+                        }
+                        let _ = event_tx.send(LiveEvent::TasksChanged(snapshot));
+                    }
+                    let _ = reply.send(());
+                }
+                ControlEvent::TaskCompleted(completion) => {
+                    if let Some(tasks) = &mut control_plane.tasks {
+                        task_lane.complete(completion, tasks, &writer).await;
+                        task_lane
+                            .publish(
+                                tasks,
+                                &control_plane.task_status,
+                                &writer,
+                                &completion_tx,
+                                &event_tx,
+                            )
+                            .await;
+                    }
+                }
+                ControlEvent::TaskServicesCompleted(completion) => {
+                    if let Some(tasks) = &mut control_plane.tasks {
+                        tasks.complete_services(completion);
+                        task_lane
+                            .publish(
+                                tasks,
+                                &control_plane.task_status,
+                                &writer,
+                                &completion_tx,
+                                &event_tx,
+                            )
+                            .await;
+                    }
+                }
+                ControlEvent::TaskTimer => {
+                    if let Some(tasks) = &mut control_plane.tasks
+                        && tasks.needs_service_timer()
+                    {
+                        if let Some((task, revision)) = super::task_transcript::foreground(tasks)
+                            && let Err(error) =
+                                tasks.observe(&task, revision, crate::tasks::TaskObservation::Timer)
+                        {
+                            let _ = event_tx.send(LiveEvent::Error(error.to_string()));
+                        }
+                        task_lane
+                            .publish(
+                                tasks,
+                                &control_plane.task_status,
+                                &writer,
+                                &completion_tx,
+                                &event_tx,
+                            )
+                            .await;
+                    }
+                }
                 ControlEvent::ToolCall(calls) => {
+                    if let Some(tasks) = &mut control_plane.tasks {
+                        task_lane.calls(calls, tasks, &writer, &completion_tx).await;
+                        task_lane
+                            .publish(
+                                tasks,
+                                &control_plane.task_status,
+                                &writer,
+                                &completion_tx,
+                                &event_tx,
+                            )
+                            .await;
+                        return;
+                    }
                     // Snapshot the current barge-in token: the router cancels it
                     // on `Interrupted`, letting inline dispatch race the user's
                     // interruption instead of blocking the lane behind a slow tool.
@@ -142,6 +253,9 @@ pub(in crate::live) async fn run_control_lane(
                 }
                 ControlEvent::ToolCallCancelled(ids) => {
                     tracing::debug!(?ids, "server cancelled tool calls");
+                    if control_plane.tasks.is_some() {
+                        task_lane.forget_cancelled_calls(&ids);
+                    }
                     // Cancel background tasks first
                     if let Some(ref tracker) = background_tracker {
                         tracker.cancel(&ids);
@@ -160,6 +274,18 @@ pub(in crate::live) async fn run_control_lane(
                         transcript_buffer.cut_current_model_turn(chars);
                         let keep = crate::live::playback::heard_prefix(&accumulated_output, chars);
                         accumulated_output.truncate(keep);
+                    }
+                    if let Some(tasks) = &mut control_plane.tasks {
+                        task_lane.interrupt(tasks, heard_chars, &event_tx);
+                        task_lane
+                            .publish(
+                                tasks,
+                                &control_plane.task_status,
+                                &writer,
+                                &completion_tx,
+                                &event_tx,
+                            )
+                            .await;
                     }
                     // A barge-in counts toward the active step's repair policy.
                     if let Some(flow) = &control_plane.flow {
@@ -234,6 +360,18 @@ pub(in crate::live) async fn run_control_lane(
                         &event_tx,
                     )
                     .await;
+                    if let Some(tasks) = &mut control_plane.tasks {
+                        task_lane.observe_turn(tasks, false, &event_tx);
+                        task_lane
+                            .publish(
+                                tasks,
+                                &control_plane.task_status,
+                                &writer,
+                                &completion_tx,
+                                &event_tx,
+                            )
+                            .await;
+                    }
                     let _ = event_tx.send(LiveEvent::TurnComplete);
                 }
                 ControlEvent::GoAway(time_left) => {
@@ -246,12 +384,35 @@ pub(in crate::live) async fn run_control_lane(
                     });
                 }
                 ControlEvent::Connected => {
+                    if let Some(tasks) = &mut control_plane.tasks {
+                        task_lane
+                            .publish(
+                                tasks,
+                                &control_plane.task_status,
+                                &writer,
+                                &completion_tx,
+                                &event_tx,
+                            )
+                            .await;
+                    }
                     if let Some(cb) = &callbacks.on_connected {
                         dispatch_callback!(callbacks.on_connected_mode, cb(writer.clone()));
                     }
                     let _ = event_tx.send(LiveEvent::Connected);
                 }
                 ControlEvent::Disconnected(reason) => {
+                    if let Some(tasks) = &mut control_plane.tasks {
+                        tasks.shutdown();
+                        task_lane
+                            .publish(
+                                tasks,
+                                &control_plane.task_status,
+                                &writer,
+                                &completion_tx,
+                                &event_tx,
+                            )
+                            .await;
+                    }
                     let _ = event_tx.send(LiveEvent::Disconnected {
                         reason: reason.clone(),
                     });
@@ -277,6 +438,18 @@ pub(in crate::live) async fn run_control_lane(
                     }
                 }
                 ControlEvent::GenerationComplete => {
+                    if let Some(tasks) = &mut control_plane.tasks {
+                        task_lane.observe_turn(tasks, true, &event_tx);
+                        task_lane
+                            .publish(
+                                tasks,
+                                &control_plane.task_status,
+                                &writer,
+                                &completion_tx,
+                                &event_tx,
+                            )
+                            .await;
+                    }
                     // Run OnGenerationComplete extractors with pre-truncation transcript
                     let gen_extractors: Vec<Arc<dyn TurnExtractor>> = extractors
                         .iter()
@@ -317,6 +490,12 @@ pub(in crate::live) async fn run_control_lane(
         }
     }
 
+    if let Some(tasks) = &mut control_plane.tasks {
+        tasks.shutdown();
+        if let Some(cache) = &control_plane.task_status {
+            *cache.lock() = tasks.snapshot();
+        }
+    }
     // Lane exit (event channel closed): graceful drain. Flush any deferred
     // context still queued and run a final persistence snapshot synchronously
     // — the per-turn save is spawn-and-forget and can lose the last turn when

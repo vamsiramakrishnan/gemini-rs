@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { BLANK_SPEC, useStudio } from '../store';
-import { modeOf, toConversation, type Spec } from '../spec/graph';
+import { BLANK_SKILL_SPEC, BLANK_SPEC, useStudio } from '../store';
+import { isSkillsOnly, modeOf, toConversation, type Spec } from '../spec/graph';
 
 export function Toolbar() {
   const spec = useStudio((s) => s.spec);
@@ -74,30 +74,40 @@ export function Toolbar() {
           JSON
         </button>
       </div>
-      {modeOf(spec) === 'flow' && (
+      {modeOf(spec) === 'flow' && !isSkillsOnly(spec) && (
         <button type="button" onClick={() => edit(toConversation(spec))} title="Steps become stages; dependencies become guarded transitions">
           To conversation
         </button>
       )}
       <select
+        aria-label="File menu"
         value=""
         onChange={async (e) => {
           const choice = e.target.value;
           e.target.value = '';
           if (choice === '__new') load(BLANK_SPEC);
+          else if (choice === '__new_skills') load(BLANK_SKILL_SPEC);
           else if (choice === '__open') fileInput.current?.click();
           else if (choice) load(await api.example(choice));
         }}
       >
         <option value="">File…</option>
         <option value="__new">New agent</option>
+        <option value="__new_skills">New agent with skills</option>
         <option value="__open">Open JSON…</option>
         {gallery.length > 0 && (
-          <optgroup label="Examples">
-            {gallery.map((g) => (
+          <optgroup label="Multi-capability examples">
+            {gallery.filter((g) => !g.file.startsWith('reference/')).map((g) => (
               <option key={g.file} value={g.file}>
                 {g.title ?? g.name ?? g.file}
               </option>
+            ))}
+          </optgroup>
+        )}
+        {gallery.some((g) => g.file.startsWith('reference/')) && (
+          <optgroup label="Original workflow references">
+            {gallery.filter((g) => g.file.startsWith('reference/')).map((g) => (
+              <option key={g.file} value={g.file}>{g.title ?? g.name ?? g.file}</option>
             ))}
           </optgroup>
         )}

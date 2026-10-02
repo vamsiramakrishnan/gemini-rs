@@ -41,6 +41,7 @@
 
 - [Governed Flows (conversation/tool DAGs)](./user-guide/flow.md)
 - [Flows as JSON (SessionSpec)](./user-guide/flow-json.md)
+- [Skills and Task Activations](./user-guide/skills-and-tasks.md)
 - [The Studio](./flow-studio.md)
 - [From a Spec to a Project](./user-guide/spec-projects.md)
 - [Storing and Promoting Specs (Bundles)](./user-guide/bundles.md)

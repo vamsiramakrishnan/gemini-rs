@@ -439,8 +439,9 @@ This is how a compliance team owns `disclosure` once and every flow imports it.
 ### Embedded tests: conformance without an API key
 
 `tests` script conversations as data and assert flow state at checkpoints. The
-script replays through the *real* `FlowMonitor` with the declared tools' mock
-semantics — offline, no model, CI-friendly (`POST /api/flows/test`, the
+script replays through the runtime's `FlowStack` with the declared tools' mock
+semantics, including a conversation's digressions and repair policies
+(`POST /api/flows/test`, the
 Studio's **Tests** button, or `spec.run_tests()`):
 
 ```json
@@ -454,6 +455,17 @@ Events: `{"user": "…"}` (turn boundary), `{"tool": "name"}` (mock semantics +
 completion, or a failure if the flow blocks it unexpectedly), `{"set": {…}}`
 (stands in for extraction), `{"expect": {done, active, allowed, blocked,
 state, complete}}`.
+
+`set` re-latches the active layer without counting a user turn. Step through
+uses the same replay and returns L1 `FlowSnapshot` fields: active-layer
+progress, `overlay_path`, whole-stack `complete`, and `terminated`. A
+digression's closing turn can have no missing requirements while the stack
+remains incomplete. These tests supply state explicitly; they do not run
+model extraction, phase callbacks, audio, or external tool implementations.
+
+`SessionSpec::validate_for_replay()` checks the original document before
+replay. It retains structural errors such as conflicting HTTP/MCP bindings
+but does not require the `http-tools` feature for mock execution.
 
 ### Validation: everything that can fail, fails at load time
 
@@ -493,7 +505,7 @@ The Studio is a drag-and-drop editor over exactly this document:
   unwritten guard keys (with did-you-mean suggestions), plus advisory
   warnings.
 - **Tests** — replays the spec's embedded test suite offline through the real
-  flow monitor (`POST /api/flows/test`) and reports each script's result. No
+  flow stack (`POST /api/flows/test`) and reports each script's result. No
   API key involved.
 - **Run** — starts a live session in the `flow-studio` app
   (`/ws/flow-studio`), passing the spec in the Start message's `config`
@@ -501,16 +513,17 @@ The Studio is a drag-and-drop editor over exactly this document:
   tools, extraction, phases, watchers), and after every turn, tool call, and
   extraction the server pushes a `flowStatus` snapshot — active steps light
   up blue and done steps green on your canvas while you chat, and the Run tab
-  lists admitted tools, blocked tools (with reasons, from `explain()`),
+  lists admitted tools, blocked tools (with reasons, from `flow_snapshot()`),
   unmet requirements, and each active step's **guard truth tree**: exactly
   which atom it is waiting on.
-- **Live posture editing** — while a session runs, committing a posture or
-  ground edit in the step inspector sends `updateFlowPostures`; the monitor
+- **Live posture editing** — while a session runs, consecutive posture or
+  ground edits in the step inspector send `updateFlowPostures`; the monitor
   re-projects postures at every turn boundary, so the change steers the very
-  next turn.
+  next turn. A structural edit, load, undo, or redo stops these patches until
+  the session restarts, so edits cannot reach an unrelated running document.
 
-Two examples ship with the Studio (toolbar → Examples): a governed
-debt-collection call and a restaurant booking flow.
+Six examples ship with the Studio. See [the Studio guide](../flow-studio.md)
+for its current layout, gallery, replay, and project export workflows.
 
 ### Validate endpoint
 

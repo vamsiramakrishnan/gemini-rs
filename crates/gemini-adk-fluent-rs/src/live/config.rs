@@ -539,7 +539,7 @@ impl Live {
     /// Replace the input VAD's configuration (the detector that runs inside
     /// `send_audio` for client-side speech edges). Use
     /// [`VadConfig::noisy_street()`](gemini_genai_rs::vad::VadConfig::noisy_street)
-    /// behind [`mic_denoise`](Self::mic_denoise) for noisy environments.
+    /// behind `mic_denoise` (the `denoise` feature) for noisy environments.
     pub fn input_vad(mut self, config: gemini_genai_rs::vad::VadConfig) -> Self {
         self.input_audio.vad = Some(config);
         self
@@ -549,8 +549,8 @@ impl Live {
     /// configured with the server's automatic activity detection disabled,
     /// and `send_audio` emits `activityStart`/`activityEnd` on the input
     /// VAD's speech edges. Measured ~2× faster barge-in than server
-    /// authority; pair with [`mic_denoise`](Self::mic_denoise) (and
-    /// [`mic_noise_gate`](Self::mic_noise_gate)) or noise will drive the
+    /// authority; pair with `mic_denoise` (the `denoise` feature) and
+    /// [`mic_noise_gate`](Self::mic_noise_gate) or noise will drive the
     /// marks.
     pub fn client_interruption_authority(mut self) -> Self {
         self.input_audio.client_authority = true;

@@ -25,7 +25,14 @@ export function namesIn(spec: Spec): Names {
     if (typeof tool.save_response_as === 'string') stateKeys.add(tool.save_response_as);
   }
   if (isObject(spec.state)) for (const key of Object.keys(spec.state)) stateKeys.add(key);
-  if (isObject(spec.computed)) for (const key of Object.keys(spec.computed)) stateKeys.add(key);
+  if (isObject(spec.inputs)) for (const key of Object.keys(spec.inputs)) stateKeys.add(key);
+  if (isObject(spec.outputs)) for (const key of Object.keys(spec.outputs)) stateKeys.add(key);
+  for (const computed of Array.isArray(spec.computed) ? spec.computed : []) {
+    if (isObject(computed) && typeof computed.key === 'string') stateKeys.add(computed.key);
+  }
+  if (isObject(spec.memory) && Array.isArray(spec.memory.slots)) {
+    for (const slot of spec.memory.slots) if (isObject(slot) && typeof slot.to === 'string') stateKeys.add(slot.to);
+  }
   const walk = (value: Json | undefined) => {
     if (Array.isArray(value)) value.forEach(walk);
     else if (isObject(value)) {

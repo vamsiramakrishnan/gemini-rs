@@ -17,9 +17,10 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import dagre from '@dagrejs/dagre';
-import { useStudio } from '../store';
-import { addNode, connect, disconnect, graphOf, modeOf, removeNode, type GraphEdge, type GraphNode, type Spec } from '../spec/graph';
+import { canvasStatus, useStudio } from '../store';
+import { addNode, connect, disconnect, graphOf, isSkillsOnly, modeOf, removeNode, type GraphEdge, type GraphNode, type Spec } from '../spec/graph';
 import type { FlowStatus } from '../api';
+import { SkillOverview } from './SkillOverview';
 
 const NODE_WIDTH = 240;
 const NODE_HEIGHT = 110;
@@ -89,11 +90,17 @@ function positionsKey(spec: Spec): string {
 }
 
 export function Canvas() {
+  const spec = useStudio((state) => state.spec);
+  if (isSkillsOnly(spec)) return <SkillOverview />;
+  return <FlowCanvas />;
+}
+
+function FlowCanvas() {
   const spec = useStudio((s) => s.spec);
   const edit = useStudio((s) => s.edit);
   const select = useStudio((s) => s.select);
   const selection = useStudio((s) => s.selection);
-  const status = useStudio((s) => s.status);
+  const status = useStudio(canvasStatus);
   const layoutEpoch = useStudio((s) => s.layoutEpoch);
   const graph = useMemo(() => graphOf(spec), [spec]);
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(() => {

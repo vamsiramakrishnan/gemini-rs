@@ -17,6 +17,8 @@ export default defineConfig({
       '/api': 'http://127.0.0.1:25125',
       '/ws': { target: 'ws://127.0.0.1:25125', ws: true },
       '/static/examples': 'http://127.0.0.1:25125',
+      '/static/js/audio.js': 'http://127.0.0.1:25125',
+      '/static/worklets': 'http://127.0.0.1:25125',
     },
   },
   test: {

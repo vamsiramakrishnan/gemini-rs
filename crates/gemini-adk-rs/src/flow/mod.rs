@@ -1955,6 +1955,26 @@ pub struct FlowExplanation {
     pub active_progress: BTreeMap<String, GuardTrace>,
 }
 
+/// Observed governance state for a simulator, UI, or handoff.
+///
+/// Step lists describe the currently driving layer. `complete` describes the
+/// entire stack, so a digression's closing turn does not finish the main task.
+/// This is an observation, not a checkpoint for restoring a conversation.
+#[derive(Debug, Clone, Serialize)]
+pub struct FlowSnapshot {
+    /// Active-layer admission and completion guards.
+    #[serde(flatten)]
+    pub explanation: FlowExplanation,
+    /// Completed steps in the same layer as `explanation`.
+    pub done: Vec<String>,
+    /// Whether the whole stack is complete, including explicit termination.
+    pub complete: bool,
+    /// Active digressions, outermost first. Empty when the main flow drives.
+    pub overlay_path: Vec<String>,
+    /// Whether a terminating digression ended the conversation.
+    pub terminated: bool,
+}
+
 /// Builder for a [`Flow`] using the cemented verbs.
 #[derive(Default)]
 pub struct FlowBuilder {

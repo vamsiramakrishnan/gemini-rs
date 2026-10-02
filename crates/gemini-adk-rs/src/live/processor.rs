@@ -246,6 +246,14 @@ pub(crate) enum ControlEvent {
     /// Replay lockstep: answered once everything queued before it is handled.
     Barrier(tokio::sync::oneshot::Sender<()>),
     ToolCall(Vec<gemini_genai_rs::prelude::FunctionCall>),
+    TaskCommand {
+        command: crate::tasks::TaskCommand,
+        reply: tokio::sync::oneshot::Sender<Result<crate::tasks::TaskSessionSnapshot, String>>,
+    },
+    TaskCompleted(crate::tasks::InvocationCompletion),
+    TaskServicesCompleted(crate::tasks::TaskServiceCompletion),
+    TaskTimer,
+    ShutdownTasks(tokio::sync::oneshot::Sender<()>),
     ToolCallCancelled(Vec<String>),
     /// A background tool finished. Posted by the detached background task (which
     /// can't reach the synchronous `FlowMonitor`) so the control lane can advance
@@ -364,6 +372,10 @@ pub(crate) struct ControlPlaneConfig {
     /// the control lane advances it. Lock briefly; never hold the guard across
     /// an `await`.
     pub flow: Option<crate::flow::SharedFlowStack>,
+    /// Task runtime, exclusively advanced by the control lane.
+    pub tasks: Option<crate::tasks::TaskRuntime>,
+    /// Read-only observation cache shared with LiveHandle.
+    pub task_status: Option<Arc<parking_lot::Mutex<crate::tasks::TaskSessionSnapshot>>>,
     /// Fast-lane delivery (backpressure) policy per event class. Defaults to
     /// all-`Lossless`, preserving the historical `send().await` behavior.
     pub delivery: DeliveryConfig,
@@ -428,6 +440,8 @@ impl Default for ControlPlaneConfig {
             pending_context: None,
             middleware: Arc::new(crate::middleware::MiddlewareChain::new()),
             flow: None,
+            tasks: None,
+            task_status: None,
             delivery: DeliveryConfig::default(),
             redactor: None,
             lockstep: None,
@@ -557,6 +571,7 @@ pub(crate) fn spawn_event_processor(
 
     // Clone for the timer task (before moving into ctrl spawn)
     let timer_temporal = temporal.clone();
+    let task_timer = control_plane.tasks.is_some();
     // Reprompt-on-silence runs only when some stage asks for it.
     let reprompt = control_plane.flow.as_ref().is_some_and(|stack| {
         stack
@@ -605,6 +620,27 @@ pub(crate) fn spawn_event_processor(
     );
 
     // Optional timer task for sustained temporal patterns
+    if task_timer {
+        let sender = ctrl_tx.downgrade();
+        let cancel = timer_cancel.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(500));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            interval.tick().await;
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    _ = interval.tick() => {
+                        let Some(sender) = sender.upgrade() else { break };
+                        if sender.send(ControlEvent::TaskTimer).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     if let Some(ref temporal_ref) = timer_temporal
         && temporal_ref.needs_timer()
     {

@@ -8,9 +8,11 @@ use tokio::sync::broadcast;
 
 use crate::live::callbacks::EventCallbacks;
 use crate::live::events::LiveEvent;
-use crate::live::extractor::{MergePolicy, TurnExtractor};
+use crate::live::extractor::{PromotionEvent, TurnExtractor, promote_fields};
 use crate::live::transcript::TranscriptBuffer;
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 
 use super::dispatch_callback;
 
@@ -89,92 +91,23 @@ fn promote_extraction_fields(
     state: &State,
     event_tx: &broadcast::Sender<LiveEvent>,
 ) {
-    let Some(obj) = value.as_object() else {
-        return;
-    };
-
-    let rules = extractor.promotion_rules();
-    if rules.is_empty() {
-        // Legacy auto-flatten: top-level non-null fields promote to same state key.
-        // Null values do not erase previously extracted state.
-        for (field, val) in obj {
-            if val.is_null() {
-                continue;
+    for event in promote_fields(extractor, name, value, state) {
+        match event {
+            PromotionEvent::Promoted { name, value } => {
+                let _ = event_tx.send(extraction_event(state, name, &value));
             }
-            let _ = state.set(field, val.clone());
-            let _ = event_tx.send(extraction_event(state, format!("{name}.{field}"), val));
+            PromotionEvent::Decision {
+                field,
+                state_key,
+                accepted,
+                reason,
+                value,
+            } => {
+                emit_promotion_decision(
+                    event_tx, name, &field, &state_key, accepted, &reason, value,
+                );
+            }
         }
-        return;
-    }
-
-    for rule in rules {
-        let Some(val) = obj.get(&rule.field) else {
-            continue;
-        };
-        if val.is_null() {
-            emit_promotion_decision(
-                event_tx,
-                name,
-                &rule.field,
-                &rule.state_key,
-                false,
-                "extracted value was null",
-                val.clone(),
-            );
-            continue;
-        }
-        if rule
-            .accept
-            .as_ref()
-            .is_some_and(|accept| !accept(state, val))
-        {
-            emit_promotion_decision(
-                event_tx,
-                name,
-                &rule.field,
-                &rule.state_key,
-                false,
-                "promotion predicate rejected the value",
-                val.clone(),
-            );
-            continue;
-        }
-        if matches!(rule.merge, MergePolicy::KeepKnown) && state.contains(&rule.state_key) {
-            emit_promotion_decision(
-                event_tx,
-                name,
-                &rule.field,
-                &rule.state_key,
-                false,
-                "existing state value was kept",
-                val.clone(),
-            );
-            continue;
-        }
-
-        let _ = state.set(&rule.state_key, val.clone());
-        let _ = state.set(
-            format!("state_meta:{}", rule.state_key),
-            json!({
-                "source": "extraction",
-                "extractor": name,
-                "field": rule.field,
-            }),
-        );
-        let _ = event_tx.send(extraction_event(
-            state,
-            format!("{name}.{}", rule.field),
-            val,
-        ));
-        emit_promotion_decision(
-            event_tx,
-            name,
-            &rule.field,
-            &rule.state_key,
-            true,
-            "promotion rule accepted the value",
-            val.clone(),
-        );
     }
 }
 

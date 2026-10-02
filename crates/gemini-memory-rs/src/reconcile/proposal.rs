@@ -122,11 +122,33 @@ pub enum MemorySelector {
 impl MemorySelector {
     /// Whether a record is targeted by this selector.
     pub fn matches(&self, memory: &CanonicalMemory) -> bool {
+        self.matches_fields(
+            Some(&memory.id),
+            memory.fingerprint().subject_predicate(),
+            &memory.statement,
+            &memory.retrieval.tags,
+        )
+    }
+
+    pub(crate) fn matches_proposal(&self, proposal: &ProposedMemory) -> bool {
+        self.matches_fields(
+            None,
+            proposal.fingerprint.subject_predicate(),
+            &proposal.statement,
+            &proposal.tags,
+        )
+    }
+
+    fn matches_fields(
+        &self,
+        id: Option<&MemoryId>,
+        subject_predicate: &str,
+        statement: &str,
+        tags: &[String],
+    ) -> bool {
         match self {
-            Self::ById(id) => &memory.id == id,
-            Self::BySubjectPredicate(prefix) => {
-                memory.fingerprint().subject_predicate() == prefix.as_str()
-            }
+            Self::ById(expected) => id == Some(expected),
+            Self::BySubjectPredicate(prefix) => subject_predicate == prefix,
             Self::ByTopic(topic) => {
                 // Word-sequence matching, not substring: deletion is
                 // irreversible, topics are often a single short word, and
@@ -134,12 +156,8 @@ impl MemorySelector {
                 // shopping cart.
                 let needle = normalize_token(topic);
                 !needle.is_empty()
-                    && (contains_word_sequence(&normalize_token(&memory.statement), &needle)
-                        || memory
-                            .retrieval
-                            .tags
-                            .iter()
-                            .any(|t| normalize_token(t) == needle))
+                    && (contains_word_sequence(&normalize_token(statement), &needle)
+                        || tags.iter().any(|t| normalize_token(t) == needle))
             }
         }
     }

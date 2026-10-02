@@ -57,6 +57,8 @@ pub enum LiveEvent {
     VadEnd,
 
     // -- Control-lane events (lower frequency, async emission) --
+    /// A task lifecycle, approval, operation, or foreground changed.
+    TasksChanged(crate::tasks::TaskSessionSnapshot),
     /// Extraction completed. Emitted for both the top-level result
     /// AND each flattened key (e.g., "order.items", "order.phase").
     Extraction {

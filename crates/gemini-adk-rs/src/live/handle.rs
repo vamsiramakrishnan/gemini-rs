@@ -10,7 +10,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::flow::{FlowExplanation, SharedFlowStack};
+use crate::flow::{FlowExplanation, FlowSnapshot, SharedFlowStack};
 use crate::state::State;
 
 use super::background_tool::BackgroundToolTracker;
@@ -67,6 +67,7 @@ pub struct LiveHandle {
     /// Governed-flow monitor shared with the control lane (None when the
     /// session is not governed by a flow).
     flow: Option<SharedFlowStack>,
+    task_status: Option<Arc<Mutex<crate::tasks::TaskSessionSnapshot>>>,
     /// Tracker for in-flight background tool tasks. Shared with the control
     /// lane (which spawns/cancels per-call tasks) so [`disconnect`](Self::disconnect)
     /// can cancel every outstanding background tool — otherwise orphaned tasks
@@ -128,10 +129,52 @@ impl LiveHandle {
             turn_commit: Arc::new(Mutex::new(None)),
             audio_clock_ms: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             flow,
+            task_status: None,
             background_tracker,
             ctrl_tx: None,
             playback: super::playback::PlaybackClock::new(state_clock),
         }
+    }
+
+    pub(crate) fn with_task_status(
+        mut self,
+        status: Option<Arc<Mutex<crate::tasks::TaskSessionSnapshot>>>,
+    ) -> Self {
+        self.task_status = status;
+        self
+    }
+
+    /// Observe the installed skill catalog and task lifecycle.
+    pub fn task_snapshot(&self) -> Option<crate::tasks::TaskSessionSnapshot> {
+        self.task_status
+            .as_ref()
+            .map(|status| status.lock().clone())
+    }
+
+    /// Apply a trusted task command on the control lane.
+    ///
+    /// Approval decisions belong here or in an authenticated application UI;
+    /// they are never exposed as model-callable tools.
+    pub async fn task_command(
+        &self,
+        command: crate::tasks::TaskCommand,
+    ) -> Result<crate::tasks::TaskSessionSnapshot, String> {
+        if self.task_status.is_none() {
+            return Err("this session has no installed skills".into());
+        }
+        let sender = self
+            .ctrl_tx
+            .as_ref()
+            .and_then(mpsc::WeakSender::upgrade)
+            .ok_or_else(|| "the session control lane has stopped".to_string())?;
+        let (reply, result) = tokio::sync::oneshot::channel();
+        sender
+            .send(ControlEvent::TaskCommand { command, reply })
+            .await
+            .map_err(|_| "the session control lane has stopped".to_string())?;
+        result
+            .await
+            .map_err(|_| "the session ended before the command completed".to_string())?
     }
 
     /// Attach the control-lane sender used to record typed turns on the
@@ -463,6 +506,21 @@ impl LiveHandle {
     ///    abort whatever is still stuck (e.g. a lane blocked in a slow tool).
     /// 4. Cancel the telemetry lane.
     pub async fn disconnect(&self) -> Result<(), SessionError> {
+        if self.task_status.is_some()
+            && let Some(sender) = self.ctrl_tx.as_ref().and_then(mpsc::WeakSender::upgrade)
+        {
+            let (reply, result) = tokio::sync::oneshot::channel();
+            let _ = tokio::time::timeout(Self::LANE_SHUTDOWN_GRACE, async {
+                if sender
+                    .send(ControlEvent::ShutdownTasks(reply))
+                    .await
+                    .is_ok()
+                {
+                    let _ = result.await;
+                }
+            })
+            .await;
+        }
         // Cancel background tool tasks FIRST: once the session is closing,
         // their results can no longer be delivered, and leaving them running
         // would let them post stale ToolCompleted events to a dead lane.
@@ -600,6 +658,17 @@ impl LiveHandle {
         self.flow
             .as_ref()
             .map(|mon| mon.lock().explain(&self.state))
+    }
+
+    /// Observe governed steps, digressions, and whole-stack completion.
+    ///
+    /// Returns `None` for an ungoverned session. Reads the stack under one
+    /// short lock without session I/O; shared business state can still change
+    /// independently. The result is not a resumable session checkpoint.
+    pub fn flow_snapshot(&self) -> Option<FlowSnapshot> {
+        self.flow
+            .as_ref()
+            .map(|stack| stack.lock().snapshot(&self.state))
     }
 
     /// Replace a governed step's posture mid-session. Returns `true` when the

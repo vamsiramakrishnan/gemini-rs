@@ -1,26 +1,41 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api, type TestRun } from '../api';
 import { useStudio } from '../store';
+import { isObject } from '../spec/paths';
+
+type Result = { revision: number } & (
+  | { kind: 'running' }
+  | { kind: 'ready'; run: TestRun }
+  | { kind: 'error'; message: string }
+);
 
 /** Run the spec's flow tests and conversation scenarios offline: scripted
  * events through the real flow monitor and simulator, no model involved. */
 export function Tests({ onPreview }: { onPreview: (test: string) => void }) {
   const spec = useStudio((s) => s.spec);
-  const [run, setRun] = useState<TestRun | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const tests = Array.isArray(spec.tests) ? spec.tests.length : 0;
+  const revision = useStudio((s) => s.revision);
+  const [result, setResult] = useState<Result | null>(null);
+  const request = useRef(0);
+  const current = result?.revision === revision ? result : null;
+  const run = current?.kind === 'ready' ? current.run : null;
+  const busy = current?.kind === 'running';
+  const error = current?.kind === 'error' ? current.message : null;
+  const skills = Array.isArray(spec.skills) ? spec.skills.filter(isObject) : [];
+  const tests = (Array.isArray(spec.tests) ? spec.tests.length : 0)
+    + skills.reduce((count, skill) => count + (Array.isArray(skill.tests) ? skill.tests.length : 0), 0);
   const scenarios = Array.isArray(spec.scenarios) ? spec.scenarios.length : 0;
+  const taskScenarios = Array.isArray(spec.task_scenarios) ? spec.task_scenarios.length : 0;
 
   const go = async () => {
-    setBusy(true);
-    setError(null);
+    const id = ++request.current;
+    setResult({ revision, kind: 'running' });
     try {
-      setRun(await api.test(spec));
+      const run = await api.test(spec);
+      if (id === request.current && revision === useStudio.getState().revision) setResult({ revision, kind: 'ready', run });
     } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
+      if (id === request.current && revision === useStudio.getState().revision) {
+        setResult({ revision, kind: 'error', message: err instanceof Error ? err.message : String(err) });
+      }
     }
   };
 
@@ -33,13 +48,15 @@ export function Tests({ onPreview }: { onPreview: (test: string) => void }) {
           {busy ? 'Running…' : 'Run tests'}
         </button>
         <span className="hint">
-          {tests} flow test{tests === 1 ? '' : 's'}, {scenarios} scenario{scenarios === 1 ? '' : 's'}. Add them in the Flow tests and Scenarios sections.
+          {tests} flow test{tests === 1 ? '' : 's'}, {scenarios} conversation scenario{scenarios === 1 ? '' : 's'}, {taskScenarios} task scenario{taskScenarios === 1 ? '' : 's'}. Run tests executes all three.
         </span>
-        {run && (
+        {run?.valid && total > 0 && (
           <span className={passed === total ? 'ok' : 'error'}>
             {passed}/{total} passed
           </span>
         )}
+        {run && !run.valid && <span className="error">Invalid document — tests did not run</span>}
+        {run?.valid && total === 0 && <span className="hint">No tests to run</span>}
       </div>
       {error && <p className="error">{error}</p>}
       {run && !run.valid && (

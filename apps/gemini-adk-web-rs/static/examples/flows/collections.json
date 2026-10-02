@@ -1,137 +1,2848 @@
 {
   "name": "collections",
-  "description": "Governed debt-collection call: verify, disclose, negotiate, take payment.",
-  "instruction": "You are a debt-collection assistant for Acme Bank. Be professional and empathetic. Follow the conversation flow you are steered through, and use the available tools rather than inventing account facts.",
-  "greeting": "Greet the caller, say you are calling from Acme Bank about their account, and ask for their full name to verify their identity.",
-  "modality": "text",
-  "tools": [
+  "version": "2.0.0",
+  "description": "Controlled payment assistant with payment resolution, hardship requests, disputes, payment history and public help. Task-owned speech extraction collects the proposed amount and date during negotiation.",
+  "instruction": "You are Acme Bank\u2019s professional, empathetic voice assistant. Start payment_resolution with the account and identity inputs, then collect the proposed amount and date during negotiation. Task extraction records these facts; it never grants payment approval. Use hardship_request for affordability review, account_dispute for contested statement items, payment_history for posted payments and payment_help for public questions. Keep verification, disclosure and payment confirmation together in payment_resolution. Each private capability performs its own identity check. Use child payment_help for interruptions and then return. Explain that hardship/dispute submission does not change the balance. Record promises and payment charges only as approved application proposals. Spoken consent is not trusted application approval. All account facts and receipts here are controlled demo fixtures; never claim real funds moved.",
+  "greeting": "Hello, this is Acme Bank\u2019s account assistant. I can help discuss a payment, request hardship review, raise a statement dispute, or explain payment history. What would you like help with?",
+  "modality": "audio",
+  "voice": "Kore",
+  "skills": [
     {
-      "name": "verify_identity",
-      "description": "Verify the caller's identity from their name and date of birth.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string", "description": "Caller's full name" },
-          "date_of_birth": { "type": "string", "description": "Caller's date of birth" }
+      "name": "payment_resolution",
+      "version": "2.0.0",
+      "description": "Verify identity, give/acknowledge disclosure, confirm a recorded promise, then propose payment once.",
+      "instruction": "Verify identity, give/acknowledge disclosure, confirm a recorded promise, then propose payment once. Use controlled demo data only. Explain proposed changes and wait for trusted application approval. Do not treat spoken consent as application approval. Never borrow verification from another task. Extract the proposed amount and date as the caller supplies them. Any correction clears the previous promise confirmation; record the corrected promise before proposing payment again.",
+      "inputs": {
+        "account_id": {
+          "type": "string",
+          "description": ""
         },
-        "required": ["name"]
-      },
-      "response": { "verified": true, "account_last4": "4821" },
-      "set_state": { "identity_verified": true }
-    },
-    {
-      "name": "lookup_balance",
-      "description": "Look up the caller's outstanding balance.",
-      "response": { "balance_usd": 1240.5, "days_past_due": 34 }
-    },
-    {
-      "name": "record_promise_to_pay",
-      "description": "Record the agreed payment amount and date.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "amount_usd": { "type": "number" },
-          "date": { "type": "string" }
+        "customer_name": {
+          "type": "string",
+          "description": ""
         },
-        "required": ["amount_usd", "date"]
-      },
-      "response": { "recorded": true },
-      "set_state": { "ptp_amount": 200, "ptp_date": "next friday", "ptp_confirmed": true }
-    },
-    {
-      "name": "charge_card",
-      "description": "Charge the agreed amount to the card on file.",
-      "response": { "charged": true, "confirmation": "TXN-83921" }
-    }
-  ],
-  "extract": [
-    {
-      "name": "promise_to_pay",
-      "instruction": "Extract the payment amount and date the caller agrees to, once both are stated.",
-      "schema": {
-        "type": "object",
-        "properties": {
-          "ptp_amount": { "type": "number", "description": "Agreed payment amount in USD" },
-          "ptp_date": { "type": "string", "description": "Agreed payment date" }
+        "date_of_birth": {
+          "type": "string",
+          "description": ""
         }
       },
-      "promote": [
-        { "field": "ptp_amount" },
-        { "field": "ptp_date" }
-      ]
-    }
-  ],
-  "tests": [
-    {
-      "name": "happy path reaches close",
-      "script": [
-        { "expect": { "active": ["verify"], "blocked": ["charge_card"], "complete": false } },
-        { "tool": "verify_identity" },
-        { "expect": { "done": ["verify"], "active": ["disclose"], "state": { "identity_verified": true } } },
-        { "tool": "lookup_balance" },
-        { "tool": "record_promise_to_pay" },
-        { "expect": { "done": ["negotiate"], "active": ["take_payment"], "allowed": ["charge_card"] } },
-        { "tool": "charge_card" },
-        { "expect": { "done": ["take_payment", "close"], "complete": true } }
+      "outputs": {
+        "result": {
+          "type": "object",
+          "description": "Accepted controlled tool result, not proof of a real service operation."
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_identity",
+          "description": "Read this task\u2019s controlled account identity check.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "date_of_birth": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id",
+              "name",
+              "date_of_birth"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "verified": true,
+            "account_last4": "4821",
+            "demo": true
+          },
+          "set_state": {
+            "identity_verified": true
+          }
+        },
+        {
+          "name": "lookup_balance",
+          "description": "Read the balance fixture only for the verified account.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "balance_usd": 1240.5,
+            "days_past_due": 34,
+            "demo": true
+          }
+        },
+        {
+          "name": "acknowledge_disclosure",
+          "description": "Record the caller\u2019s acknowledgement locally after reading the collection disclosure; this is not a verbatim-speech verifier.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              },
+              "acknowledgement": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id",
+              "acknowledgement"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "acknowledged": true,
+            "demo": true
+          },
+          "set_state": {
+            "disclosure_acknowledged": true
+          }
+        },
+        {
+          "name": "record_promise_to_pay",
+          "description": "Propose recording the supplied payment promise; this receipt is a controlled fixture and does not overwrite amount/date inputs.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              },
+              "amount_usd": {
+                "type": "number"
+              },
+              "date": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id",
+              "amount_usd",
+              "date",
+              "request_id"
+            ]
+          },
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "recorded": true,
+            "promise_reference": "DEMO-PTP-4821",
+            "demo": true
+          },
+          "set_state": {
+            "ptp_confirmed": true
+          }
+        },
+        {
+          "name": "charge_card",
+          "description": "Propose charging the checked account for the exact confirmed promise, with its reference and stable request key.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              },
+              "amount_usd": {
+                "type": "number"
+              },
+              "promise_reference": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id",
+              "amount_usd",
+              "promise_reference",
+              "request_id"
+            ]
+          },
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "charged": true,
+            "confirmation": "TXN-83921",
+            "demo": true
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "identity_verified": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "disclosure_acknowledged": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "ptp_confirmed": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "ptp_amount": {
+          "type": "number",
+          "description": "Proposed amount collected from the task transcript."
+        },
+        "ptp_date": {
+          "type": "string",
+          "description": "Proposed date collected from the task transcript."
+        },
+        "promise_to_pay": {
+          "type": "object",
+          "description": "Latest accepted structured extraction for this task."
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "posture": "Verify the caller's identity before discussing any account details.",
+            "allow": [
+              "verify_identity"
+            ],
+            "done": {
+              "is_true": "identity_verified"
+            }
+          },
+          {
+            "id": "disclose",
+            "after": [
+              "verify"
+            ],
+            "posture": "Give the required disclosure: this is an attempt to collect a debt and any information obtained will be used for that purpose. Ask the caller to confirm they understood.",
+            "done": {
+              "all": [
+                {
+                  "called_ok": "lookup_balance"
+                },
+                {
+                  "is_true": "disclosure_acknowledged"
+                }
+              ]
+            },
+            "allow": [
+              "lookup_balance",
+              "acknowledge_disclosure"
+            ],
+            "ground": "The caller's identity is {identity_verified?verified:NOT verified}."
+          },
+          {
+            "id": "negotiate",
+            "after": [
+              "disclose"
+            ],
+            "posture": "Discuss an affordable amount and date. Extraction records the caller\u2019s proposal. Confirm both facts explicitly with record_promise_to_pay, then propose the payment for application approval.",
+            "allow": [
+              "lookup_balance",
+              "record_promise_to_pay"
+            ],
+            "done": {
+              "all": [
+                {
+                  "captured": [
+                    "ptp_amount",
+                    "ptp_date"
+                  ]
+                },
+                {
+                  "is_true": "ptp_confirmed"
+                }
+              ]
+            }
+          },
+          {
+            "id": "take_payment",
+            "after": [
+              "negotiate"
+            ],
+            "posture": "Propose the exact confirmed payment amount for this verified account. Wait for application approval and use its receipt, never claim that real funds moved in this demo.",
+            "allow": [
+              "charge_card"
+            ],
+            "done": {
+              "called_ok": "charge_card"
+            }
+          },
+          {
+            "id": "close",
+            "after": [
+              "take_payment"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "once": "charge_card"
+          },
+          {
+            "never_until": {
+              "tool": "charge_card",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "identity_verified"
+                  },
+                  {
+                    "is_true": "disclosure_acknowledged"
+                  },
+                  {
+                    "is_true": "ptp_confirmed"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "require": [
+              "close"
+            ]
+          },
+          {
+            "never_until": {
+              "tool": "record_promise_to_pay",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "identity_verified"
+                  },
+                  {
+                    "is_true": "disclosure_acknowledged"
+                  },
+                  {
+                    "captured": [
+                      "ptp_amount",
+                      "ptp_date"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "ambient": [
+          "record_promise_to_pay"
+        ]
+      },
+      "tests": [
+        {
+          "name": "happy path reaches close",
+          "script": [
+            {
+              "expect": {
+                "active": [
+                  "verify"
+                ],
+                "blocked": [
+                  "charge_card"
+                ],
+                "complete": false
+              }
+            },
+            {
+              "tool": "verify_identity"
+            },
+            {
+              "expect": {
+                "done": [
+                  "verify"
+                ],
+                "active": [
+                  "disclose"
+                ],
+                "state": {
+                  "identity_verified": true
+                }
+              }
+            },
+            {
+              "tool": "lookup_balance"
+            },
+            {
+              "tool": "acknowledge_disclosure"
+            },
+            {
+              "set": {
+                "ptp_amount": 150,
+                "ptp_date": "2026-10-09"
+              }
+            },
+            {
+              "tool": "record_promise_to_pay"
+            },
+            {
+              "expect": {
+                "done": [
+                  "negotiate"
+                ],
+                "active": [
+                  "take_payment"
+                ],
+                "allowed": [
+                  "charge_card"
+                ]
+              }
+            },
+            {
+              "tool": "charge_card"
+            },
+            {
+              "expect": {
+                "done": [
+                  "take_payment",
+                  "close"
+                ],
+                "complete": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "premature charge is blocked",
+          "script": [
+            {
+              "tool": "charge_card"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "charge_card"
+                ],
+                "complete": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "balance cannot disclose before identity check",
+          "script": [
+            {
+              "tool": "lookup_balance"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "lookup_balance"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "unconfirmed promise cannot charge after disclosure",
+          "script": [
+            {
+              "tool": "verify_identity"
+            },
+            {
+              "tool": "lookup_balance"
+            },
+            {
+              "tool": "acknowledge_disclosure"
+            },
+            {
+              "set": {
+                "ptp_amount": 150,
+                "ptp_date": "2026-10-09"
+              }
+            },
+            {
+              "tool": "charge_card"
+            },
+            {
+              "expect": {
+                "blocked": [
+                  "charge_card"
+                ],
+                "active": [
+                  "negotiate"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "disclosure acknowledgement is required before negotiation",
+          "script": [
+            {
+              "tool": "verify_identity"
+            },
+            {
+              "tool": "lookup_balance"
+            },
+            {
+              "expect": {
+                "active": [
+                  "disclose"
+                ],
+                "blocked": [
+                  "record_promise_to_pay",
+                  "charge_card"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "extract": [
+        {
+          "name": "promise_to_pay",
+          "instruction": "Extract the payment amount and date the caller agrees to, once both are stated.",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "ptp_amount": {
+                "type": "number",
+                "description": "Agreed payment amount in USD"
+              },
+              "ptp_date": {
+                "type": "string",
+                "description": "Agreed payment date"
+              }
+            }
+          },
+          "promote": [
+            {
+              "field": "ptp_amount",
+              "policy": "overwrite"
+            },
+            {
+              "field": "ptp_date",
+              "policy": "overwrite"
+            }
+          ]
+        }
+      ],
+      "watch": [
+        {
+          "key": "ptp_amount",
+          "condition": "changed",
+          "effects": [
+            {
+              "set": {
+                "ptp_confirmed": false
+              }
+            }
+          ]
+        },
+        {
+          "key": "ptp_date",
+          "condition": "changed",
+          "effects": [
+            {
+              "set": {
+                "ptp_confirmed": false
+              }
+            }
+          ]
+        }
       ]
     },
     {
-      "name": "premature charge is blocked",
-      "script": [
-        { "tool": "charge_card" },
-        { "expect": { "blocked": ["charge_card"], "complete": false } }
-      ]
-    },
-    {
-      "name": "extraction alone advances negotiate",
-      "script": [
-        { "tool": "verify_identity" },
-        { "tool": "lookup_balance" },
-        { "set": { "ptp_amount": 150, "ptp_date": "next friday" } },
-        { "expect": { "done": ["negotiate"] } }
-      ]
-    }
-  ],
-  "flow": {
-    "steps": [
-      {
-        "id": "verify",
-        "posture": "Verify the caller's identity before discussing any account details.",
-        "allow": ["verify_identity"],
-        "done": { "is_true": "identity_verified" }
+      "name": "hardship_request",
+      "version": "2.0.0",
+      "description": "Verify the account, explain available assistance, and submit an approved request for review.",
+      "instruction": "Verify the account, explain available assistance, and submit an approved request for review. Use controlled demo data only. Explain proposed changes and wait for trusted application approval. Do not treat spoken consent as application approval. Never borrow verification from another task.",
+      "inputs": {
+        "account_id": {
+          "type": "string",
+          "description": ""
+        },
+        "customer_name": {
+          "type": "string",
+          "description": ""
+        },
+        "date_of_birth": {
+          "type": "string",
+          "description": ""
+        },
+        "circumstances": {
+          "type": "string",
+          "description": ""
+        },
+        "affordable_amount_usd": {
+          "type": "number",
+          "description": ""
+        }
       },
-      {
-        "id": "disclose",
-        "after": ["verify"],
-        "posture": "Give the required disclosure: this is an attempt to collect a debt and any information obtained will be used for that purpose. Ask the caller to confirm they understood.",
-        "done": { "called_ok": "lookup_balance" },
-        "allow": ["lookup_balance"],
-        "ground": "The caller's identity is {identity_verified?verified:NOT verified}."
+      "outputs": {
+        "result": {
+          "type": "object",
+          "description": "Accepted controlled tool result, not proof of a real service operation."
+        }
       },
-      {
-        "id": "negotiate",
-        "after": ["disclose"],
-        "posture": "Negotiate an affordable payment plan. Record the promise to pay once agreed.",
-        "allow": ["lookup_balance", "record_promise_to_pay"],
-        "done": { "captured": ["ptp_amount", "ptp_date"] }
+      "tools": [
+        {
+          "name": "verify_identity",
+          "description": "Perform this capability\u2019s own controlled account identity check.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "date_of_birth": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id",
+              "name",
+              "date_of_birth"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "verified": true,
+            "account_last4": "4821",
+            "demo": true
+          },
+          "set_state": {
+            "identity_verified": true
+          }
+        },
+        {
+          "name": "lookup_hardship_options",
+          "description": "Read assistance options for the checked account; do not promise acceptance.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "options": [
+              "Temporary reduced payment review",
+              "Payment date review"
+            ],
+            "review_required": true,
+            "demo": true
+          },
+          "set_state": {
+            "options_reviewed": true
+          }
+        },
+        {
+          "name": "submit_hardship_request",
+          "description": "Propose submission of exact circumstances and proposed affordable amount for review; does not alter the debt.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              },
+              "circumstances": {
+                "type": "string"
+              },
+              "affordable_amount_usd": {
+                "type": "number"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id",
+              "circumstances",
+              "affordable_amount_usd",
+              "request_id"
+            ]
+          },
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "submitted": true,
+            "reference": "DEMO-HARD-4821",
+            "review_window": "3 business days",
+            "payment_changed": false,
+            "demo": true
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "identity_verified": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "options_reviewed": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        }
       },
-      {
-        "id": "take_payment",
-        "after": ["negotiate"],
-        "posture": "Take the payment now that an amount and date are agreed.",
-        "allow": ["charge_card"],
-        "done": { "called_ok": "charge_card" }
-      },
-      {
-        "id": "close",
-        "after": ["take_payment"],
-        "terminal": true
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "posture": "Use the declared tools to complete verify.",
+            "allow": [
+              "verify_identity"
+            ],
+            "done": {
+              "is_true": "identity_verified"
+            }
+          },
+          {
+            "id": "options",
+            "posture": "Use the declared tools to complete options.",
+            "allow": [
+              "lookup_hardship_options"
+            ],
+            "done": {
+              "is_true": "options_reviewed"
+            },
+            "after": [
+              "verify"
+            ]
+          },
+          {
+            "id": "submit",
+            "posture": "Use the declared tools to complete submit.",
+            "allow": [
+              "submit_hardship_request"
+            ],
+            "done": {
+              "called_ok": "submit_hardship_request"
+            },
+            "after": [
+              "options"
+            ]
+          },
+          {
+            "id": "done",
+            "after": [
+              "submit"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "once": "submit_hardship_request"
+          },
+          {
+            "never_until": {
+              "tool": "submit_hardship_request",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "identity_verified"
+                  },
+                  {
+                    "is_true": "options_reviewed"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
       }
-    ],
-    "constraints": [
-      { "once": "charge_card" },
-      { "never_until": { "tool": "charge_card", "until": { "is_true": "ptp_confirmed" } } },
-      { "require": ["close"] }
-    ]
-  }
+    },
+    {
+      "name": "account_dispute",
+      "version": "2.0.0",
+      "description": "Verify the account, inspect the statement, capture a specific dispute and submit it for review.",
+      "instruction": "Verify the account, inspect the statement, capture a specific dispute and submit it for review. Use controlled demo data only. Explain proposed changes and wait for trusted application approval. Do not treat spoken consent as application approval. Never borrow verification from another task.",
+      "inputs": {
+        "account_id": {
+          "type": "string",
+          "description": ""
+        },
+        "customer_name": {
+          "type": "string",
+          "description": ""
+        },
+        "date_of_birth": {
+          "type": "string",
+          "description": ""
+        },
+        "statement_reference": {
+          "type": "string",
+          "description": ""
+        },
+        "disputed_item": {
+          "type": "string",
+          "description": ""
+        },
+        "reason": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object",
+          "description": "Accepted controlled tool result, not proof of a real service operation."
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_identity",
+          "description": "Perform this capability\u2019s own controlled account identity check.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "date_of_birth": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id",
+              "name",
+              "date_of_birth"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "verified": true,
+            "account_last4": "4821",
+            "demo": true
+          },
+          "set_state": {
+            "identity_verified": true
+          }
+        },
+        {
+          "name": "lookup_statement",
+          "description": "Read the controlled statement for the checked account.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              },
+              "statement_reference": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id",
+              "statement_reference"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "statement_reference": "ST-4821-09",
+            "balance_usd": 1240.5,
+            "items": [
+              "Missed instalment",
+              "Late charge"
+            ],
+            "demo": true
+          },
+          "set_state": {
+            "statement_reviewed": true
+          }
+        },
+        {
+          "name": "capture_dispute",
+          "description": "Capture the specific disputed item and caller\u2019s explanation locally; no balance adjustment.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              },
+              "statement_reference": {
+                "type": "string"
+              },
+              "disputed_item": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id",
+              "statement_reference",
+              "disputed_item",
+              "reason"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "captured_locally": true,
+            "demo": true
+          },
+          "set_state": {
+            "dispute_captured": true
+          }
+        },
+        {
+          "name": "submit_dispute",
+          "description": "Propose submitting the exact statement/item/reason for account review.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              },
+              "statement_reference": {
+                "type": "string"
+              },
+              "disputed_item": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id",
+              "statement_reference",
+              "disputed_item",
+              "reason",
+              "request_id"
+            ]
+          },
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "submitted": true,
+            "reference": "DEMO-DISPUTE-4821",
+            "status": "Review requested",
+            "balance_adjusted": false,
+            "demo": true
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "identity_verified": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "statement_reviewed": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        },
+        "dispute_captured": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "posture": "Use the declared tools to complete verify.",
+            "allow": [
+              "verify_identity"
+            ],
+            "done": {
+              "is_true": "identity_verified"
+            }
+          },
+          {
+            "id": "inspect",
+            "posture": "Use the declared tools to complete inspect.",
+            "allow": [
+              "lookup_statement"
+            ],
+            "done": {
+              "is_true": "statement_reviewed"
+            },
+            "after": [
+              "verify"
+            ]
+          },
+          {
+            "id": "capture",
+            "posture": "Use the declared tools to complete capture.",
+            "allow": [
+              "capture_dispute"
+            ],
+            "done": {
+              "is_true": "dispute_captured"
+            },
+            "after": [
+              "inspect"
+            ]
+          },
+          {
+            "id": "submit",
+            "posture": "Use the declared tools to complete submit.",
+            "allow": [
+              "submit_dispute"
+            ],
+            "done": {
+              "called_ok": "submit_dispute"
+            },
+            "after": [
+              "capture"
+            ]
+          },
+          {
+            "id": "done",
+            "after": [
+              "submit"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "once": "submit_dispute"
+          },
+          {
+            "never_until": {
+              "tool": "submit_dispute",
+              "until": {
+                "all": [
+                  {
+                    "is_true": "identity_verified"
+                  },
+                  {
+                    "is_true": "statement_reviewed"
+                  },
+                  {
+                    "is_true": "dispute_captured"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "payment_history",
+      "version": "2.0.0",
+      "description": "Independently verify the account and explain posted payment history from a controlled source.",
+      "instruction": "Independently verify the account and explain posted payment history from a controlled source. Use controlled demo data only. Explain proposed changes and wait for trusted application approval. Do not treat spoken consent as application approval. Never borrow verification from another task.",
+      "inputs": {
+        "account_id": {
+          "type": "string",
+          "description": ""
+        },
+        "customer_name": {
+          "type": "string",
+          "description": ""
+        },
+        "date_of_birth": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object",
+          "description": "Accepted controlled tool result, not proof of a real service operation."
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_identity",
+          "description": "Perform this capability\u2019s own controlled account identity check.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "date_of_birth": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id",
+              "name",
+              "date_of_birth"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "verified": true,
+            "account_last4": "4821",
+            "demo": true
+          },
+          "set_state": {
+            "identity_verified": true
+          }
+        },
+        {
+          "name": "lookup_payment_history",
+          "description": "Read posted payments for this checked account and requested period.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string"
+              },
+              "period": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "account_id",
+              "period"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "account_last4": "4821",
+            "payments": [
+              {
+                "date": "2026-09-04",
+                "amount_usd": 100,
+                "status": "posted"
+              },
+              {
+                "date": "2026-08-07",
+                "amount_usd": 100,
+                "status": "posted"
+              }
+            ],
+            "source": "Acme controlled payment history",
+            "demo": true
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "state": {
+        "identity_verified": {
+          "type": "boolean",
+          "description": "Task-local controlled check or progress flag.",
+          "default": false
+        }
+      },
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "posture": "Use the declared tools to complete verify.",
+            "allow": [
+              "verify_identity"
+            ],
+            "done": {
+              "is_true": "identity_verified"
+            }
+          },
+          {
+            "id": "history",
+            "posture": "Use the declared tools to complete history.",
+            "allow": [
+              "lookup_payment_history"
+            ],
+            "done": {
+              "called_ok": "lookup_payment_history"
+            },
+            "after": [
+              "verify"
+            ]
+          },
+          {
+            "id": "done",
+            "after": [
+              "history"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "never_until": {
+              "tool": "lookup_payment_history",
+              "until": {
+                "is_true": "identity_verified"
+              }
+            }
+          },
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "payment_help",
+      "version": "2.0.0",
+      "description": "Answer public questions about payment methods, account reviews and requesting assistance.",
+      "instruction": "Answer public payment-help questions from the controlled source. Do not disclose any customer balance or promise a hardship decision. Finish a child task and resume the account task when appropriate.",
+      "inputs": {
+        "question": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object",
+          "description": "Accepted controlled tool result, not proof of a real service operation."
+        }
+      },
+      "tools": [
+        {
+          "name": "lookup_payment_help",
+          "description": "Retrieve public payment and assistance information without accessing an account.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "question": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "question"
+            ]
+          },
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "payment_methods": [
+              "Card on file through an approved proposal",
+              "Bank transfer instructions from an account specialist"
+            ],
+            "review_policy": "Hardship and dispute requests are reviewed; submission does not change the balance.",
+            "source": "Acme account-help demo",
+            "demo": true
+          },
+          "save_response_as": "result"
+        }
+      ]
+    }
+  ],
+  "task_scenarios": [
+    {
+      "name": "Payment completes only after promise and charge approvals",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_resolution",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I propose to pay 150 on 2026-10-09.",
+          "extraction": {
+            "promise_to_pay": {
+              "ptp_amount": 150,
+              "ptp_date": "2026-10-09"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_identity",
+            "args": {
+              "account_id": "ACME-4821",
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_balance",
+            "args": {
+              "account_id": "ACME-4821"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "acknowledge_disclosure",
+            "args": {
+              "account_id": "ACME-4821",
+              "acknowledgement": "Caller acknowledges the stated collection disclosure"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_promise_to_pay",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "date": "2026-10-09",
+              "request_id": "PROMISE-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-4": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-4",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "charge_card",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "promise_reference": "DEMO-PTP-4821",
+              "request_id": "PAY-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-5": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-5",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "charged": true,
+                  "confirmation": "TXN-83921",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Hardship review request completes after approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "hardship_request",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "circumstances": "Reduced working hours",
+              "affordable_amount_usd": 75
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_identity",
+            "args": {
+              "account_id": "ACME-4821",
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_hardship_options",
+            "args": {
+              "account_id": "ACME-4821"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "submit_hardship_request",
+            "args": {
+              "account_id": "ACME-4821",
+              "circumstances": "Reduced working hours",
+              "affordable_amount_usd": 75,
+              "request_id": "HARD-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "submitted": true,
+                  "reference": "DEMO-HARD-4821",
+                  "review_window": "3 business days",
+                  "payment_changed": false,
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Account dispute is submitted without changing the balance",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "account_dispute",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14",
+              "statement_reference": "ST-4821-09",
+              "disputed_item": "Late charge",
+              "reason": "Payment was posted before the due date"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_identity",
+            "args": {
+              "account_id": "ACME-4821",
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_statement",
+            "args": {
+              "account_id": "ACME-4821",
+              "statement_reference": "ST-4821-09"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "capture_dispute",
+            "args": {
+              "account_id": "ACME-4821",
+              "statement_reference": "ST-4821-09",
+              "disputed_item": "Late charge",
+              "reason": "Payment was posted before the due date"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "submit_dispute",
+            "args": {
+              "account_id": "ACME-4821",
+              "statement_reference": "ST-4821-09",
+              "disputed_item": "Late charge",
+              "reason": "Payment was posted before the due date",
+              "request_id": "DISPUTE-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-4": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-4",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "submitted": true,
+                  "reference": "DEMO-DISPUTE-4821",
+                  "status": "Review requested",
+                  "balance_adjusted": false,
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Payment history completes after its own verification",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_history",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_identity",
+            "args": {
+              "account_id": "ACME-4821",
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_payment_history",
+            "args": {
+              "account_id": "ACME-4821",
+              "period": "Last 90 days"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "account_last4": "4821",
+                  "payments": [
+                    {
+                      "date": "2026-09-04",
+                      "amount_usd": 100,
+                      "status": "posted"
+                    },
+                    {
+                      "date": "2026-08-07",
+                      "amount_usd": 100,
+                      "status": "posted"
+                    }
+                  ],
+                  "source": "Acme controlled payment history",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Public payment help completes independently",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_help",
+            "input": {
+              "question": "Does a hardship request change my balance?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_payment_help",
+            "args": {
+              "question": "Does a hardship request change my balance?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "payment_methods": [
+                    "Card on file through an approved proposal",
+                    "Bank transfer instructions from an account specialist"
+                  ],
+                  "review_policy": "Hardship and dispute requests are reviewed; submission does not change the balance.",
+                  "source": "Acme account-help demo",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Public payment question resumes verified negotiation",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_resolution",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I propose to pay 150 on 2026-10-09.",
+          "extraction": {
+            "promise_to_pay": {
+              "ptp_amount": 150,
+              "ptp_date": "2026-10-09"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_identity",
+            "args": {
+              "account_id": "ACME-4821",
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_balance",
+            "args": {
+              "account_id": "ACME-4821"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "acknowledge_disclosure",
+            "args": {
+              "account_id": "ACME-4821",
+              "acknowledgement": "Caller acknowledges the stated collection disclosure"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_help",
+            "input": {
+              "question": "What payment methods are supported?"
+            },
+            "parent": "task-1"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "lookup_payment_help",
+            "args": {
+              "question": "What payment methods are supported?"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-2"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-2",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "payment_methods": [
+                    "Card on file through an approved proposal",
+                    "Bank transfer instructions from an account specialist"
+                  ],
+                  "review_policy": "Hardship and dispute requests are reviewed; submission does not change the balance.",
+                  "source": "Acme account-help demo",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        },
+        {
+          "event": "expect",
+          "foreground": "task-1",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "verify",
+                "disclose"
+              ],
+              "active": [
+                "negotiate"
+              ]
+            }
+          ]
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_promise_to_pay",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "date": "2026-10-09",
+              "request_id": "PROMISE-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-5": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-5",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "charge_card",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "promise_reference": "DEMO-PTP-4821",
+              "request_id": "PAY-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-6": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-6",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "charged": true,
+                  "confirmation": "TXN-83921",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "No payment or balance access before verification",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_resolution",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I propose to pay 150 on 2026-10-09.",
+          "extraction": {
+            "promise_to_pay": {
+              "ptp_amount": 150,
+              "ptp_date": "2026-10-09"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "charge_card",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "promise_reference": "DEMO-PTP-4821",
+              "request_id": "PAY-4821-1"
+            }
+          },
+          "expected_error": "not permitted yet"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_balance",
+            "args": {
+              "account_id": "ACME-4821"
+            }
+          },
+          "expected_error": "not part of the current step"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "active": [
+                "verify"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Unconfirmed promise blocks payment despite supplied amount and date",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_resolution",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I propose to pay 150 on 2026-10-09.",
+          "extraction": {
+            "promise_to_pay": {
+              "ptp_amount": 150,
+              "ptp_date": "2026-10-09"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_identity",
+            "args": {
+              "account_id": "ACME-4821",
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_balance",
+            "args": {
+              "account_id": "ACME-4821"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "acknowledge_disclosure",
+            "args": {
+              "account_id": "ACME-4821",
+              "acknowledgement": "Caller acknowledges the stated collection disclosure"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "charge_card",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "promise_reference": "DEMO-PTP-4821",
+              "request_id": "PAY-4821-1"
+            }
+          },
+          "expected_error": "not permitted yet"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "active": [
+                "negotiate"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Denied charge produces no payment success",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_resolution",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I propose to pay 150 on 2026-10-09.",
+          "extraction": {
+            "promise_to_pay": {
+              "ptp_amount": 150,
+              "ptp_date": "2026-10-09"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_identity",
+            "args": {
+              "account_id": "ACME-4821",
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_balance",
+            "args": {
+              "account_id": "ACME-4821"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "acknowledge_disclosure",
+            "args": {
+              "account_id": "ACME-4821",
+              "acknowledgement": "Caller acknowledges the stated collection disclosure"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_promise_to_pay",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "date": "2026-10-09",
+              "request_id": "PROMISE-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-4": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-4",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "charge_card",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "promise_reference": "DEMO-PTP-4821",
+              "request_id": "PAY-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-5": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-5",
+            "approve": false
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "active": [
+                "take_payment"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-5": "declined"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          },
+          "expected_error": "governance has not completed"
+        }
+      ]
+    },
+    {
+      "name": "Revising payment invalidates pending charge approval",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_resolution",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I propose to pay 150 on 2026-10-09.",
+          "extraction": {
+            "promise_to_pay": {
+              "ptp_amount": 150,
+              "ptp_date": "2026-10-09"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_identity",
+            "args": {
+              "account_id": "ACME-4821",
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_balance",
+            "args": {
+              "account_id": "ACME-4821"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "acknowledge_disclosure",
+            "args": {
+              "account_id": "ACME-4821",
+              "acknowledgement": "Caller acknowledges the stated collection disclosure"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_promise_to_pay",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "date": "2026-10-09",
+              "request_id": "PROMISE-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-4": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-4",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "charge_card",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "promise_reference": "DEMO-PTP-4821",
+              "request_id": "PAY-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-5": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "revise",
+            "task": "task-1",
+            "expected_revision": 1,
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I propose to pay 100 on 2026-10-09.",
+          "extraction": {
+            "promise_to_pay": {
+              "ptp_amount": 100,
+              "ptp_date": "2026-10-09"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-5",
+            "approve": true
+          },
+          "expected_error": "approval is no longer pending"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "revision": 2,
+              "active": [
+                "verify"
+              ]
+            }
+          ],
+          "operations": {
+            "operation-5": "declined"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stable payment key reuses the accepted receipt",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_resolution",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I propose to pay 150 on 2026-10-09.",
+          "extraction": {
+            "promise_to_pay": {
+              "ptp_amount": 150,
+              "ptp_date": "2026-10-09"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_identity",
+            "args": {
+              "account_id": "ACME-4821",
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_balance",
+            "args": {
+              "account_id": "ACME-4821"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "acknowledge_disclosure",
+            "args": {
+              "account_id": "ACME-4821",
+              "acknowledgement": "Caller acknowledges the stated collection disclosure"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_promise_to_pay",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "date": "2026-10-09",
+              "request_id": "PROMISE-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-4": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-4",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "charge_card",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "promise_reference": "DEMO-PTP-4821",
+              "request_id": "PAY-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-5": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-5",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "charge_card",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "promise_reference": "DEMO-PTP-4821",
+              "request_id": "PAY-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-6": "succeeded"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "charged": true,
+                  "confirmation": "TXN-83921",
+                  "demo": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "History capability cannot inherit payment-task verification",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_resolution",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I propose to pay 150 on 2026-10-09.",
+          "extraction": {
+            "promise_to_pay": {
+              "ptp_amount": 150,
+              "ptp_date": "2026-10-09"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_identity",
+            "args": {
+              "account_id": "ACME-4821",
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_history",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "lookup_payment_history",
+            "args": {
+              "account_id": "ACME-4821",
+              "period": "Last 90 days"
+            }
+          },
+          "expected_error": "not permitted yet"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "suspended",
+              "done": [
+                "verify"
+              ]
+            },
+            {
+              "task": "task-2",
+              "active": [
+                "verify"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "A spoken payment correction clears confirmation and revokes the charge proposal",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "payment_resolution",
+            "input": {
+              "account_id": "ACME-4821",
+              "customer_name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I propose to pay 150 on 2026-10-09.",
+          "extraction": {
+            "promise_to_pay": {
+              "ptp_amount": 150,
+              "ptp_date": "2026-10-09"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_identity",
+            "args": {
+              "account_id": "ACME-4821",
+              "name": "Jordan Ellis",
+              "date_of_birth": "1988-03-14"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "lookup_balance",
+            "args": {
+              "account_id": "ACME-4821"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "acknowledge_disclosure",
+            "args": {
+              "account_id": "ACME-4821",
+              "acknowledgement": "Caller acknowledges the stated collection disclosure"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "record_promise_to_pay",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "date": "2026-10-09",
+              "request_id": "PROMISE-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-4": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-4",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "charge_card",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "promise_reference": "DEMO-PTP-4821",
+              "request_id": "PAY-4821-1"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-5": "awaiting_approval"
+          }
+        },
+        {
+          "event": "observe",
+          "task": "task-1",
+          "user": "I need to change that: I can pay seventy-five on October fifteenth.",
+          "extraction": {
+            "promise_to_pay": {
+              "ptp_amount": 75,
+              "ptp_date": "2026-10-15"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-5": "declined"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-5",
+            "approve": true
+          },
+          "expected_error": "no longer pending"
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "charge_card",
+            "args": {
+              "account_id": "ACME-4821",
+              "amount_usd": 150,
+              "promise_reference": "DEMO-PTP-4821",
+              "request_id": "PAY-4821-1"
+            }
+          },
+          "expected_error": "not permitted yet"
+        }
+      ]
+    }
+  ]
 }

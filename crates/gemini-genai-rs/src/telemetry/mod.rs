@@ -76,7 +76,8 @@ pub struct TelemetryGuard {
 
 /// The exporters a [`TelemetryConfig`] asks for, built but not yet attached
 /// to a subscriber: for an application that builds its own subscriber (to
-/// add layers of its own) and attaches [`layer`](Self::layer) to it.
+/// add layers of its own) and attaches `Exporters::layer` to it when the
+/// `otel-base` feature is enabled.
 #[derive(Default)]
 pub struct Exporters {
     /// Keeps the providers alive; dropping it flushes and shuts them down.
@@ -106,7 +107,7 @@ impl TelemetryConfig {
     /// - `OTEL_EXPORTER_OTLP_ENDPOINT`: turns on OTLP trace and metric
     ///   export to that collector (`otel-otlp`).
     /// - `ADK_TELEMETRY=gcp`: turns on Cloud Trace and Cloud Monitoring
-    ///   export (`otel-gcp`, use [`build_gcp`](Self::build_gcp)), with
+    ///   export (`otel-gcp`, use `TelemetryConfig::build_gcp`), with
     ///   `GOOGLE_CLOUD_PROJECT` as the project when set.
     /// - `OTEL_SERVICE_NAME`: the service name (default `gemini-live`).
     /// - `ADK_METRICS_ADDR`: serve Prometheus metrics at this address, e.g.
@@ -215,13 +216,13 @@ impl TelemetryConfig {
     }
 
     /// Initialize telemetry subsystems based on configuration: the OTLP
-    /// exporters ([`build_otlp`](Self::build_otlp), feature `otel-otlp`),
+    /// exporters (`TelemetryConfig::build_otlp`, feature `otel-otlp`),
     /// the Prometheus endpoint ([`install_metrics`](Self::install_metrics),
     /// feature `metrics`) and a logging subscriber carrying the trace
     /// exporter (feature `tracing-subscriber`).
     ///
-    /// With `otel-gcp`, use [`init_gcp`](Self::init_gcp) instead. To add
-    /// layers of your own, use `build_otlp` and [`Exporters::layer`].
+    /// With `otel-gcp`, use `TelemetryConfig::init_gcp` instead. To add
+    /// layers of your own, use `build_otlp` and `Exporters::layer`.
     ///
     /// The returned `TelemetryGuard` must be held alive for the duration of the
     /// application. Dropping it triggers a flush and shutdown of all exporters.

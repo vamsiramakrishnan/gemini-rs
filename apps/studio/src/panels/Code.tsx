@@ -3,6 +3,11 @@ import JSZip from 'jszip';
 import { api, type Language, type ProjectFile } from '../api';
 import { useStudio } from '../store';
 
+type Result = { revision: number; language: Language } & (
+  | { kind: 'ready'; files: ProjectFile[]; name: string }
+  | { kind: 'error'; message: string }
+);
+
 const LANGUAGES: { id: Language; label: string; blurb: string }[] = [
   { id: 'rust', label: 'Rust', blurb: 'A Cargo binary that runs the session, with the tools in process.' },
   { id: 'python', label: 'Python', blurb: 'An MCP tool server (official mcp package); agent.json binds the tools to it.' },
@@ -12,10 +17,14 @@ const LANGUAGES: { id: Language; label: string; blurb: string }[] = [
 /** The project `adk spec codegen` would write for this document. */
 export function Code() {
   const spec = useStudio((s) => s.spec);
+  const revision = useStudio((s) => s.revision);
   const [language, setLanguage] = useState<Language>('rust');
-  const [files, setFiles] = useState<ProjectFile[]>([]);
+  const [result, setResult] = useState<Result | null>(null);
   const [open, setOpen] = useState<string>('');
-  const [error, setError] = useState<string | null>(null);
+  const currentResult = result?.revision === revision && result.language === language ? result : null;
+  const project = currentResult?.kind === 'ready' ? currentResult : null;
+  const files = project?.files ?? [];
+  const error = currentResult?.kind === 'error' ? currentResult.message : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -24,28 +33,28 @@ export function Code() {
         .project(spec, language)
         .then((out) => {
           if (cancelled) return;
-          if (!out.valid) return setError(out.errors.join('; '));
-          setError(null);
-          setFiles(out.files);
+          if (!out.valid) return setResult({ revision, language, kind: 'error', message: out.errors.join('; ') });
+          setResult({ revision, language, kind: 'ready', files: out.files, name: typeof spec.name === 'string' && spec.name ? spec.name : 'agent' });
           setOpen((current) => (out.files.some((f) => f.path === current) ? current : preferred(out.files)));
         })
-        .catch((err: Error) => !cancelled && setError(err.message));
+        .catch((err: Error) => !cancelled && setResult({ revision, language, kind: 'error', message: err.message }));
     }, 300);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [spec, language]);
+  }, [spec, revision, language]);
 
   const download = async () => {
+    if (!project || project.revision !== useStudio.getState().revision) return;
     const zip = new JSZip();
-    const root = typeof spec.name === 'string' && spec.name ? spec.name : 'agent';
-    for (const file of files) zip.file(`${root}/${file.path}`, file.contents);
+    const root = project.name;
+    for (const file of project.files) zip.file(`${root}/${file.path}`, file.contents);
     const blob = await zip.generateAsync({ type: 'blob' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${root}-${language}.zip`;
+    a.download = `${root}-${project.language}.zip`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -65,6 +74,7 @@ export function Code() {
         </button>
       </div>
       {error && <p className="error">{error}</p>}
+      {!currentResult && <p className="hint">Generating project…</p>}
       <div className="code-body">
         <ul className="file-list">
           {files.map((file) => (

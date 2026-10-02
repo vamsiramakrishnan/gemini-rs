@@ -168,7 +168,7 @@ impl BundleSet {
 
 /// What this runtime cannot provide for a spec, if anything.
 fn unsupported(spec: &SessionSpec) -> Option<String> {
-    spec.memory.is_some().then(|| {
+    spec.requires_memory().then(|| {
         "the spec declares `memory`, and adk-runtime has no memory engine; \
          serve it from your own server with SpecResources::memory"
             .to_string()

@@ -3,7 +3,7 @@
 //! A [`SpecTest`] scripts a conversation as data — user turns, tool calls,
 //! state writes — and asserts flow state at checkpoints: which steps are done
 //! or active, which tools are admitted or blocked, what the state holds. The
-//! script replays through the *real* [`FlowMonitor`](gemini_adk_rs::flow::FlowMonitor) with the declared tools'
+//! script replays through the *real* [`FlowStack`] with the declared tools'
 //! mock semantics, so governance is exercised exactly as a live session would
 //! — with no model, no network, and no API key. Run in CI, or scrub through
 //! one in the Studio.
@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use gemini_adk_rs::flow::{Enforcement, FlowMonitor};
+use gemini_adk_rs::flow::{Enforcement, FlowMonitor, FlowSnapshot, FlowStack};
 use gemini_adk_rs::state::State;
 
 use super::SessionSpec;
@@ -56,7 +56,8 @@ pub struct TestExpectation {
     /// State keys that must hold exactly these values.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub state: BTreeMap<String, Value>,
-    /// Whether the flow must be complete (all `require` steps done).
+    /// Whether the stack must be complete (all required steps done with no
+    /// active overlay, or a terminating overlay ended the conversation).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complete: Option<bool>,
 }
@@ -107,73 +108,87 @@ pub struct SimSnapshot {
     /// Assertion failures at this event (empty when none).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failures: Vec<String>,
-    /// Steps done after this event.
-    pub done: Vec<String>,
-    /// Whether the flow is complete after this event.
-    pub complete: bool,
-    /// The full explanation (active steps, admitted/blocked tools, unmet
-    /// requirements, per-step guard truth trees) after this event.
+    /// The runtime snapshot shared by live sessions and offline replay.
     #[serde(flatten)]
-    pub explanation: gemini_adk_rs::flow::FlowExplanation,
+    pub status: FlowSnapshot,
 }
 
 /// Replay one named test and return a snapshot after every event (plus an
 /// initial "start" snapshot), for scrubbing. Errors when the flow cannot be
 /// built or the test name is unknown.
 pub fn trace_test(spec: &SessionSpec, test_name: &str) -> Result<Vec<SimSnapshot>, Vec<String>> {
-    let flow = spec.effective_flow()?;
+    if let Some((skill_name, local_name)) = test_name.split_once('/')
+        && let Some(skill) = spec.skills.iter().find(|skill| skill.name == skill_name)
+    {
+        let validation = spec.validate_for_replay();
+        if !validation.valid {
+            return Err(validation.errors);
+        }
+        return trace_test(&skill.definition(), local_name);
+    }
     let test = spec
         .tests
         .iter()
         .find(|t| t.name == test_name)
         .ok_or_else(|| vec![format!("no test named '{test_name}' in the spec")])?;
-    Ok(replay(spec, flow, test))
+    replay(spec, test)
 }
 
-/// The shared replay engine: run the script through a fresh monitor, snapshot
+/// Compile the same governance stack installed by a live session. Resolvers
+/// remain stubs: tests supply state directly and tools use declared mock effects.
+fn replay_stack(spec: &SessionSpec) -> Result<FlowStack, Vec<String>> {
+    let validation = spec.validate_for_replay();
+    if !validation.valid {
+        return Err(validation.errors);
+    }
+    if let Some(conversation) = &spec.conversation {
+        crate::conversation::Conversation::from_spec_stubbing_resolvers(conversation.clone())
+            .map(|compiled| compiled.stack(Enforcement::Enforce))
+            .map_err(|error| vec![format!("conversation: {error}")])
+    } else {
+        FlowMonitor::try_new(spec.effective_flow()?, Enforcement::Enforce)
+            .map(FlowMonitor::into_stack)
+            .map_err(|errors| errors.0.iter().map(ToString::to_string).collect())
+    }
+}
+
+/// The shared replay engine: run the script through a fresh stack, snapshot
 /// after every event.
-fn replay(
-    spec: &SessionSpec,
-    flow: gemini_adk_rs::flow::Flow,
-    test: &SpecTest,
-) -> Vec<SimSnapshot> {
+fn replay(spec: &SessionSpec, test: &SpecTest) -> Result<Vec<SimSnapshot>, Vec<String>> {
     let state = State::new();
     // Mirror `apply()`: declared defaults are seeded and computed variables
     // recompute after every state change, so guards over derived keys latch
     // exactly as they do live.
     spec.seed_state_defaults(&state);
     spec.recompute_computed(&state);
-    let mut monitor = FlowMonitor::new(flow, Enforcement::Enforce);
-    monitor.relatch(&state);
+    let mut stack = replay_stack(spec)?;
+    stack.relatch(&state);
 
-    let snapshot = |index: usize,
-                    event: String,
-                    failures: Vec<String>,
-                    monitor: &FlowMonitor,
-                    state: &State| SimSnapshot {
-        index,
-        event,
-        failures,
-        done: monitor.marking().done.iter().cloned().collect(),
-        complete: monitor.is_complete(),
-        explanation: monitor.explain(state),
-    };
+    let snapshot =
+        |index: usize, event: String, failures: Vec<String>, stack: &FlowStack, state: &State| {
+            SimSnapshot {
+                index,
+                event,
+                failures,
+                status: stack.snapshot(state),
+            }
+        };
 
-    let mut snapshots = vec![snapshot(0, "start".into(), Vec::new(), &monitor, &state)];
+    let mut snapshots = vec![snapshot(0, "start".into(), Vec::new(), &stack, &state)];
     for (index, event) in test.script.iter().enumerate() {
         let mut failures = Vec::new();
         let label = match event {
             SimEvent::User(text) => {
                 spec.recompute_computed(&state);
-                monitor.on_turn(&state);
+                stack.on_turn(&state);
                 format!("user: {text}")
             }
             SimEvent::Tool(name) => {
-                match monitor.admits_tool(name, &state) {
+                match stack.admits_tool(name, &state) {
                     Ok(()) => {
                         spec.apply_tool_state(name, &state);
                         spec.recompute_computed(&state);
-                        monitor.on_tool_ok(name, &state);
+                        stack.on_tool_ok(name, &state);
                     }
                     Err(reason) => {
                         let anticipated = matches!(
@@ -192,52 +207,44 @@ fn replay(
                     let _ = state.set(key, value.clone());
                 }
                 spec.recompute_computed(&state);
-                monitor.relatch(&state);
+                stack.relatch(&state);
                 format!(
                     "set: {}",
                     map.keys().cloned().collect::<Vec<_>>().join(", ")
                 )
             }
             SimEvent::Expect(expect) => {
-                check(expect, &monitor, &state, &mut failures);
+                check(expect, &stack, &state, &mut failures);
                 "expect".to_string()
             }
         };
-        snapshots.push(snapshot(index + 1, label, failures, &monitor, &state));
+        snapshots.push(snapshot(index + 1, label, failures, &stack, &state));
     }
-    snapshots
+    Ok(snapshots)
 }
 
-/// Run every embedded test in the spec against its effective flow.
+/// Run every embedded test against the same governance stack as live sessions.
 pub(crate) fn run_tests(spec: &SessionSpec) -> Vec<TestReport> {
-    let flow = match spec.effective_flow() {
-        Ok(flow) => flow,
+    spec.tests.iter().map(|test| run_one(spec, test)).collect()
+}
+
+fn run_one(spec: &SessionSpec, test: &SpecTest) -> TestReport {
+    let snapshots = match replay(spec, test) {
+        Ok(snapshots) => snapshots,
         Err(errors) => {
-            return spec
-                .tests
-                .iter()
-                .map(|t| TestReport {
-                    name: t.name.clone(),
-                    passed: false,
-                    failures: vec![TestStepResult {
-                        index: 0,
-                        event: "setup".into(),
-                        failures: errors.clone(),
-                    }],
-                    events: 0,
-                })
-                .collect();
+            return TestReport {
+                name: test.name.clone(),
+                passed: false,
+                failures: vec![TestStepResult {
+                    index: 0,
+                    event: "setup".into(),
+                    failures: errors,
+                }],
+                events: 0,
+            };
         }
     };
-
-    spec.tests
-        .iter()
-        .map(|test| run_one(spec, flow.clone(), test))
-        .collect()
-}
-
-fn run_one(spec: &SessionSpec, flow: gemini_adk_rs::flow::Flow, test: &SpecTest) -> TestReport {
-    let failures: Vec<TestStepResult> = replay(spec, flow, test)
+    let failures: Vec<TestStepResult> = snapshots
         .into_iter()
         .skip(1) // the "start" snapshot carries no event
         .filter(|s| !s.failures.is_empty())
@@ -256,18 +263,13 @@ fn run_one(spec: &SessionSpec, flow: gemini_adk_rs::flow::Flow, test: &SpecTest)
     }
 }
 
-fn check(
-    expect: &TestExpectation,
-    monitor: &FlowMonitor,
-    state: &State,
-    failures: &mut Vec<String>,
-) {
-    let explanation = monitor.explain(state);
+fn check(expect: &TestExpectation, stack: &FlowStack, state: &State, failures: &mut Vec<String>) {
+    let explanation = stack.explain(state);
     for step in &expect.done {
-        if !monitor.marking().done.contains(step) {
+        if !stack.marking().done.contains(step) {
             failures.push(format!(
                 "expected step '{step}' done; done = [{}]",
-                join(&monitor.marking().done.iter().cloned().collect::<Vec<_>>())
+                join(&stack.marking().done.iter().cloned().collect::<Vec<_>>())
             ));
         }
     }
@@ -288,17 +290,8 @@ fn check(
         }
     }
     for tool in &expect.blocked {
-        if !explanation.blocked_tools.contains_key(tool) {
-            failures.push(format!(
-                "expected tool '{tool}' blocked; blocked = [{}]",
-                join(
-                    &explanation
-                        .blocked_tools
-                        .keys()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                )
-            ));
+        if stack.admits_tool(tool, state).is_ok() {
+            failures.push(format!("expected tool '{tool}' blocked; it was admitted"));
         }
     }
     for (key, expected) in &expect.state {
@@ -311,11 +304,11 @@ fn check(
         }
     }
     if let Some(complete) = expect.complete
-        && monitor.is_complete() != complete
+        && stack.is_complete() != complete
     {
         failures.push(format!(
             "expected complete = {complete}; got {}",
-            monitor.is_complete()
+            stack.is_complete()
         ));
     }
 }
@@ -327,7 +320,7 @@ fn join(items: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::super::SessionSpec;
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     fn spec_with_tests() -> SessionSpec {
         SessionSpec::from_value(json!({
@@ -396,15 +389,22 @@ mod tests {
         assert_eq!(snapshots[0].event, "start");
         assert!(
             snapshots[0]
+                .status
                 .explanation
                 .active
                 .contains(&"verify".to_string())
         );
         // After verify_identity (event 2), verify is done and pay is active.
-        assert!(snapshots[2].done.contains(&"verify".to_string()));
-        assert!(snapshots[2].explanation.active.contains(&"pay".to_string()));
+        assert!(snapshots[2].status.done.contains(&"verify".to_string()));
+        assert!(
+            snapshots[2]
+                .status
+                .explanation
+                .active
+                .contains(&"pay".to_string())
+        );
         // Final snapshot: complete.
-        assert!(snapshots[5].complete);
+        assert!(snapshots[5].status.complete);
         assert!(super::trace_test(&spec, "no such test").is_err());
     }
 
@@ -449,5 +449,244 @@ mod tests {
         let reports = spec.run_tests();
         assert!(!reports[0].passed);
         assert!(reports[0].failures[0].failures[0].contains("was blocked"));
+    }
+
+    fn conversation_spec(script: Value) -> SessionSpec {
+        use crate::conversation::Conversation;
+        use gemini_adk_rs::flow::{Guard, Resume};
+
+        let conversation = Conversation::new("support")
+            .stage("main")
+            .allow(["finish_main"])
+            .complete_when(Guard::called_ok("finish_main"))
+            .next("main_end", Guard::called_ok("finish_main"))
+            .stage("main_end")
+            .terminal()
+            .require(["main_end"])
+            .overlay("faq")
+            .trigger(Guard::is_true("intent:faq"))
+            .stage("answer")
+            .allow(["finish_faq"])
+            .complete_when(Guard::called_ok("finish_faq"))
+            .next("faq_end", Guard::called_ok("finish_faq"))
+            .stage("faq_end")
+            .terminal()
+            .require(["faq_end"])
+            .resume(Resume::Previous)
+            .end_overlay()
+            .overlay("clarify")
+            .trigger(Guard::is_true("intent:clarify"))
+            .stage("clarification")
+            .allow(["finish_clarify"])
+            .complete_when(Guard::called_ok("finish_clarify"))
+            .next("clarify_end", Guard::called_ok("finish_clarify"))
+            .stage("clarify_end")
+            .terminal()
+            .require(["clarify_end"])
+            .resume(Resume::Previous)
+            .end_overlay()
+            .overlay("cancel")
+            .trigger(Guard::is_true("intent:cancel"))
+            .stage("cancelled")
+            .terminal()
+            .require(["cancelled"])
+            .resume(Resume::Terminate)
+            .end_overlay()
+            .into_spec();
+        SessionSpec::from_value(json!({
+            "conversation": conversation,
+            "tools": [
+                {"name": "finish_main"},
+                {"name": "finish_faq", "set_state": {"intent:faq": false}},
+                {"name": "finish_clarify", "set_state": {"intent:clarify": false}}
+            ],
+            "tests": [{"name": "conversation", "script": script}]
+        }))
+        .expect("spec parses")
+    }
+
+    #[test]
+    fn preview_and_tests_preserve_nested_overlays_and_resume() {
+        let spec = conversation_spec(json!([
+            {"set": {"intent:faq": true}},
+            {"user": "FAQ"},
+            {"expect": {"active": ["answer"], "allowed": ["finish_faq"],
+                        "complete": false}},
+            {"set": {"intent:clarify": true}},
+            {"user": "Clarify"},
+            {"expect": {"active": ["clarification"], "allowed": ["finish_clarify"],
+                        "complete": false}},
+            {"tool": "finish_clarify"},
+            {"user": "Back to FAQ"},
+            {"expect": {"active": ["answer"], "allowed": ["finish_faq"]}},
+            {"tool": "finish_faq"},
+            {"user": "Back to main"},
+            {"expect": {"active": ["main"], "allowed": ["finish_main"],
+                        "complete": false}},
+            {"tool": "finish_main"},
+            {"expect": {"done": ["main", "main_end"], "complete": true}}
+        ]));
+        let reports = spec.run_tests();
+        assert!(reports[0].passed, "{:?}", reports[0].failures);
+        let snapshots = super::trace_test(&spec, "conversation").expect("traces");
+        assert!(snapshots.iter().all(|s| s.failures.is_empty()));
+        assert_eq!(snapshots[2].status.overlay_path, ["faq"]);
+        assert_eq!(snapshots[5].status.overlay_path, ["faq", "clarify"]);
+        assert_eq!(snapshots[7].status.overlay_path, ["faq", "clarify"]);
+        assert_eq!(snapshots[8].status.overlay_path, ["faq"]);
+        assert!(snapshots[11].status.overlay_path.is_empty());
+        assert!(snapshots.last().expect("final").status.complete);
+        let value = serde_json::to_value(&snapshots[5]).expect("serializes");
+        assert_eq!(value["overlay_path"], json!(["faq", "clarify"]));
+        assert_eq!(value["terminated"], false);
+        assert!(value.get("status").is_none(), "runtime fields stay flat");
+    }
+
+    #[test]
+    fn nested_termination_is_reported_and_blocks_mock_tool_effects() {
+        let mut spec = conversation_spec(json!([
+            {"set": {"intent:faq": true}},
+            {"user": "FAQ"},
+            {"set": {"intent:cancel": true}},
+            {"user": "Cancel"},
+            {"expect": {"complete": false}},
+            {"user": "Closing turn"},
+            {"expect": {"complete": true, "blocked": ["finish_main"]}},
+            {"tool": "finish_main"},
+            {"expect": {"complete": true, "blocked": ["finish_main"],
+                        "state": {"charged": false}}}
+        ]));
+        spec.state = serde_json::from_value(json!({
+            "charged": {"type": "boolean", "default": false}
+        }))
+        .expect("state parses");
+        spec.tools[0]
+            .set_state
+            .insert("charged".into(), json!(true));
+        let reports = spec.run_tests();
+        assert!(reports[0].passed, "{:?}", reports[0].failures);
+        let snapshots = super::trace_test(&spec, "conversation").expect("traces");
+        assert_eq!(snapshots[4].status.overlay_path, ["faq", "cancel"]);
+        assert!(!snapshots[4].status.complete);
+        let final_status = &snapshots.last().expect("final").status;
+        assert!(final_status.terminated);
+        assert!(final_status.complete);
+        assert!(final_status.overlay_path.is_empty());
+        assert!(final_status.explanation.active.is_empty());
+        assert!(final_status.explanation.allowed_tools.is_empty());
+    }
+
+    #[test]
+    fn overlay_denial_can_be_asserted_for_a_suspended_layers_tool() {
+        let mut spec = conversation_spec(json!([
+            {"set": {"intent:faq": true, "charged": false}},
+            {"user": "FAQ"},
+            {"tool": "finish_main"},
+            {"expect": {"blocked": ["finish_main"], "state": {"charged": false}}}
+        ]));
+        spec.tools[0]
+            .set_state
+            .insert("charged".into(), json!(true));
+        let reports = spec.run_tests();
+        assert!(reports[0].passed, "{:?}", reports[0].failures);
+        let trace = super::trace_test(&spec, "conversation").unwrap();
+        assert!(trace.iter().all(|snapshot| snapshot.failures.is_empty()));
+    }
+
+    #[test]
+    fn replay_uses_conversation_repair_and_set_does_not_count_as_a_turn() {
+        use crate::conversation::Conversation;
+        use gemini_adk_rs::flow::{Guard, RepairPolicy, reprompt_flag};
+
+        let conversation = Conversation::new("repair")
+            .stage("collect")
+            .complete_when(Guard::is_true("info"))
+            .next("done", Guard::is_true("info"))
+            .repair(RepairPolicy::new(2, 3).escalate_to("handoff"))
+            .stage("done")
+            .terminal()
+            .stage("handoff")
+            .complete_when(Guard::is_true("handoff_complete"))
+            .require(["done"])
+            .into_spec();
+        let spec = SessionSpec::from_value(json!({
+            "conversation": conversation,
+            "tests": [{"name": "repair", "script": [
+                {"set": {"unrelated": 1}},
+                {"set": {"unrelated": 2}},
+                {"user": "First turn"},
+                {"expect": {"active": ["collect"], "complete": false}},
+                {"user": "Second turn"},
+                {"expect": {"active": ["collect"],
+                            "state": {reprompt_flag("collect"): true}}},
+                {"user": "Third turn"},
+                {"expect": {"active": ["handoff"],
+                            "state": {"repair:collect:escalate": true}}}
+            ]}]
+        }))
+        .expect("parses");
+        let reports = spec.run_tests();
+        assert!(reports[0].passed, "{:?}", reports[0].failures);
+        let snapshots = super::trace_test(&spec, "repair").expect("traces");
+        assert!(
+            snapshots
+                .last()
+                .expect("final")
+                .status
+                .explanation
+                .active
+                .contains(&"handoff".into())
+        );
+    }
+
+    #[test]
+    fn invalid_specs_fail_preview_and_tests_at_setup() {
+        let mut spec = spec_with_tests();
+        spec.flow.as_mut().expect("flow").steps[1].after[0].step = "missing".into();
+        assert!(!spec.validate().valid);
+        assert!(super::trace_test(&spec, "happy path").is_err());
+        let reports = spec.run_tests();
+        assert!(reports.iter().all(|r| !r.passed && r.events == 0));
+        assert!(reports.iter().all(|r| r.failures[0].event == "setup"));
+    }
+
+    #[test]
+    fn offline_http_tools_keep_mock_effects_without_transport_features() {
+        let mut spec = spec_with_tests();
+        spec.tools[0].http = Some(
+            serde_json::from_value(json!({
+                "url": "http://127.0.0.1:1/never-executed"
+            }))
+            .expect("binding parses"),
+        );
+        let reports = spec.run_tests();
+        assert!(reports[0].passed, "{:?}", reports[0].failures);
+        assert!(reports[1].passed, "{:?}", reports[1].failures);
+    }
+
+    #[test]
+    fn offline_validation_preserves_conflicting_binding_errors() {
+        let mut spec = spec_with_tests();
+        spec.tools[0].http = Some(
+            serde_json::from_value(json!({
+                "url": "http://127.0.0.1:1/never-executed"
+            }))
+            .unwrap(),
+        );
+        spec.tools[0].mcp = Some("never-executed-tool-server".into());
+        let validation = spec.validate_for_replay();
+        assert!(!validation.valid);
+        assert!(
+            validation
+                .errors
+                .iter()
+                .any(|error| error.contains("both an http and an mcp"))
+        );
+        assert!(super::trace_test(&spec, "happy path").is_err());
+        assert!(
+            spec.run_tests()
+                .iter()
+                .all(|report| !report.passed && report.events == 0)
+        );
     }
 }

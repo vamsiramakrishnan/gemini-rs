@@ -241,6 +241,7 @@ pub struct LocalMemoryRetriever {
     semantic: Option<Arc<dyn SemanticFallback>>,
     cache: RwLock<HashMap<String, PreparedMemorySnapshot>>,
     suppressed: RwLock<HashSet<String>>,
+    removed: RwLock<HashSet<MemoryId>>,
 }
 
 impl LocalMemoryRetriever {
@@ -258,6 +259,7 @@ impl LocalMemoryRetriever {
             semantic: None,
             cache: RwLock::new(HashMap::new()),
             suppressed: RwLock::new(HashSet::new()),
+            removed: RwLock::new(HashSet::new()),
         }
     }
 
@@ -275,6 +277,45 @@ impl LocalMemoryRetriever {
     /// The windows currently hidden from canonical retrieval.
     pub fn suppressed_windows(&self) -> HashSet<String> {
         self.suppressed.read().clone()
+    }
+
+    pub(crate) fn suppress_records(&self, ids: HashSet<MemoryId>) {
+        *self.removed.write() = ids;
+        self.invalidate_cache();
+    }
+
+    pub(crate) fn record_visible(&self, id: &MemoryId, origin: crate::bm25::MemoryOrigin) -> bool {
+        if self.removed.read().contains(id) {
+            return false;
+        }
+        if origin == crate::bm25::MemoryOrigin::SessionOverlay {
+            return self.overlay.read().get(id).is_some();
+        }
+        self.canonical.read().get(id).is_none_or(|doc| {
+            !self
+                .suppressed
+                .read()
+                .contains(&format!("{}|{}", doc.subject_form, doc.predicate))
+        })
+    }
+
+    pub(crate) fn filter_snapshot(
+        &self,
+        mut snapshot: PreparedMemorySnapshot,
+    ) -> PreparedMemorySnapshot {
+        let facts: Vec<_> = snapshot
+            .facts
+            .iter()
+            .filter(|fact| self.record_visible(&fact.memory_id, fact.origin))
+            .cloned()
+            .collect();
+        snapshot.token_count = facts
+            .iter()
+            .map(super::snapshot::RetrievedMemory::token_cost)
+            .sum::<usize>()
+            .min(u16::MAX as usize) as u16;
+        snapshot.facts = facts.into();
+        snapshot
     }
 
     /// The semantic backend, if one was installed.
@@ -517,22 +558,7 @@ impl LocalMemoryRetriever {
 
     /// Drop canonical candidates the session has superseded in conversation.
     fn drop_suppressed(&self, candidates: &mut Vec<FusedCandidate>) {
-        let suppressed = self.suppressed.read();
-        if suppressed.is_empty() {
-            return;
-        }
-        let canonical = self.canonical.read();
-        candidates.retain(|candidate| {
-            if candidate.hit.origin != crate::bm25::MemoryOrigin::Canonical {
-                return true;
-            }
-            match canonical.get(&candidate.hit.id) {
-                Some(doc) => {
-                    !suppressed.contains(&format!("{}|{}", doc.subject_form, doc.predicate))
-                }
-                None => true,
-            }
-        });
+        candidates.retain(|candidate| self.record_visible(&candidate.hit.id, candidate.hit.origin));
     }
 
     async fn execute(

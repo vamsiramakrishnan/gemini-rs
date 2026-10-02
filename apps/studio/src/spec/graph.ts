@@ -37,6 +37,11 @@ export function modeOf(spec: Spec): Mode {
   return isObject(spec.conversation) ? 'conversation' : 'flow';
 }
 
+/** This assistant keeps its dialogue inside skills rather than a root flow. */
+export function isSkillsOnly(spec: Spec): boolean {
+  return Array.isArray(spec.skills) && !isObject(spec.flow) && !isObject(spec.conversation);
+}
+
 function asArray(value: Json | undefined): Json[] {
   return Array.isArray(value) ? value : [];
 }

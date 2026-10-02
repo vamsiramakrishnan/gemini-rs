@@ -532,6 +532,9 @@ button.add {
 .dock.open {
   height: 34vh;
 }
+.dock.open.tasks-dock {
+  height: 52vh;
+}
 .dock-tabs {
   display: flex;
   gap: 2px;
@@ -667,6 +670,119 @@ button.add {
 }
 .run-state {
   overflow: auto;
+}
+.run.run-tasks {
+  grid-template-columns: minmax(280px, 1fr) minmax(360px, 1fr);
+}
+.skill-overview {
+  height: 100%;
+  overflow: auto;
+  padding: 30px clamp(20px, 4vw, 64px);
+}
+.skill-overview h1 {
+  margin: 10px 0;
+  font-size: 25px;
+  font-weight: 550;
+}
+.skill-overview-actions {
+  margin: 18px 0;
+}
+.skill-library {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.skill-library button {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 8px;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+.skill-library button:hover,
+.skill-library button.selected {
+  background: var(--panel);
+}
+.skill-number {
+  color: var(--accent);
+  font-family: var(--mono);
+}
+.skill-library-description {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+}
+.task-session {
+  display: grid;
+  grid-template-columns: minmax(200px, 280px) minmax(0, 1fr);
+  gap: 20px;
+  margin-top: 10px;
+}
+.task-session h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.task-session label:not(.row) {
+  display: block;
+}
+.task-session select,
+.task-input textarea {
+  display: block;
+  width: 100%;
+  margin: 4px 0;
+}
+.task-input textarea {
+  font-family: var(--mono);
+  resize: vertical;
+}
+.task-input {
+  margin: 8px 0;
+}
+.task-entry {
+  padding: 10px 12px;
+  border-left: 2px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.task-entry.foreground {
+  border-left-color: var(--accent);
+}
+.task-heading {
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.task-operation {
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+}
+.task-operation.uncertain {
+  border-top-color: var(--warn);
+}
+.task-session details {
+  margin-top: 8px;
+}
+.task-session pre,
+.task-history pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.run-state .task-session {
+  display: block;
+}
+.run-state .task-timeline {
+  margin-top: 16px;
+}
+@media (max-width: 800px) {
+  .task-session {
+    grid-template-columns: 1fr;
+  }
 }
 .code-body {
   display: grid;

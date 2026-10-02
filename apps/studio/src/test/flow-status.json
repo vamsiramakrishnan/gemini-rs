@@ -1,0 +1,16 @@
+{
+  "active": ["answer"],
+  "allowed_tools": [],
+  "blocked_tools": {},
+  "missing_requirements": ["end"],
+  "active_progress": {
+    "answer": {
+      "desc": "'answered' must be true",
+      "holds": false
+    }
+  },
+  "done": [],
+  "complete": false,
+  "overlay_path": ["faq"],
+  "terminated": false
+}

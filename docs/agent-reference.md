@@ -47,6 +47,7 @@ use gemini_adk_fluent_rs::flow::*;          // full flow vocabulary (CompiledFlo
 use gemini_adk_fluent_rs::agents::*;        // Agent, orchestration (call_agent, AgentMode), agent_session
 use gemini_adk_fluent_rs::llm::*;           // LlmRequest/Response/Params/Registry
 use gemini_adk_fluent_rs::conversation::*;  // Conversation, ConversationSpec, CompiledConversation
+use gemini_adk_fluent_rs::tasks::*;         // Skill, SkillSpec, TaskRuntime, TaskCommand, snapshots
 use gemini_adk_fluent_rs::wire::*;          // raw L0 wire types
 // a2a, motifs, policy, simulation, testing — the same-named module.
 ```
@@ -56,6 +57,14 @@ use gemini_adk_fluent_rs::wire::*;          // raw L0 wire types
 `Agent` type alias for it, so the two names never collide.
 
 ## Core API Patterns
+
+For a voice assistant with several capabilities, install `SessionSpec.skills`
+or one `Live::skills(...)` catalog. Each activation owns its state and optional
+conversation. Inspect `LiveHandle::task_snapshot()` and use
+`LiveHandle::task_command(...)` for trusted approval and task controls. Do not
+combine task skills with root tools, state defaults, extraction, governance or
+middleware. See [skills and tasks](user-guide/skills-and-tasks.md) for contracts,
+effect policies, supported conversation features and offline scenarios.
 
 ### Fluent Agent Builder (Text Agents)
 

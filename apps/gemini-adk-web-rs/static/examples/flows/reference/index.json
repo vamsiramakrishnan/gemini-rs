@@ -1,0 +1,35 @@
+{
+  "source_revision": "ebd5542a205ac2ef2c5c8c629fad4890ec74c155",
+  "files": [
+    {
+      "file": "call-screening.json",
+      "sha256": "4e103fd65fd8cd5453db37583d9e4c660c28514088eed970967de1899ed60000",
+      "workflow_tests": 3
+    },
+    {
+      "file": "clinic-intake.json",
+      "sha256": "4ebf1fc3d919ce07281212e00cf298a4b21b37c7140c9ead07274230cba90146",
+      "workflow_tests": 3
+    },
+    {
+      "file": "collections.json",
+      "sha256": "d8f890087566f3d2460be4ce1b02434b4e1b2558ce01b356a69beea12ccdc178",
+      "workflow_tests": 3
+    },
+    {
+      "file": "restaurant.json",
+      "sha256": "f06f06ea99ac08b91355c606a02b5e0819e8223c7ed7d5f361902daec4d1a0a3",
+      "workflow_tests": 4
+    },
+    {
+      "file": "returns-desk.json",
+      "sha256": "6fb62dad950d3518cbc601e19cd682e7de5ec96cf9beca0bab4be6bda77e8157",
+      "workflow_tests": 3
+    },
+    {
+      "file": "telco-support.json",
+      "sha256": "4c557355155f0f248384270acf90ec53d04862eba5ee813bd2084727a15796df",
+      "workflow_tests": 4
+    }
+  ]
+}

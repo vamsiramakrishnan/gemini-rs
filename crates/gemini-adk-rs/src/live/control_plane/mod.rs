@@ -5,6 +5,8 @@
 mod extractors;
 mod lifecycle;
 mod main_loop;
+mod task_handler;
+mod task_transcript;
 mod tool_gate;
 mod tool_handler;
 

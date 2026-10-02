@@ -1107,11 +1107,65 @@
       },
       "type": "object"
     },
+    "OperationStatus": {
+      "description": "Operation lifecycle, including uncertainty after an interrupted commit.",
+      "oneOf": [
+        {
+          "description": "Waiting for a trusted decision about exact arguments.",
+          "enum": [
+            "awaiting_approval"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Released to an owned worker.",
+          "enum": [
+            "running"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Successful result was observed.",
+          "enum": [
+            "succeeded"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Read failed, or an external non-commit was verified.",
+          "enum": [
+            "failed"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "User declined or a proposal was invalidated.",
+          "enum": [
+            "declined"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Execution was revoked or a read was cancelled.",
+          "enum": [
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A dispatched commit has no reliable external outcome yet.",
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "OverlaySpec": {
       "description": "A digression (overlay): a named sub-flow that suspends the main flow when its `trigger` holds, runs to completion, then resumes per `resume`.",
       "properties": {
         "name": {
-          "description": "Overlay name.",
+          "description": "Overlay name, unique across the conversation. The safety-handoff policy generates an overlay named `safety`.",
           "type": "string"
         },
         "require": {
@@ -1585,6 +1639,50 @@
         "field"
       ],
       "type": "object"
+    },
+    "ReconciledOutcome": {
+      "description": "An externally verified commit result, not an inference from cancellation.",
+      "oneOf": [
+        {
+          "description": "External service confirms the operation succeeded.",
+          "properties": {
+            "result": {
+              "description": "Verified external result."
+            },
+            "status": {
+              "enum": [
+                "succeeded"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "result",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "External service confirms no committed effect remains.",
+          "properties": {
+            "error": {
+              "description": "Verified failure description.",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "error",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "RepairPolicy": {
       "description": "A step's repair policy for the weird paths (silence, no-match, the user stalling). The stack sets `repair:{step}:reprompt` once the step has been active `reprompt_after` turns without completing, and `repair:{step}:escalate` after `escalate_after`. When `escalate_to` is set, the authoring layer lowers an extra edge gated on the escalate signal — a deterministic \"give up and hand off\".",
@@ -2221,6 +2319,208 @@
         }
       ]
     },
+    "SkillSpec": {
+      "description": "A versioned capability installed in one speaking session.",
+      "properties": {
+        "computed": {
+          "description": "Derived task state, evaluated in dependency order.",
+          "items": {
+            "$ref": "#/definitions/ComputedSpec"
+          },
+          "type": "array"
+        },
+        "conversation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConversationSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional stages, digressions, repair and policies."
+        },
+        "description": {
+          "default": "",
+          "description": "Short routing description, available before activation.",
+          "type": "string"
+        },
+        "extract": {
+          "description": "Structured extraction from this activation's owned transcript.",
+          "items": {
+            "$ref": "#/definitions/ExtractSpec"
+          },
+          "type": "array"
+        },
+        "flow": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Flow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional lower-level governed flow; mutually exclusive with conversation."
+        },
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/StateFieldSpec"
+          },
+          "description": "Typed activation fields. Fields without defaults are required.",
+          "type": "object"
+        },
+        "instruction": {
+          "default": "",
+          "description": "Instructions projected when this capability is foreground.",
+          "type": "string"
+        },
+        "memory": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MemorySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Existing contextual memory projected into this task's state."
+        },
+        "name": {
+          "description": "Unique installed capability name.",
+          "type": "string"
+        },
+        "outputs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/StateFieldSpec"
+          },
+          "description": "Fields exported from accepted task state on completion.",
+          "type": "object"
+        },
+        "patterns": {
+          "description": "Patterns over this activation's turns or clock.",
+          "items": {
+            "$ref": "#/definitions/PatternSpec"
+          },
+          "type": "array"
+        },
+        "state": {
+          "additionalProperties": {
+            "$ref": "#/definitions/StateFieldSpec"
+          },
+          "description": "Task-private state and defaults.",
+          "type": "object"
+        },
+        "tests": {
+          "description": "Existing model-free tests for the governed workflow.",
+          "items": {
+            "$ref": "#/definitions/SpecTest"
+          },
+          "type": "array"
+        },
+        "tools": {
+          "description": "Operations, using skill-local names.",
+          "items": {
+            "$ref": "#/definitions/SkillToolSpec"
+          },
+          "type": "array"
+        },
+        "version": {
+          "description": "Version pinned by each activation.",
+          "type": "string"
+        },
+        "watch": {
+          "description": "Reactions to accepted task-state changes.",
+          "items": {
+            "$ref": "#/definitions/WatchSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "SkillToolSpec": {
+      "description": "One skill-local operation. Its effect policy is mandatory even for mocks.",
+      "properties": {
+        "background": {
+          "description": "Run non-blocking: the model keeps speaking while the tool executes (`behavior: NonBlocking` on the wire; Google AI only, stripped on Vertex). Implied by `scheduling`.",
+          "type": "boolean"
+        },
+        "description": {
+          "default": "",
+          "description": "Description shown to the model.",
+          "type": "string"
+        },
+        "effect": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TaskToolEffect"
+            }
+          ],
+          "description": "Reads can run immediately; commits require a trusted approval."
+        },
+        "http": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HttpBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Execute as an HTTP request instead of returning the canned response."
+        },
+        "mcp": {
+          "description": "Execute by calling the tool of the same name on this MCP server: a command line (stdio) or an `http(s)://` URL. This is how a tool written in another language (a generated Python or Go tool server) implements a declared tool. The declaration here stays what the model sees, and `set_state` still applies.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Tool (function) name the model calls.",
+          "type": "string"
+        },
+        "parameters": {
+          "description": "JSON Schema for the arguments (Gemini subset). `None` = no parameters."
+        },
+        "response": {
+          "description": "Canned JSON response (mock tools). Default `{\"ok\": true}`."
+        },
+        "save_response_as": {
+          "description": "Store the tool's full response under this state key.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scheduling": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SchedulingSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the async response is delivered (implies `background`)."
+        },
+        "set_state": {
+          "additionalProperties": true,
+          "description": "State keys written when the tool runs — how a tool latches guards.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "effect",
+        "name"
+      ],
+      "type": "object"
+    },
     "SlotRecognizer": {
       "description": "A serializable description of the deterministic recognizer that fills a slot.\n\nMirrors [`Recognizer`] but is serde-friendly (it holds patterns/options as data, not a compiled `Regex`), so a [`FrameSpec`] — and the conversation spec that embeds it — round-trips through JSON/YAML. Lower to a runtime recognizer with [`SlotRecognizer::to_recognizer`].",
       "oneOf": [
@@ -2558,7 +2858,7 @@
           ]
         },
         "id": {
-          "description": "Unique stage id.",
+          "description": "Stage id, unique across the main flow and every overlay.",
           "type": "string"
         },
         "next": {
@@ -2793,6 +3093,709 @@
       ],
       "type": "object"
     },
+    "TaskCommand": {
+      "description": "Trusted application/UI command. Models must never receive Decide or Reconcile.",
+      "oneOf": [
+        {
+          "description": "Start a new independent activation and make it foreground.",
+          "properties": {
+            "action": {
+              "enum": [
+                "start"
+              ],
+              "type": "string"
+            },
+            "input": {
+              "default": {},
+              "description": "Input validated against that skill's contract."
+            },
+            "parent": {
+              "default": null,
+              "description": "Optional parent resumed when this child finishes.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "skill": {
+              "description": "Installed skill name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "skill"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Suspend a task without losing its accepted progress.",
+          "properties": {
+            "action": {
+              "enum": [
+                "suspend"
+              ],
+              "type": "string"
+            },
+            "task": {
+              "description": "Activation to suspend.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Make an existing nonterminal activation foreground.",
+          "properties": {
+            "action": {
+              "enum": [
+                "resume"
+              ],
+              "type": "string"
+            },
+            "task": {
+              "description": "Activation to resume.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Replace inputs and governance, invalidating prior work and approvals.",
+          "properties": {
+            "action": {
+              "enum": [
+                "revise"
+              ],
+              "type": "string"
+            },
+            "expected_revision": {
+              "description": "Revision the caller observed.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "input": {
+              "description": "Complete replacement input."
+            },
+            "task": {
+              "description": "Activation to revise.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "expected_revision",
+            "input",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Cancel this task; an already dispatched commit may still finish.",
+          "properties": {
+            "action": {
+              "enum": [
+                "cancel"
+              ],
+              "type": "string"
+            },
+            "task": {
+              "description": "Activation to cancel.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Validate and export a task's result; resume its suspended parent.",
+          "properties": {
+            "action": {
+              "enum": [
+                "complete"
+              ],
+              "type": "string"
+            },
+            "output": {
+              "default": {},
+              "description": "Output used when the skill has no state projector; defaults to an empty object."
+            },
+            "task": {
+              "description": "Activation to finish.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Admit a tool for the foreground activation.",
+          "properties": {
+            "action": {
+              "enum": [
+                "invoke"
+              ],
+              "type": "string"
+            },
+            "args": {
+              "description": "Exact proposed arguments."
+            },
+            "idempotency_key": {
+              "default": null,
+              "description": "Stable external operation key for a commit.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "task": {
+              "description": "Activation whose tool should run.",
+              "type": "string"
+            },
+            "tool": {
+              "description": "Skill-local tool name.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "args",
+            "task",
+            "tool"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Trusted decision about an immutable pending proposal.",
+          "properties": {
+            "action": {
+              "enum": [
+                "decide"
+              ],
+              "type": "string"
+            },
+            "approve": {
+              "description": "Whether the exact proposal is approved.",
+              "type": "boolean"
+            },
+            "operation": {
+              "description": "Pending operation to approve or decline.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "approve",
+            "operation"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Trusted externally verified resolution of an unknown commit outcome.",
+          "properties": {
+            "action": {
+              "enum": [
+                "reconcile"
+              ],
+              "type": "string"
+            },
+            "operation": {
+              "description": "Operation whose external outcome was verified.",
+              "type": "string"
+            },
+            "outcome": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ReconciledOutcome"
+                }
+              ],
+              "description": "Verified result."
+            }
+          },
+          "required": [
+            "action",
+            "operation",
+            "outcome"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TaskExpectation": {
+      "description": "An assertion about one task activation.",
+      "properties": {
+        "active": {
+          "description": "Active steps in the task's current governance layer.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "done": {
+          "description": "Completed steps in the task's current governance layer.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "output": {
+          "description": "Expected validated export."
+        },
+        "revision": {
+          "description": "Expected input revision.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TaskStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Expected activation lifecycle."
+        },
+        "task": {
+          "description": "Task ID to inspect.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Expected pinned skill version.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "task"
+      ],
+      "type": "object"
+    },
+    "TaskObservationKind": {
+      "description": "Serializable owned-observation vocabulary for task replay.",
+      "oneOf": [
+        {
+          "description": "Finalized user/heard-model turn.",
+          "enum": [
+            "turn"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Generated model text before interruption truncation.",
+          "enum": [
+            "generation_complete"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Owned interruption.",
+          "enum": [
+            "interrupted"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Owned timer tick.",
+          "enum": [
+            "timer"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "TaskScenario": {
+      "description": "A deterministic journey through task commands and controlled tool effects.",
+      "properties": {
+        "name": {
+          "description": "Display name used in CI and Studio.",
+          "type": "string"
+        },
+        "steps": {
+          "description": "Events in order; task and operation IDs match the runtime snapshots.",
+          "items": {
+            "$ref": "#/definitions/TaskStep"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "TaskStatus": {
+      "description": "Task lifecycle, separate from the lifecycle of its external operations.",
+      "oneOf": [
+        {
+          "description": "Owns the speaking foreground.",
+          "enum": [
+            "running"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Retains progress while another task speaks.",
+          "enum": [
+            "suspended"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Exported a validated output.",
+          "enum": [
+            "completed"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Cancelled; external operations retain independent receipts.",
+          "enum": [
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Could not continue.",
+          "enum": [
+            "failed"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "TaskStep": {
+      "description": "One event applied by both scripted task tests and Studio Preview.",
+      "oneOf": [
+        {
+          "description": "Apply a trusted command. Tools run with declared mock implementations.",
+          "properties": {
+            "command": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/TaskCommand"
+                }
+              ],
+              "description": "The same command accepted by the live runtime."
+            },
+            "defer": {
+              "default": false,
+              "description": "Hold an admitted invocation until an explicit finish event.",
+              "type": "boolean"
+            },
+            "event": {
+              "enum": [
+                "command"
+              ],
+              "type": "string"
+            },
+            "expected_error": {
+              "description": "An anticipated admission error; no error means the step fails.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "extraction": {
+              "additionalProperties": true,
+              "description": "Controlled results for due after-tool extractors.",
+              "type": "object"
+            },
+            "extraction_errors": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Controlled extraction provider failures.",
+              "type": "object"
+            }
+          },
+          "required": [
+            "command",
+            "event"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Advance the same task-local governance as a live turn boundary.",
+          "properties": {
+            "event": {
+              "enum": [
+                "turn"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Execute and finish one previously deferred controlled invocation.",
+          "properties": {
+            "event": {
+              "enum": [
+                "finish"
+              ],
+              "type": "string"
+            },
+            "extraction": {
+              "additionalProperties": true,
+              "description": "Controlled results for due after-tool extractors.",
+              "type": "object"
+            },
+            "extraction_errors": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Controlled extraction provider failures.",
+              "type": "object"
+            },
+            "operation": {
+              "description": "Invocation identity from the runtime's operation snapshot.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "operation"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Observe owned speech through the same trigger/window/promotion pipeline.",
+          "properties": {
+            "defer": {
+              "default": false,
+              "description": "Hold prepared work until finish_service, allowing stale-result tests.",
+              "type": "boolean"
+            },
+            "event": {
+              "enum": [
+                "observe"
+              ],
+              "type": "string"
+            },
+            "extraction": {
+              "additionalProperties": true,
+              "description": "Explicit results from the controlled extractor provider.",
+              "type": "object"
+            },
+            "extraction_errors": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Explicit provider failures, keyed by extractor name.",
+              "type": "object"
+            },
+            "model": {
+              "default": "",
+              "description": "Heard or generated model text, depending on trigger.",
+              "type": "string"
+            },
+            "revision": {
+              "description": "Captured revision; omitted means the current revision at this step.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "task": {
+              "description": "Activation receiving the observation.",
+              "type": "string"
+            },
+            "trigger": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/TaskObservationKind"
+                }
+              ],
+              "default": "turn",
+              "description": "Observation kind, defaulting to finalized turn."
+            },
+            "user": {
+              "default": "",
+              "description": "Finalized user text.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Complete a previously deferred service ticket.",
+          "properties": {
+            "event": {
+              "enum": [
+                "finish_service"
+              ],
+              "type": "string"
+            },
+            "operation": {
+              "description": "Service operation identity from its owned ticket.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "operation"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Advance the shared manual clock and observe a foreground timer tick.",
+          "properties": {
+            "event": {
+              "enum": [
+                "advance_time"
+              ],
+              "type": "string"
+            },
+            "millis": {
+              "description": "Elapsed milliseconds.",
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "event",
+            "millis"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Seed the offline memory adapter, never authoritative task state.",
+          "properties": {
+            "event": {
+              "enum": [
+                "memory"
+              ],
+              "type": "string"
+            },
+            "skill": {
+              "description": "Skill whose controlled memory backend receives these fixtures.",
+              "type": "string"
+            },
+            "values": {
+              "additionalProperties": true,
+              "description": "Projection values keyed by declared slot target.",
+              "type": "object"
+            }
+          },
+          "required": [
+            "event",
+            "skill",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Assert observable task state without exporting private task state.",
+          "properties": {
+            "event": {
+              "enum": [
+                "expect"
+              ],
+              "type": "string"
+            },
+            "foreground": {
+              "description": "Foreground task ID, when it must be set to this value.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "operations": {
+              "additionalProperties": {
+                "$ref": "#/definitions/OperationStatus"
+              },
+              "description": "Operation outcomes that must hold.",
+              "type": "object"
+            },
+            "tasks": {
+              "description": "Task observations that must hold.",
+              "items": {
+                "$ref": "#/definitions/TaskExpectation"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TaskToolEffect": {
+      "description": "Effects determine admission, approval, cancellation and reconciliation.",
+      "oneOf": [
+        {
+          "description": "Does not commit an external mutation.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "read"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Requires explicit approval and a complete key passed to the external adapter.",
+          "properties": {
+            "idempotency_argument": {
+              "description": "String argument carrying the external idempotency key.",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "commit"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "idempotency_argument",
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TestExpectation": {
       "description": "Assertions at a checkpoint. Every listed item must hold; omitted fields are not checked.",
       "properties": {
@@ -2818,7 +3821,7 @@
           "type": "array"
         },
         "complete": {
-          "description": "Whether the flow must be complete (all `require` steps done).",
+          "description": "Whether the stack must be complete (all required steps done with no active overlay, or a terminating overlay ended the conversation).",
           "type": [
             "boolean",
             "null"
@@ -3370,12 +4373,26 @@
       },
       "type": "array"
     },
+    "skills": {
+      "description": "Reusable capabilities, each with task-private state and operations.",
+      "items": {
+        "$ref": "#/definitions/SkillSpec"
+      },
+      "type": "array"
+    },
     "state": {
       "additionalProperties": {
         "$ref": "#/definitions/StateFieldSpec"
       },
       "description": "Declared state keys — the session's data dictionary.",
       "type": "object"
+    },
+    "task_scenarios": {
+      "description": "Model-free journeys through skill activation, approval and cancellation.",
+      "items": {
+        "$ref": "#/definitions/TaskScenario"
+      },
+      "type": "array"
     },
     "tests": {
       "description": "Embedded conformance tests, replayed offline by [`SessionSpec::run_tests`].",

@@ -1,0 +1,517 @@
+{
+  "name": "Support assistant",
+  "version": "1.0.0",
+  "description": "One voice assistant handles billing, questions, diagnostics and human handoff.",
+  "instruction": "Help the customer choose a capability. Keep one voice throughout. Start a task with its declared inputs. Use a child FAQ task for questions during billing and resume the parent afterwards. Call a commit tool to create its approval proposal, explain it, and wait for the customer to approve it in the application.",
+  "greeting": "Introduce yourself and ask whether the customer needs billing help, technical support or a general answer.",
+  "modality": "audio",
+  "voice": "Kore",
+  "skills": [
+    {
+      "name": "billing",
+      "version": "1.0.0",
+      "description": "Check an account and arrange a billing adjustment.",
+      "instruction": "Verify the account before arranging an adjustment. Call submit_adjustment to create the proposal, explain the proposed adjustment and ask the customer to approve it in the application. Wait for its successful receipt before reporting completion.",
+      "inputs": {
+        "account_id": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "verify_account",
+          "description": "Check the account and its balance",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "verified": true,
+            "balance": 25
+          },
+          "set_state": {
+            "verified": true
+          }
+        },
+        {
+          "name": "submit_adjustment",
+          "description": "Submit the agreed billing adjustment",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "receipt": "adjustment-demo",
+            "amount": 5
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "request_id"
+            ]
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "flow": {
+        "steps": [
+          {
+            "id": "verify",
+            "allow": [
+              "verify_account"
+            ],
+            "done": {
+              "called_ok": "verify_account"
+            },
+            "posture": "Check the account."
+          },
+          {
+            "id": "adjust",
+            "after": [
+              "verify"
+            ],
+            "allow": [
+              "submit_adjustment"
+            ],
+            "done": {
+              "called_ok": "submit_adjustment"
+            },
+            "posture": "Create the adjustment proposal, explain it and wait for approval in the application."
+          },
+          {
+            "id": "done",
+            "after": [
+              "adjust"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      },
+      "state": {
+        "verified": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    {
+      "name": "faq",
+      "version": "1.0.0",
+      "description": "Answer product and policy questions.",
+      "instruction": "Retrieve a relevant answer and return to the task that was interrupted.",
+      "inputs": {
+        "question": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "search_faq",
+          "description": "Retrieve the relevant help article",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "answer": "Adjustments appear on the next invoice.",
+            "source": "Billing help"
+          },
+          "save_response_as": "result"
+        }
+      ]
+    },
+    {
+      "name": "diagnostics",
+      "version": "1.0.0",
+      "description": "Diagnose a device or connection problem.",
+      "instruction": "Run diagnostics, explain the result and offer a human handoff when needed.",
+      "inputs": {
+        "device_id": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "run_diagnostics",
+          "description": "Check connection health",
+          "effect": {
+            "kind": "read"
+          },
+          "response": {
+            "status": "healthy",
+            "recommendation": "Restart the client application."
+          },
+          "save_response_as": "result"
+        }
+      ],
+      "flow": {
+        "steps": [
+          {
+            "id": "diagnose",
+            "allow": [
+              "run_diagnostics"
+            ],
+            "done": {
+              "called_ok": "run_diagnostics"
+            },
+            "posture": "Check the device connection."
+          },
+          {
+            "id": "done",
+            "after": [
+              "diagnose"
+            ],
+            "terminal": true
+          }
+        ],
+        "constraints": [
+          {
+            "require": [
+              "done"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "handoff",
+      "version": "1.0.0",
+      "description": "Transfer the case to a human specialist.",
+      "instruction": "Explain what will be shared. Call transfer_case to create the proposal and ask the customer to approve it in the application. Wait for a successful receipt before reporting the transfer.",
+      "inputs": {
+        "reason": {
+          "type": "string"
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "object"
+        }
+      },
+      "tools": [
+        {
+          "name": "transfer_case",
+          "description": "Transfer the case to a specialist",
+          "effect": {
+            "kind": "commit",
+            "idempotency_argument": "request_id"
+          },
+          "response": {
+            "case_id": "support-demo",
+            "queue": "human-support"
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "request_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "request_id"
+            ]
+          },
+          "save_response_as": "result"
+        }
+      ]
+    }
+  ],
+  "task_scenarios": [
+    {
+      "name": "FAQ interruption preserves billing and approved adjustment",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "billing",
+            "input": {
+              "account_id": "A-17"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "verify_account",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "faq",
+            "input": {
+              "question": "When does an adjustment appear?"
+            },
+            "parent": "task-1"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-2",
+            "tool": "search_faq",
+            "args": {}
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-2",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "foreground": "task-1",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "running",
+              "done": [
+                "verify"
+              ],
+              "active": [
+                "adjust"
+              ]
+            },
+            {
+              "task": "task-2",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "submit_adjustment",
+            "args": {
+              "request_id": "adjustment-17"
+            }
+          }
+        },
+        {
+          "event": "expect",
+          "operations": {
+            "operation-3": "awaiting_approval"
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-3",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1",
+            "output": {}
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "version": "1.0.0",
+              "output": {
+                "result": {
+                  "receipt": "adjustment-demo",
+                  "amount": 5
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cancelled diagnostic cannot finish its activation",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "diagnostics",
+            "input": {
+              "device_id": "device-1"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "run_diagnostics",
+            "args": {}
+          },
+          "defer": true
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "cancel",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "finish",
+          "operation": "operation-1"
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "cancelled"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "diagnostics completes independently",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "diagnostics",
+            "input": {
+              "device_id": "DEVICE-DEMO"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "run_diagnostics",
+            "args": {
+              "device_id": "DEVICE-DEMO"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "status": "healthy",
+                  "recommendation": "Restart the client application."
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "handoff completes independently",
+      "steps": [
+        {
+          "event": "command",
+          "command": {
+            "action": "start",
+            "skill": "handoff",
+            "input": {
+              "reason": "A specialist is needed"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "invoke",
+            "task": "task-1",
+            "tool": "transfer_case",
+            "args": {
+              "reason": "A specialist is needed",
+              "request_id": "handoff-demo-standalone"
+            }
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "decide",
+            "operation": "operation-1",
+            "approve": true
+          }
+        },
+        {
+          "event": "command",
+          "command": {
+            "action": "complete",
+            "task": "task-1"
+          }
+        },
+        {
+          "event": "expect",
+          "tasks": [
+            {
+              "task": "task-1",
+              "status": "completed",
+              "output": {
+                "result": {
+                  "case_id": "support-demo",
+                  "queue": "human-support"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

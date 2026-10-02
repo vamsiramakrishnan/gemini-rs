@@ -1,0 +1,104 @@
+{
+  "name": "returns-desk",
+  "description": "E-commerce returns: locate the order, check eligibility, then refund or offer store credit — the refund is a confirm-gated, single-use commit.",
+  "instruction": "You are the returns assistant for Meridian Home Goods. Locate the order, check the return window and condition, and process the refund only when eligibility is confirmed. Offer store credit when a refund is not possible.",
+  "greeting": "Welcome the caller to Meridian returns and ask for their order number.",
+  "modality": "text",
+  "tools": [
+    {
+      "name": "lookup_order",
+      "description": "Look up an order by its number.",
+      "parameters": {
+        "type": "object",
+        "properties": { "order_number": { "type": "string" } },
+        "required": ["order_number"]
+      },
+      "response": { "found": true, "item": "Linen duvet set", "delivered_days_ago": 12, "total_usd": 149 },
+      "set_state": { "order_found": true }
+    },
+    {
+      "name": "check_eligibility",
+      "description": "Check the return window and item condition rules for this order.",
+      "response": { "eligible": true, "window_days_left": 18 },
+      "set_state": { "eligibility_checked": true, "refund_eligible": true }
+    },
+    {
+      "name": "issue_refund",
+      "description": "Refund the order to the original payment method.",
+      "response": { "refunded": true, "reference": "RF-30917" },
+      "set_state": { "refund_issued": true }
+    },
+    {
+      "name": "offer_store_credit",
+      "description": "Issue store credit instead of a refund.",
+      "response": { "credited": true, "amount_usd": 149 },
+      "set_state": { "credit_issued": true }
+    }
+  ],
+  "flow": {
+    "steps": [
+      {
+        "id": "locate",
+        "posture": "Find the order before discussing the return.",
+        "allow": ["lookup_order"],
+        "done": { "is_true": "order_found" }
+      },
+      {
+        "id": "eligibility",
+        "after": ["locate"],
+        "posture": "Check eligibility and explain the outcome plainly — window, condition, and what the customer can expect.",
+        "allow": ["check_eligibility"],
+        "done": { "is_true": "eligibility_checked" },
+        "ground": "Order {order_found?located:not located}; eligibility {eligibility_checked?checked:pending}."
+      },
+      {
+        "id": "settle",
+        "after": ["eligibility"],
+        "posture": "Refund when eligible; otherwise offer store credit. Read the reference back.",
+        "allow": ["issue_refund", "offer_store_credit"],
+        "done": { "any": [{ "is_true": "refund_issued" }, { "is_true": "credit_issued" }] }
+      },
+      {
+        "id": "done",
+        "after": ["settle"],
+        "terminal": true
+      }
+    ],
+    "constraints": [
+      { "once": "issue_refund" },
+      { "never_until": { "tool": "issue_refund", "until": { "is_true": "refund_eligible" } } },
+      { "require": ["done"] }
+    ]
+  },
+  "tests": [
+    {
+      "name": "eligible return is refunded once",
+      "script": [
+        { "expect": { "active": ["locate"], "blocked": ["issue_refund"] } },
+        { "tool": "lookup_order" },
+        { "tool": "check_eligibility" },
+        { "expect": { "allowed": ["issue_refund"] } },
+        { "tool": "issue_refund" },
+        { "tool": "issue_refund" },
+        { "expect": { "blocked": ["issue_refund"], "done": ["settle", "done"], "complete": true } }
+      ]
+    },
+    {
+      "name": "no refund before eligibility",
+      "script": [
+        { "tool": "lookup_order" },
+        { "tool": "issue_refund" },
+        { "expect": { "blocked": ["issue_refund"], "complete": false } }
+      ]
+    },
+    {
+      "name": "ineligible return settles with credit",
+      "script": [
+        { "tool": "lookup_order" },
+        { "set": { "eligibility_checked": true } },
+        { "tool": "offer_store_credit" },
+        { "expect": { "done": ["settle", "done"], "blocked": ["issue_refund"], "complete": true } }
+      ]
+    }
+  ]
+}

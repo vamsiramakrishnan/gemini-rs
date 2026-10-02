@@ -141,6 +141,14 @@ async fn run(
             return;
         }
     }
+    if let Some(status) = handle.task_snapshot()
+        && send(&mut sink, ServerMessage::TasksStatus { status })
+            .await
+            .is_err()
+    {
+        let _ = handle.disconnect().await;
+        return;
+    }
 
     // 3. Relay until either side ends, the time limit, or shutdown.
     let deadline = tokio::time::sleep(runtime.config.max_session);
@@ -210,6 +218,12 @@ async fn apply(handle: &LiveHandle, message: ClientMessage) -> Option<ServerMess
         ClientMessage::PlaybackDrained => handle.playback_drained().await,
         ClientMessage::UserSpeechStarted => handle.user_speech_started().await,
         ClientMessage::UserSpeechEnded => handle.user_speech_ended().await,
+        ClientMessage::TaskCommand { command } => {
+            return Some(match handle.task_command(command).await {
+                Ok(status) => ServerMessage::TasksStatus { status },
+                Err(message) => error(message),
+            });
+        }
         ClientMessage::UpdateFlowPostures { .. } => {
             return Some(error("posture edits are not accepted by adk-runtime"));
         }
@@ -218,8 +232,8 @@ async fn apply(handle: &LiveHandle, message: ClientMessage) -> Option<ServerMess
     result.err().map(|e| error(e.to_string()))
 }
 
-/// What a client sees of a session: its conversation, not its internals
-/// (state, tool calls and telemetry stay on the server).
+/// Forward conversation output and task proposals/receipts to the session's
+/// client. Private task state and runtime telemetry stay on the server.
 fn to_client(event: LiveEvent) -> Option<ServerMessage> {
     Some(match event {
         LiveEvent::Audio(data) => ServerMessage::Audio {
@@ -232,6 +246,7 @@ fn to_client(event: LiveEvent) -> Option<ServerMessage> {
         LiveEvent::VadStart => ServerMessage::VoiceActivityStart,
         LiveEvent::VadEnd => ServerMessage::VoiceActivityEnd,
         LiveEvent::TurnComplete => ServerMessage::TurnComplete,
+        LiveEvent::TasksChanged(status) => ServerMessage::TasksStatus { status },
         LiveEvent::Interrupted => ServerMessage::Interrupted,
         LiveEvent::Error(message) => ServerMessage::Error { message },
         _ => return None,
