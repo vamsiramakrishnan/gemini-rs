@@ -382,8 +382,10 @@ if ! $DRY_RUN; then
 
   # These are curated sources, checked against the workspace version by the
   # quickstart tests. Update them before validating the bumped tree.
-  sed -i -E "/^gemini-adk-fluent-rs =/ s/\"[0-9][^\"]*\"/\"${VERSION}\"/" \
-    README.md crates/gemini-adk-fluent-rs/README.md
+  mapfile -t VERSION_DOCS < <(grep -lE '^gemini-(adk|genai|memory)[a-z-]*[[:space:]]*=.*"[0-9]' \
+    README.md crates/*/README.md docs/src/*.md docs/user-guide/*.md)
+  sed -i -E "/^gemini-(adk|genai|memory)[a-z-]*[[:space:]]*=/ s/\"[0-9][^\"]*\"/\"${VERSION}\"/" \
+    "${VERSION_DOCS[@]}"
   VERSION_CORE="${VERSION%%[-+]*}"
   MAJOR_MINOR="${VERSION_CORE%.*}"
   sed -i -E "/hero-eyebrow/ s/>v[0-9]+\.[0-9]+ ·/>v${MAJOR_MINOR} ·/" \
@@ -411,7 +413,7 @@ step "Committing and tagging"
 if ! $DRY_RUN; then
   git add Cargo.toml Cargo.lock CHANGELOG.md \
     crates/gemini-adk-py/Cargo.toml crates/gemini-adk-py/Cargo.lock \
-    crates/gemini-adk-py/pyproject.toml README.md crates/gemini-adk-fluent-rs/README.md \
+    crates/gemini-adk-py/pyproject.toml "${VERSION_DOCS[@]}" \
     apps/docs/src/content/docs/index.mdx
   git commit -m "chore(release): ${TAG}
 
