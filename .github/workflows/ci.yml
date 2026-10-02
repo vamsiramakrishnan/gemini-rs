@@ -160,7 +160,7 @@ jobs:
         with:
           toolchain: "1.93.1"
           components: rustfmt, clippy
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - uses: actions/setup-go@v6
@@ -207,7 +207,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.1"
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - uses: Swatinem/rust-cache@v2
