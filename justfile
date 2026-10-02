@@ -241,20 +241,20 @@ release-dry version:
 
 # Preview commits since last tag (changelog preview before release)
 release-preview:
-    @PREV=$$(git tag --sort=-version:refname | head -1 2>/dev/null || echo ""); \
-     if [ -z "$$PREV" ]; then \
+    @PREV=$(git tag --sort=-version:refname | head -1 2>/dev/null || echo ""); \
+     if [ -z "$PREV" ]; then \
        echo "No tags found. All commits:"; git log --oneline HEAD; \
      else \
-       echo "Changes since $$PREV:"; \
-       git log --oneline --no-decorate "$$PREV..HEAD"; \
+       echo "Changes since $PREV:"; \
+       git log --oneline --no-decorate "$PREV..HEAD"; \
        echo ""; \
-       echo "Crates: gemini-genai-rs, gemini-adk-rs, gemini-adk-fluent-rs, gemini-adk-server-rs, gemini-adk-cli-rs"; \
-       echo "Current version: $$(grep -m1 '^version = ' Cargo.toml | sed 's/.*\"\(.*\)\".*/\1/')"; \
+       echo "Crates: gemini-genai-rs, gemini-adk-macros-rs, gemini-adk-rs, gemini-adk-fluent-rs, gemini-memory-rs, gemini-adk, gemini-adk-server-rs, gemini-adk-cli-rs"; \
+       echo "Current version: $(grep -m1 '^version = ' Cargo.toml | sed 's/.*\"\(.*\)\".*/\1/')"; \
      fi
 
 # Show current version and tag history
 release-status:
-    @echo "Current version: $$(grep -m1 '^version = ' Cargo.toml | sed 's/.*\"\(.*\)\".*/\1/')"
+    @echo "Current version: $(grep -m1 '^version = ' Cargo.toml | sed 's/.*\"\(.*\)\".*/\1/')"
     @echo ""
     @echo "Tags:"
     @git tag --sort=-version:refname | head -10 2>/dev/null || echo "  (none)"
@@ -262,7 +262,7 @@ release-status:
     @echo "Release branches:"
     @git branch -a 2>/dev/null | grep "release/" | head -10 || echo "  (none)"
     @echo ""
-    @echo "Published crates: gemini-genai-rs, gemini-adk-rs, gemini-adk-fluent-rs, gemini-adk-server-rs, gemini-adk-cli-rs"
+    @echo "Published crates: gemini-genai-rs, gemini-adk-macros-rs, gemini-adk-rs, gemini-adk-fluent-rs, gemini-memory-rs, gemini-adk, gemini-adk-server-rs, gemini-adk-cli-rs"
 
 # ─── Utilities ───────────────────────────────────────────────
 
