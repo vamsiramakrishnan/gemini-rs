@@ -39,7 +39,7 @@ For MCP servers that accept HTTP POST requests (StreamableHTTP transport):
 
 ```toml
 [dependencies]
-gemini-adk-rs = { version = "2.0", features = ["mcp-http"] }
+gemini-adk-rs = { version = "4.0.0", features = ["mcp-http"] }
 ```
 
 ```rust,ignore

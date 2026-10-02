@@ -51,7 +51,7 @@ cargo new my-agent && cd my-agent
 
 ```toml
 [dependencies]
-gemini-adk-fluent-rs = "2.0"
+gemini-adk-fluent-rs = "4.0.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-02
+
 ### Multi-capability agents
 
 - One live session can run a catalog of skills, with separate task state,
@@ -203,6 +205,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   affinity, CPU always allocated and the token secret. It prints each
   command before running it; `--dry-run` only prints. `--with-ui` and
   `--trace-to-cloud` are removed: they set variables nothing read.
+
+
+### Features
+
+- feat(studio)!: compose voice agents from skills and task-owned services
+- feat(devex): the small things a first look hits — docs.rs, Studio keys, READMEs
+### Bug Fixes
+
+- fix(release): synchronize installation snippets across canonical guides
+- fix(release): synchronize the published SDK installation example
+- fix(release): update quickstart and landing-page versions before validation
+### Documentation
+
+- docs: overhaul guides and shared agent instructions (#62)
+- docs: clarify product outcomes, first-use paths, and boundaries (#61)
+- docs: de-Claude gemini-rs README (#60)
+- docs(site): Astro + Starlight website synced from docs/, replacing mdBook (#58)
+### Other
+
+- Studio and runtime: sandboxing, one agent format, codegen, bundles, the new Studio, adk-runtime, telemetry (#72)
+- Release 3.0.0: Gemini 3.8 Live (live-verified), wire fixes, and the roadmap (#71)
+- Flow stack in the runtime, plus a developer-experience overhaul: ask/chat/stream, typed output, #[tool], honest configuration (#69)
+- Update version from 1.0 to 2.0 in README
 
 ## [3.0.0] - 2026-09-25
 
