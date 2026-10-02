@@ -380,6 +380,14 @@ if ! $DRY_RUN; then
   cargo update --workspace --manifest-path crates/gemini-adk-py/Cargo.toml --quiet \
     || die "Could not update the Python binding lockfile"
 
+  # These are curated sources, checked against the workspace version by the
+  # quickstart tests. Update them before validating the bumped tree.
+  sed -i -E "/^gemini-adk-fluent-rs =/ s/\"[0-9][^\"]*\"/\"${VERSION}\"/" README.md
+  VERSION_CORE="${VERSION%%[-+]*}"
+  MAJOR_MINOR="${VERSION_CORE%.*}"
+  sed -i -E "/hero-eyebrow/ s/>v[0-9]+\.[0-9]+ ·/>v${MAJOR_MINOR} ·/" \
+    apps/docs/src/content/docs/index.mdx
+
   # Re-validate AFTER the bump.
   #
   # The validation suite above ran against the pre-bump tree, so without this
@@ -402,7 +410,8 @@ step "Committing and tagging"
 if ! $DRY_RUN; then
   git add Cargo.toml Cargo.lock CHANGELOG.md \
     crates/gemini-adk-py/Cargo.toml crates/gemini-adk-py/Cargo.lock \
-    crates/gemini-adk-py/pyproject.toml
+    crates/gemini-adk-py/pyproject.toml README.md \
+    apps/docs/src/content/docs/index.mdx
   git commit -m "chore(release): ${TAG}
 
 Bump workspace version ${CURRENT} → ${VERSION}.
