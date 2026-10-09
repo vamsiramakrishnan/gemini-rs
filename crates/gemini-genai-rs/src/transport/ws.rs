@@ -68,6 +68,15 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 type WsStream =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
+/// Bytes tungstenite reads from the socket per frame read.
+///
+/// Its default, 128 KiB, is allocated and zero-filled for every connection:
+/// over a thousand sessions that is 128 MB for buffers that hold one
+/// message at a time. 16 KiB still takes a 40 ms audio message (about
+/// 2.7 KB) or an 8 KB-PCM one (about 11 KB) in a single read; anything
+/// larger is read in more than one.
+const READ_BUFFER_SIZE: usize = 16 * 1024;
+
 /// WebSocket transport using `tokio-tungstenite`.
 pub struct TungsteniteTransport {
     ws_write: Option<futures_util::stream::SplitSink<WsStream, Message>>,
@@ -165,7 +174,12 @@ impl Transport for TungsteniteTransport {
             request.headers_mut().insert(header_name, header_value);
         }
 
-        let (ws_stream, _response) = tokio_tungstenite::connect_async(request).await?;
+        let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+            .read_buffer_size(READ_BUFFER_SIZE);
+        // Nagle off: audio goes out as a stream of small messages, and a
+        // small write must not wait for the previous one to be acknowledged.
+        let (ws_stream, _response) =
+            tokio_tungstenite::connect_async_with_config(request, Some(config), true).await?;
         let (ws_write, ws_read) = ws_stream.split();
         self.ws_write = Some(ws_write);
         self.ws_read = Some(ws_read);
@@ -180,7 +194,7 @@ impl Transport for TungsteniteTransport {
         // Convert bytes to a UTF-8 text frame. The wire protocol sends JSON as text.
         let text = String::from_utf8(data)
             .map_err(|e| TungsteniteError::Request(format!("invalid UTF-8: {e}")))?;
-        ws_write.send(Message::Text(text)).await?;
+        ws_write.send(Message::Text(text.into())).await?;
         Ok(())
     }
 
@@ -191,9 +205,9 @@ impl Transport for TungsteniteTransport {
             .ok_or(TungsteniteError::NotConnected)?;
         loop {
             match ws_read.next().await {
-                Some(Ok(Message::Text(t))) => return Ok(Some(t.into_bytes())),
+                Some(Ok(Message::Text(t))) => return Ok(Some(bytes::Bytes::from(t).into())),
                 // IMPORTANT: Vertex AI sends JSON in Binary frames.
-                Some(Ok(Message::Binary(b))) => return Ok(Some(b)),
+                Some(Ok(Message::Binary(b))) => return Ok(Some(b.into())),
                 Some(Ok(Message::Close(frame))) => {
                     if let Some(ref cf) = frame {
                         tracing::warn!(code = %cf.code, reason = %cf.reason, "WebSocket close frame received");

@@ -186,7 +186,7 @@ async fn next_json(ws: &mut Client) -> Option<Value> {
 /// Send `start` and return the version the session reports.
 async fn start(ws: &mut Client) -> String {
     ws.send(tungstenite::Message::Text(
-        json!({"type": "start"}).to_string(),
+        json!({"type": "start"}).to_string().into(),
     ))
     .await
     .unwrap();
@@ -492,7 +492,7 @@ async fn drain_returns_early_when_sessions_finish() {
     eventually("drain to begin", || runtime.is_draining()).await;
     running
         .send(tungstenite::Message::Text(
-            json!({"type": "stop"}).to_string(),
+            json!({"type": "stop"}).to_string().into(),
         ))
         .await
         .unwrap();
@@ -638,7 +638,7 @@ async fn open_media(addr: SocketAddr, path: &str, call_sid: &str) -> Client {
         "streamSid": "MZ1"
     });
     for frame in [connected, start] {
-        ws.send(tungstenite::Message::Text(frame.to_string()))
+        ws.send(tungstenite::Message::Text(frame.to_string().into()))
             .await
             .unwrap();
     }
