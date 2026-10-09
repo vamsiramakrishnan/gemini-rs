@@ -1,8 +1,9 @@
 //! Auto-tracked session-level state signals.
 //!
-//! [`SessionSignals`] is called by the telemetry lane on every
-//! [`SessionEvent`] and transparently updates keys under the `session:`
-//! prefix in the shared [`State`].
+//! [`SessionSignals`] is called on every [`SessionEvent`] and transparently
+//! updates keys under the `session:` prefix in the shared [`State`]. The
+//! router touches the activity timestamp for audio and text inline; the
+//! telemetry lane handles every event that writes state.
 //!
 //! Hot-path timestamps use [`AtomicU64`] (nanos since start) instead of
 //! `Mutex<Instant>`, eliminating per-event mutex contention. Derived
@@ -249,7 +250,7 @@ impl SessionSignals {
     }
 
     #[inline]
-    fn touch_activity(&self) {
+    pub(crate) fn touch_activity(&self) {
         self.last_activity_ns
             .store(self.elapsed_ns(), Ordering::Relaxed);
     }

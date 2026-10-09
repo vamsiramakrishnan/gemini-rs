@@ -22,7 +22,9 @@ use super::handle::LiveHandle;
 use super::needs::{NeedsFulfillment, RepairConfig};
 use super::persistence::SessionPersistence;
 use super::phase::PhaseMachine;
-use super::processor::{ControlPlaneConfig, spawn_event_processor, spawn_telemetry_lane};
+use super::processor::{
+    ControlPlaneConfig, TelemetryTap, spawn_event_processor, spawn_telemetry_lane,
+};
 use super::session_signals::SessionSignals;
 use super::soft_turn::SoftTurnDetector;
 use super::steering::{ContextDelivery, SteeringMode};
@@ -586,7 +588,6 @@ pub(crate) struct SessionRuntime {
     /// User-facing writer handed to the `LiveHandle` (and used for greeting).
     user_writer: Arc<dyn SessionWriter>,
     event_rx: tokio::sync::broadcast::Receiver<gemini_genai_rs::prelude::SessionEvent>,
-    telem_rx: tokio::sync::broadcast::Receiver<gemini_genai_rs::prelude::SessionEvent>,
     on_usage_cb: Option<super::callbacks::UsageCallback>,
     live_event_tx: tokio::sync::broadcast::Sender<super::events::LiveEvent>,
     telem_cancel: CancellationToken,
@@ -617,9 +618,8 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         stack.lock().publish_timing(&state);
     }
 
-    // Subscribe twice: one for router → fast/ctrl, one for telemetry lane
+    // The router is the runtime's only subscriber; it feeds the telemetry lane.
     let event_rx = session.subscribe();
-    let telem_rx = session.subscribe();
 
     // Store initial phase's `needs` metadata for ContextBuilder.
     if let Some(ref pm) = plan.phase_machine {
@@ -638,7 +638,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
     let temporal_arc = plan.temporal.map(Arc::new);
     let background_tracker = Arc::new(BackgroundToolTracker::new());
 
-    // Create telemetry (auto-collected by the telemetry lane)
+    // Create telemetry (recorded by the router)
     let telemetry = Arc::new(SessionTelemetry::new());
     let telem_cancel = CancellationToken::new();
 
@@ -728,7 +728,6 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         writer,
         user_writer,
         event_rx,
-        telem_rx,
         on_usage_cb,
         live_event_tx,
         telem_cancel,
@@ -793,12 +792,14 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
     );
     let entered = session_span.enter();
 
-    // Spawn telemetry lane (SessionSignals + SessionTelemetry on own broadcast rx)
-    let session_signals = SessionSignals::new(rt.state.clone());
+    // Spawn the telemetry lane. The router records SessionTelemetry inline
+    // and forwards only the events whose SessionSignals write state.
+    let session_signals = Arc::new(SessionSignals::new(rt.state.clone()));
+    let (telemetry_tap, telem_rx) =
+        TelemetryTap::new(rt.telemetry.clone(), session_signals.clone());
     let _telem_handle = spawn_telemetry_lane(
-        rt.telem_rx,
+        telem_rx,
         session_signals,
-        rt.telemetry.clone(),
         rt.telem_cancel.clone(),
         rt.on_usage_cb,
     );
@@ -822,6 +823,7 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
         rt.execution_modes,
         rt.control_plane,
         rt.live_event_tx.clone(),
+        Some(telemetry_tap),
     );
     drop(entered);
 

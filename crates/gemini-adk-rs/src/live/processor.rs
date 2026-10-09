@@ -3,8 +3,10 @@
 //! **Fast lane**: audio, text, VAD (sync callbacks, never blocks)
 //! **Control lane**: tool calls, interruptions, lifecycle, transcript accumulation,
 //!   extractors, phases, watchers (async callbacks, can block)
-//! **Telemetry lane**: SessionSignals + SessionTelemetry (debounced state writes,
-//!   runs on its own broadcast receiver — zero work on the router hot path)
+//! **Telemetry lane**: SessionSignals state writes, the usage callback and the
+//!   100 ms timing flush. The router records SessionTelemetry's atomic counters
+//!   inline and forwards only the events that write state, so audio and text
+//!   deltas never wake this lane.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -328,7 +330,8 @@ pub(crate) struct SharedState {
 /// Runs the three-lane event processor.
 ///
 /// Returns JoinHandles for the fast consumer and control processor tasks.
-/// The telemetry lane is spawned separately via [`spawn_telemetry_lane`].
+/// The telemetry lane is spawned separately via [`spawn_telemetry_lane`] and
+/// fed by the router through a [`TelemetryTap`].
 /// Configuration for the control plane's new capabilities.
 pub(crate) struct ControlPlaneConfig {
     /// The connect-time system instruction, as text.
@@ -469,6 +472,7 @@ pub(crate) fn spawn_event_processor(
     execution_modes: std::collections::HashMap<String, super::background_tool::ToolExecutionMode>,
     control_plane: ControlPlaneConfig,
     live_event_tx: broadcast::Sender<LiveEvent>,
+    telemetry: Option<TelemetryTap>,
 ) -> (
     tokio::task::JoinHandle<()>,
     tokio::task::JoinHandle<()>,
@@ -503,8 +507,9 @@ pub(crate) fn spawn_event_processor(
     let (fast_tx, fast_rx) = mpsc::channel::<FastEvent>(512);
     let (ctrl_tx, ctrl_rx) = mpsc::channel::<ControlEvent>(512);
 
-    // Spawn the router task (reads broadcast, routes to lanes)
-    // NOTE: SessionSignals is NOT called here — it runs on the telemetry lane.
+    // Spawn the router task (reads broadcast, records telemetry counters,
+    // routes to lanes). SessionSignals' state writes stay on the telemetry lane.
+    let mut telemetry = telemetry;
     let fast_tx_clone = fast_tx.clone();
     let ctrl_tx_clone = ctrl_tx.clone();
     let shared_clone = shared.clone();
@@ -525,6 +530,9 @@ pub(crate) fn spawn_event_processor(
                         // while the `SessionHandle` is alive.
                         let terminal = matches!(event, SessionEvent::Disconnected(_));
                         let boundary = matches!(event, SessionEvent::TurnComplete);
+                        if let Some(tap) = telemetry.as_mut() {
+                            turn.span().in_scope(|| tap.observe(&event));
+                        }
                         route_event(event, &fast_tx_clone, &ctrl_tx_clone, &shared_clone)
                             .instrument(turn.span())
                             .await;
@@ -679,15 +687,121 @@ pub(crate) fn spawn_event_processor(
     (fast_handle, ctrl_handle, ctrl_tx_handle)
 }
 
-/// Spawns the telemetry lane — processes events on its own broadcast receiver.
+/// What the router hands the telemetry lane.
+pub(crate) enum TelemetryMsg {
+    /// An event whose [`SessionSignals`] handling writes state.
+    Event(SessionEvent),
+    /// The turn's response latency, measured by the router on the model's
+    /// first output.
+    ResponseLatency(Duration),
+}
+
+/// How many forwarded events the telemetry lane can fall behind by before
+/// the router drops them. Only low-rate events are forwarded.
+const TELEMETRY_LANE_CAPACITY: usize = 256;
+
+/// The router's side of telemetry.
 ///
-/// SessionSignals + SessionTelemetry run here, off the router hot path.
-/// Derived timing signals (silence_ms, elapsed_ms, remaining_budget_ms)
-/// are flushed every 100ms via debounced timer.
-pub(crate) fn spawn_telemetry_lane(
-    mut telem_rx: broadcast::Receiver<SessionEvent>,
-    signals: SessionSignals,
+/// [`SessionTelemetry`] is atomic counters, so the router records them inline,
+/// in event order, at a cost of a few atomic operations per event. Events
+/// whose [`SessionSignals`] handling writes state go on to the telemetry lane.
+/// Audio and text, the high-rate events, only touch an atomic timestamp and
+/// are not forwarded: before this, every audio frame woke a separate task,
+/// which cost more CPU than the rest of the runtime's per-frame work.
+pub(crate) struct TelemetryTap {
     telemetry: Arc<SessionTelemetry>,
+    signals: Arc<SessionSignals>,
+    lane: mpsc::Sender<TelemetryMsg>,
+    /// The turn's latest usage report, added to the totals at its end.
+    turn_usage: Option<gemini_genai_rs::prelude::UsageMetadata>,
+}
+
+impl TelemetryTap {
+    /// A tap feeding a new telemetry lane, and the lane's receiving end for
+    /// [`spawn_telemetry_lane`].
+    pub(crate) fn new(
+        telemetry: Arc<SessionTelemetry>,
+        signals: Arc<SessionSignals>,
+    ) -> (Self, mpsc::Receiver<TelemetryMsg>) {
+        let (lane, rx) = mpsc::channel(TELEMETRY_LANE_CAPACITY);
+        let tap = Self {
+            telemetry,
+            signals,
+            lane,
+            turn_usage: None,
+        };
+        (tap, rx)
+    }
+
+    /// Record one event's telemetry. Synchronous and cheap; never waits on
+    /// the telemetry lane.
+    pub(crate) fn observe(&mut self, event: &SessionEvent) {
+        match event {
+            SessionEvent::AudioData(data) => {
+                if let Some(latency) = self.telemetry.record_audio_out(data.len()) {
+                    tracing::info!(
+                        latency_ms = latency.as_millis() as u64,
+                        "first model audio after the user's turn"
+                    );
+                    self.forward(TelemetryMsg::ResponseLatency(latency));
+                }
+                self.signals.touch_activity();
+                return;
+            }
+            SessionEvent::TextDelta(_) => {
+                if let Some(latency) = self.telemetry.record_text_out() {
+                    tracing::info!(
+                        latency_ms = latency.as_millis() as u64,
+                        "first model text after the user's turn"
+                    );
+                    self.forward(TelemetryMsg::ResponseLatency(latency));
+                }
+                self.signals.touch_activity();
+                return;
+            }
+            SessionEvent::TextComplete(_) => {
+                self.signals.touch_activity();
+                return;
+            }
+            SessionEvent::VoiceActivityEnd => self.telemetry.record_vad_end(),
+            SessionEvent::Interrupted => self.telemetry.record_interruption(),
+            SessionEvent::TurnComplete => {
+                self.telemetry.record_turn_complete();
+                if let Some(usage) = self.turn_usage.take() {
+                    self.telemetry.record_turn_usage(&usage);
+                }
+            }
+            SessionEvent::VoiceActivityStart => self.telemetry.mark_turn_start(),
+            SessionEvent::Usage(usage) => {
+                self.telemetry.record_usage(
+                    usage.total_token_count,
+                    usage.prompt_token_count,
+                    usage.response_token_count,
+                    usage.cached_content_token_count,
+                    usage.thoughts_token_count,
+                );
+                self.turn_usage = Some(usage.clone());
+            }
+            _ => {}
+        }
+        self.forward(TelemetryMsg::Event(event.clone()));
+    }
+
+    fn forward(&self, msg: TelemetryMsg) {
+        // A closed lane means the session is shutting down.
+        if let Err(mpsc::error::TrySendError::Full(_)) = self.lane.try_send(msg) {
+            tracing::warn!("Telemetry lane lagged, dropped a session signal");
+        }
+    }
+}
+
+/// Spawns the telemetry lane: [`SessionSignals`] state writes for the events
+/// a [`TelemetryTap`] forwards, the `on_usage` callback, and the derived
+/// timing signals (`silence_ms`, `elapsed_ms`, `remaining_budget_ms`),
+/// flushed to state every 100 ms.
+pub(crate) fn spawn_telemetry_lane(
+    mut rx: mpsc::Receiver<TelemetryMsg>,
+    signals: Arc<SessionSignals>,
     cancel: CancellationToken,
     on_usage: Option<super::callbacks::UsageCallback>,
 ) -> tokio::task::JoinHandle<()> {
@@ -697,80 +811,27 @@ pub(crate) fn spawn_telemetry_lane(
         debounce.tick().await;
         // One span per turn; see `turn_trace` for why each lane keeps its own.
         let mut turn = super::turn_trace::TurnTrace::new();
-        // The turn's latest usage report, added to the totals at its end.
-        let mut turn_usage: Option<gemini_genai_rs::prelude::UsageMetadata> = None;
         loop {
             tokio::select! {
                 biased;
-                result = telem_rx.recv() => {
-                    match result {
-                        Ok(event) => {
-                            // Sync section: no await inside, so entering the
-                            // span for its duration is sound.
-                            turn.span().in_scope(|| {
-                                // SessionTelemetry: record atomic counters
-                                match &event {
-                                    SessionEvent::AudioData(data) => {
-                                        if let Some(latency) = telemetry.record_audio_out(data.len()) {
-                                            signals.record_response_latency(latency);
-                                            tracing::info!(
-                                                latency_ms = latency.as_millis() as u64,
-                                                "first model audio after the user's turn"
-                                            );
-                                        }
-                                    }
-                                    SessionEvent::TextDelta(_) => {
-                                        if let Some(latency) = telemetry.record_text_out() {
-                                            signals.record_response_latency(latency);
-                                            tracing::info!(
-                                                latency_ms = latency.as_millis() as u64,
-                                                "first model text after the user's turn"
-                                            );
-                                        }
-                                    }
-                                    SessionEvent::VoiceActivityEnd => {
-                                        telemetry.record_vad_end();
-                                    }
-                                    SessionEvent::Interrupted => {
-                                        telemetry.record_interruption();
-                                    }
-                                    SessionEvent::TurnComplete => {
-                                        telemetry.record_turn_complete();
-                                        if let Some(usage) = turn_usage.take() {
-                                            telemetry.record_turn_usage(&usage);
-                                        }
-                                    }
-                                    SessionEvent::VoiceActivityStart => {
-                                        telemetry.mark_turn_start();
-                                    }
-                                    SessionEvent::Usage(usage) => {
-                                        telemetry.record_usage(
-                                            usage.total_token_count,
-                                            usage.prompt_token_count,
-                                            usage.response_token_count,
-                                            usage.cached_content_token_count,
-                                            usage.thoughts_token_count,
-                                        );
-                                        turn_usage = Some(usage.clone());
-                                        if let Some(cb) = &on_usage {
-                                            cb(usage);
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                                // SessionSignals: update state keys + atomic timestamps
-                                signals.on_event(&event);
-                            });
-                            if matches!(event, SessionEvent::TurnComplete) {
-                                turn.advance();
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Lagged(n)) => {
-                            tracing::warn!(skipped = n, "Telemetry lane lagged");
-                        }
-                        Err(broadcast::error::RecvError::Closed) => break,
+                msg = rx.recv() => match msg {
+                    Some(TelemetryMsg::ResponseLatency(latency)) => {
+                        signals.record_response_latency(latency);
                     }
-                }
+                    Some(TelemetryMsg::Event(event)) => {
+                        turn.span().in_scope(|| {
+                            if let (SessionEvent::Usage(usage), Some(cb)) = (&event, &on_usage) {
+                                cb(usage);
+                            }
+                            signals.on_event(&event);
+                        });
+                        if matches!(event, SessionEvent::TurnComplete) {
+                            turn.advance();
+                        }
+                    }
+                    // The router is gone.
+                    None => break,
+                },
                 _ = debounce.tick() => {
                     // Flush derived timing signals to state (debounced)
                     signals.flush_timing();
@@ -1143,6 +1204,7 @@ mod tests {
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         // Send audio events
@@ -1196,6 +1258,7 @@ mod tests {
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         // Live Avatar video chunks
@@ -1250,6 +1313,7 @@ mod tests {
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         // Send audio, then interrupt, then more audio
@@ -1304,6 +1368,7 @@ mod tests {
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         let _ = event_tx.send(SessionEvent::TurnComplete);
@@ -1341,6 +1406,7 @@ mod tests {
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         // Send transcripts
@@ -1398,6 +1464,7 @@ mod tests {
             std::collections::HashMap::new(),
             control_plane,
             dummy_event_tx(),
+            None,
         );
 
         // The model streams 4 s of audio (24 kHz PCM16) and its whole
@@ -1472,6 +1539,7 @@ mod tests {
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         // Produce a turn with content
@@ -1547,6 +1615,7 @@ mod tests {
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         // No `InputTranscription` event at all — this is the text path.
@@ -1595,6 +1664,7 @@ mod tests {
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         // Hold the handle's sender across shutdown, as `LiveHandle` does.
@@ -1614,31 +1684,71 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn telemetry_lane_auto_collects() {
-        let (event_tx, _) = broadcast::channel(16);
-        let telem_rx = event_tx.subscribe();
-
+    async fn telemetry_tap_counts_inline_and_forwards_only_state_events() {
         let telemetry = Arc::new(SessionTelemetry::new());
-        let signals = SessionSignals::new(State::new());
-        let cancel = CancellationToken::new();
+        let signals = Arc::new(SessionSignals::new(State::new()));
+        let (mut tap, mut lane) = TelemetryTap::new(telemetry.clone(), signals);
 
-        let telem_handle =
-            spawn_telemetry_lane(telem_rx, signals, telemetry.clone(), cancel.clone(), None);
+        tap.observe(&SessionEvent::AudioData(Bytes::from_static(b"chunk1")));
+        tap.observe(&SessionEvent::AudioData(Bytes::from_static(b"chunk2")));
+        tap.observe(&SessionEvent::TextDelta("hi".into()));
+        tap.observe(&SessionEvent::VoiceActivityEnd);
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        tap.observe(&SessionEvent::AudioData(Bytes::from_static(b"response")));
 
-        // Send events
-        let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"chunk1")));
-        let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"chunk2")));
-        let _ = event_tx.send(SessionEvent::VoiceActivityEnd);
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        let _ = event_tx.send(SessionEvent::AudioData(Bytes::from_static(b"response")));
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
+        // Counters are recorded synchronously, in event order.
         let snap = telemetry.snapshot();
         assert_eq!(snap["audio_chunks_out"], 3);
-        assert!(snap["response_count"].as_u64().unwrap() >= 1);
+        assert_eq!(snap["response_count"], 1);
 
-        cancel.cancel();
-        let _ = telem_handle.await;
+        // Audio and text never reach the lane: only the state-writing VAD
+        // edge and the measured latency do.
+        assert!(matches!(
+            lane.try_recv(),
+            Ok(TelemetryMsg::Event(SessionEvent::VoiceActivityEnd))
+        ));
+        assert!(matches!(
+            lane.try_recv(),
+            Ok(TelemetryMsg::ResponseLatency(_))
+        ));
+        assert!(lane.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn telemetry_lane_writes_signals_and_reports_usage() {
+        let state = State::new();
+        let telemetry = Arc::new(SessionTelemetry::new());
+        let signals = Arc::new(SessionSignals::new(state.clone()));
+        let (mut tap, lane) = TelemetryTap::new(telemetry.clone(), signals.clone());
+        let usage_seen = Arc::new(AtomicU64::new(0));
+        let seen = usage_seen.clone();
+        let on_usage: super::super::callbacks::UsageCallback = Box::new(move |usage| {
+            seen.store(
+                usage.total_token_count.unwrap_or(0) as u64,
+                Ordering::SeqCst,
+            );
+        });
+        let cancel = CancellationToken::new();
+        let handle = spawn_telemetry_lane(lane, signals, cancel.clone(), Some(on_usage));
+
+        let usage: gemini_genai_rs::prelude::UsageMetadata =
+            serde_json::from_value(serde_json::json!({ "totalTokenCount": 42 })).expect("usage");
+        tap.observe(&SessionEvent::VoiceActivityStart);
+        tap.observe(&SessionEvent::Usage(usage));
+        tap.observe(&SessionEvent::TurnComplete);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert_eq!(state.session().get::<bool>("is_user_speaking"), Some(true));
+        assert_eq!(state.session().get::<u64>("total_token_count"), Some(42));
+        assert_eq!(usage_seen.load(Ordering::SeqCst), 42);
+        assert_eq!(telemetry.snapshot()["total_token_count"], 42);
+
+        // Dropping the router's tap ends the lane.
+        drop(tap);
+        tokio::time::timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("lane exits once the router is gone")
+            .expect("lane task");
     }
 
     #[tokio::test]
@@ -1754,6 +1864,7 @@ mod tests {
             execution_modes,
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         // Send a tool call
@@ -1837,6 +1948,7 @@ mod tests {
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         let _ = event_tx.send(SessionEvent::TurnComplete);
@@ -1892,6 +2004,7 @@ mod tests {
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         // Tool call starts the 5s dispatch, then the user barges in.
@@ -1954,6 +2067,7 @@ mod tests {
             std::collections::HashMap::new(),
             control_plane,
             dummy_event_tx(),
+            None,
         );
 
         // Accumulate state mid-turn — but never reach a TurnComplete, so the
@@ -2001,6 +2115,7 @@ mod tests {
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         let _ = event_tx.send(SessionEvent::Disconnected(None));
@@ -2059,6 +2174,7 @@ mod tests {
             std::collections::HashMap::new(),
             ControlPlaneConfig::default(),
             dummy_event_tx(),
+            None,
         );
 
         let _ = event_tx.send(SessionEvent::TurnComplete);
