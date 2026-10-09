@@ -120,6 +120,10 @@ again after the resumed setup. Shrinking the declarations
 from twelve tools to one cut the prompt from about 1,650 to about 700 tokens
 per turn. Extended Thinking reported no such drop.
 
+To have each phase or flow step declare its own tools, set
+`SteeringMode::ContextUpdate` and let the runtime send these updates; see
+[steering modes](steering-modes.md#contextupdate-gemini-38-live).
+
 `SessionConfig::supports_context_update()` reports whether the configured
 model accepts the message. Where it does not, the session reports a codec
 error event and stays up rather than sending a message that would close it.

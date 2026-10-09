@@ -684,6 +684,11 @@ impl Conversation {
     }
 
     /// Allow the given tools while this stage is active.
+    ///
+    /// Calls to other governed tools are refused. Under
+    /// [`SteeringMode::ContextUpdate`](gemini_adk_rs::live::SteeringMode::ContextUpdate)
+    /// the model is also offered only the admitted tools while the stage is
+    /// active.
     pub fn allow<I, S>(mut self, tools: I) -> Self
     where
         I: IntoIterator<Item = S>,

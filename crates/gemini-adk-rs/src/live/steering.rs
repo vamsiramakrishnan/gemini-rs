@@ -26,6 +26,7 @@ use crate::state::State;
 /// | `InstructionUpdate` | Replaced on every phase transition | Baked into instruction | Agents with radically different personas per phase |
 /// | `ContextInjection` | Set once at connect, never touched | Model-role context turns | Multi-phase apps with stable persona (recommended) |
 /// | `Hybrid` | Replaced on phase transition | Model-role context turns | Persona shifts + lightweight per-turn context |
+/// | `ContextUpdate` | Base + phase instruction, replaced on phase transition; tools re-declared per phase and step | Model-role context turns | Gemini 3.8 Live sessions whose phases or flow steps use different tools |
 ///
 /// # Example
 ///
@@ -79,6 +80,30 @@ pub enum SteeringMode {
     /// Use when phases represent genuinely different personas but you also
     /// want lightweight per-turn steering within each phase.
     Hybrid,
+
+    /// Replace the declared tools and the system instruction with a
+    /// `contextUpdate` message at each phase transition and flow-step change
+    /// (Gemini 3.8 Live).
+    ///
+    /// The model is offered only the tools the current phase lists
+    /// ([`Phase::tools_enabled`](crate::live::phase::Phase::tools_enabled))
+    /// and an enforcing flow admits, from the setup message on. Under the other
+    /// modes those lists are enforced by refusing calls, while the model is
+    /// offered every tool. When a step changes on a tool result, the new
+    /// declarations are sent before that tool response.
+    ///
+    /// The system instruction becomes the connect-time instruction followed by
+    /// the current phase's instruction: unlike an instruction update, a
+    /// `contextUpdate` replaces the instruction outright, so the base is kept
+    /// explicitly. An `instruction_template` still replaces the whole
+    /// instruction. Per-turn modifiers are delivered as model-role context
+    /// turns, as in `Hybrid`: each `contextUpdate` invalidates the server's
+    /// prefix cache, so it is sent only when the instruction or the tool set
+    /// changes.
+    ///
+    /// On a model without `contextUpdate` (Gemini 2.5 Live), the session
+    /// logs a warning at connect and steers as `Hybrid`.
+    ContextUpdate,
 }
 
 /// Build steering context from instruction modifiers.

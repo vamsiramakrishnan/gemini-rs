@@ -5,6 +5,7 @@ import { FlowState } from './FlowState';
 import { isFlowStatus, isRecord, type FlowStatus } from '../api';
 import { isTaskSessionSnapshot, type TaskCommand, type TaskSessionSnapshot } from '../tasks';
 import { TaskSession } from './TaskSession';
+import { declaresTools } from '../spec/graph';
 import { useSessionAudio } from '../audio';
 
 interface Line {
@@ -17,6 +18,7 @@ type Connection = { kind: 'idle' } | { kind: 'connecting' | 'connected' | 'ended
 /** Mounted for the workspace lifetime: navigating the dock never ends a session. */
 export function Run() {
   const revision = useStudio((s) => s.revision);
+  const declared = useStudio((s) => declaresTools(s.spec));
   const setLiveStatus = useStudio((s) => s.setLiveStatus);
   const [lines, setLines] = useState<Line[]>([]);
   const [connection, setConnection] = useState<Connection>({ kind: 'idle' });
@@ -238,7 +240,7 @@ export function Run() {
         </form>
       </div>
       <div className="run-state">
-        {tasks ? <TaskSession status={tasks} disabled={!connected || changed || taskPending} onCommand={sendTask} /> : status ? <FlowState status={status} /> : <p className="hint">Session progress appears here once the session starts.</p>}
+        {tasks ? <TaskSession status={tasks} disabled={!connected || changed || taskPending} onCommand={sendTask} /> : status ? <FlowState status={status} declared={declared} /> : <p className="hint">Session progress appears here once the session starts.</p>}
       </div>
     </div>
   );

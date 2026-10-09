@@ -3,6 +3,7 @@ import { api, type FlowStatus } from '../api';
 import { useStudio } from '../store';
 import { FlowState } from './FlowState';
 import { isObject } from '../spec/paths';
+import { declaresTools } from '../spec/graph';
 
 type Result = { revision: number; test: string } & (
   | { kind: 'ready'; snapshots: FlowStatus[] }
@@ -98,7 +99,7 @@ export function Preview({ test, onTest }: { test: string | null; onTest: (test: 
             {snapshot.event}
             {snapshot.failures?.length ? ` — ${snapshot.failures[0]}` : ''}
           </p>
-          <FlowState status={snapshot} />
+          <FlowState status={snapshot} declared={declaresTools(spec)} />
         </>
       )}
     </div>

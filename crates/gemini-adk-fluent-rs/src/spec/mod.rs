@@ -670,6 +670,10 @@ pub enum SteeringSpec {
     ContextInjection,
     /// Both.
     Hybrid,
+    /// Replace the instruction and the declared tools with `contextUpdate` at
+    /// each phase and flow-step change, so the model is offered only the
+    /// current tools (Gemini 3.8 Live; `hybrid` on other models).
+    ContextUpdate,
 }
 
 /// When batched context turns hit the wire.
@@ -2311,6 +2315,7 @@ fn apply_runtime(mut live: Live, runtime: &RuntimeSpec) -> Live {
             SteeringSpec::InstructionUpdate => SteeringMode::InstructionUpdate,
             SteeringSpec::ContextInjection => SteeringMode::ContextInjection,
             SteeringSpec::Hybrid => SteeringMode::Hybrid,
+            SteeringSpec::ContextUpdate => SteeringMode::ContextUpdate,
         });
     }
     if let Some(delivery) = runtime.context_delivery {
@@ -3351,6 +3356,29 @@ mod tests {
                 .warnings
                 .iter()
                 .any(|w| w.contains("include_thoughts"))
+        );
+    }
+
+    #[test]
+    fn context_update_steering_lowers_onto_the_builder() {
+        let spec = SessionSpec::from_value(json!({
+            "instruction": "x",
+            "flow": {"steps": [{"id": "only", "terminal": true}]},
+            "runtime": {"steering": "context_update"}
+        }))
+        .expect("parses");
+        assert!(spec.validate().valid);
+        let live = spec
+            .apply(Live::builder(), &State::new(), &SpecResources::default())
+            .expect("applies");
+        assert_eq!(
+            live.describe_contract().controls.steering_mode,
+            "ContextUpdate"
+        );
+        assert!(
+            spec.to_rust()
+                .contains(".steering_mode(SteeringMode::ContextUpdate)"),
+            "codegen emits the same mode"
         );
     }
 

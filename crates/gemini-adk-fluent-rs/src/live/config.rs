@@ -704,6 +704,10 @@ impl Live {
     /// - `InstructionUpdate` (default): Replace system instruction on transition.
     /// - `ContextInjection`: Inject steering via `send_client_content`.
     /// - `Hybrid`: Instruction on transition, context injection per turn.
+    /// - `ContextUpdate`: Gemini 3.8 Live only. On each phase or flow-step
+    ///   change, a `contextUpdate` replaces the instruction (base plus phase)
+    ///   and the declared tools, so the model is offered only the current
+    ///   phase's and step's tools. Falls back to `Hybrid` on other models.
     pub fn steering_mode(mut self, mode: SteeringMode) -> Self {
         self.steering_mode = mode;
         self

@@ -110,6 +110,11 @@ pub(in crate::live) async fn handle_turn_complete(
         transition_from,
         transition_to,
     } = evaluate_phase_transition(phase_machine, state, writer, &transcript_window).await;
+    // A `contextUpdate` replaces the system instruction outright, so under
+    // `ContextUpdate` steering the phase instruction follows the base.
+    if let Some(scope) = &control_plane.tool_scope {
+        resolved_instruction = resolved_instruction.map(|i| scope.instruction_for(&i));
+    }
 
     // 7c. Emit PhaseTransition LiveEvent (if a transition fired)
     if let (Some(from), Some(to)) = (&transition_from, &transition_to) {
@@ -143,8 +148,13 @@ pub(in crate::live) async fn handle_turn_complete(
     // 7d. Tool availability advisory (Phase 5). (Extracted so the active-tool
     // diffing + advisory projection is a named, harness-covered unit — see
     // `harness` below and docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
+    //
+    // With tools declared per phase (`ContextUpdate` steering) the model is
+    // offered only the phase's tools, so there is nothing to advise.
     project_tool_advisory(
-        transition_result.is_some() && control_plane.tool_advisory,
+        transition_result.is_some()
+            && control_plane.tool_advisory
+            && control_plane.tool_scope.is_none(),
         phase_machine,
         state,
         &mut context_buffer,
@@ -177,6 +187,16 @@ pub(in crate::live) async fn handle_turn_complete(
     // /grounding/unmet projection + on-enter firing is a named, harness-covered
     // unit — see `harness` below and docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
     govern_flow(&control_plane.flow, state, &mut context_buffer).await;
+
+    // 7h. Under `ContextUpdate` steering, the tools the phase and flow admit
+    // now, when they differ from those declared; sent with the instruction.
+    let scoped_tools = crate::live::tool_scope::rescope(
+        &control_plane.tool_scope,
+        phase_machine,
+        &control_plane.flow,
+        state,
+    )
+    .await;
 
     // 8. Fire watchers from net state mutations since the cursor.
     if let (Some(watchers), Some(cursor)) = (watchers, pre_watcher_cursor) {
@@ -222,9 +242,13 @@ pub(in crate::live) async fn handle_turn_complete(
     {
         let base = if let Some(pm) = phase_machine {
             let pm_guard = pm.lock().await;
-            pm_guard
-                .current_phase()
-                .map(|p| p.instruction.resolve_with_modifiers(state, &p.modifiers))
+            pm_guard.current_phase().map(|p| {
+                let phase_instruction = p.instruction.resolve_with_modifiers(state, &p.modifiers);
+                match &control_plane.tool_scope {
+                    Some(scope) => scope.instruction_for(&phase_instruction),
+                    None => phase_instruction,
+                }
+            })
         } else {
             None
         };
@@ -254,6 +278,7 @@ pub(in crate::live) async fn handle_turn_complete(
         shared,
         control_plane,
         resolved_instruction,
+        scoped_tools,
         context_buffer,
         &transition_result,
         should_prompt,
@@ -406,7 +431,7 @@ async fn project_tool_advisory(
 
 /// Project context-injection steering modifiers into the context buffer.
 ///
-/// Under `ContextInjection`/`Hybrid` steering, composes the active phase's
+/// Under `ContextInjection`/`Hybrid`/`ContextUpdate` steering, composes the active phase's
 /// instruction modifiers into a steering context line. Behavior-preserving lift
 /// of step 7f. No-op under `InstructionUpdate` steering or with no phase machine.
 async fn project_steering_context(
@@ -417,7 +442,7 @@ async fn project_steering_context(
 ) {
     if matches!(
         steering_mode,
-        SteeringMode::ContextInjection | SteeringMode::Hybrid
+        SteeringMode::ContextInjection | SteeringMode::Hybrid | SteeringMode::ContextUpdate
     ) && let Some(pm) = phase_machine
     {
         let machine = pm.lock().await;
@@ -717,10 +742,18 @@ async fn deliver_instruction_and_context(
     shared: &SharedState,
     control_plane: &ControlPlaneConfig,
     resolved_instruction: Option<String>,
+    scoped_tools: Option<Vec<gemini_genai_rs::prelude::Tool>>,
     mut context_buffer: Vec<gemini_genai_rs::prelude::Content>,
     transition_result: &Option<TransitionResult>,
     mut should_prompt: bool,
 ) {
+    // Under `ContextUpdate` steering the instruction and the re-scoped tools
+    // go out together, as one `contextUpdate`, ahead of the context turns.
+    let mut context_update = gemini_genai_rs::prelude::ContextUpdate::new();
+    if let Some(tools) = scoped_tools {
+        context_update = context_update.tools(tools);
+    }
+
     // Instruction delivery (dedup against last sent).
     if let Some(instruction) = resolved_instruction {
         match control_plane.steering_mode {
@@ -737,7 +770,22 @@ async fn deliver_instruction_and_context(
             SteeringMode::ContextInjection => {
                 context_buffer.push(gemini_genai_rs::prelude::Content::model(instruction));
             }
+            SteeringMode::ContextUpdate => {
+                let should_update = {
+                    let last = shared.last_instruction.lock();
+                    last.as_deref() != Some(&instruction)
+                };
+                if should_update {
+                    *shared.last_instruction.lock() = Some(instruction.clone());
+                    context_update = context_update.system_instruction(instruction);
+                }
+            }
         }
+    }
+    if !context_update.is_empty()
+        && let Err(e) = writer.update_context(context_update).await
+    {
+        tracing::warn!(error = %e, "contextUpdate at the turn boundary failed");
     }
 
     // Add on_enter_context content to the batch (if a phase transition produced it).
@@ -853,7 +901,16 @@ mod harness {
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum Write {
         Instruction(String),
-        ClientContent { turns: usize, turn_complete: bool },
+        ClientContent {
+            turns: usize,
+            turn_complete: bool,
+        },
+        /// A `contextUpdate`: the instruction text and the declared function
+        /// names, each `None` when the update leaves it unchanged.
+        ContextUpdate {
+            instruction: Option<String>,
+            tools: Option<Vec<String>>,
+        },
     }
 
     /// A `SessionWriter` that records the wire writes that matter for the scars.
@@ -907,6 +964,32 @@ mod harness {
         }
         async fn update_instruction(&self, instruction: String) -> Result<(), SessionError> {
             self.log.lock().push(Write::Instruction(instruction));
+            Ok(())
+        }
+        async fn update_context(
+            &self,
+            update: gemini_genai_rs::prelude::ContextUpdate,
+        ) -> Result<(), SessionError> {
+            let instruction = update.system_instruction.map(|c| {
+                c.parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        gemini_genai_rs::prelude::Part::Text { text } => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect::<String>()
+            });
+            let tools = update.tools.map(|tools| {
+                tools
+                    .iter()
+                    .filter_map(|t| t.function_declarations.as_ref())
+                    .flatten()
+                    .map(|d| d.name.clone())
+                    .collect()
+            });
+            self.log
+                .lock()
+                .push(Write::ContextUpdate { instruction, tools });
             Ok(())
         }
         async fn signal_activity_start(&self) -> Result<(), SessionError> {
@@ -1222,7 +1305,7 @@ mod harness {
             .into_iter()
             .filter_map(|w| match w {
                 Write::Instruction(text) => Some(text),
-                Write::ClientContent { .. } => None,
+                Write::ClientContent { .. } | Write::ContextUpdate { .. } => None,
             })
             .collect();
         assert_eq!(
@@ -1776,6 +1859,133 @@ mod harness {
             h.state.session().get::<Vec<String>>("active_tools"),
             Some(vec!["search".to_string()]),
             "new phase's tool set advertised + persisted"
+        );
+    }
+
+    /// Catalog, phases and scope for `ContextUpdate` steering: a `verify`
+    /// phase offering `verify_identity`, then a `serve` phase offering
+    /// `get_balance`, entered once `verified` is set.
+    fn context_update_harness() -> Harness {
+        use crate::live::tool_scope::ToolScope;
+        use gemini_genai_rs::prelude::{FunctionDeclaration, Tool};
+
+        let decl = |name: &str| FunctionDeclaration {
+            name: name.into(),
+            description: name.into(),
+            parameters: None,
+            behavior: None,
+        };
+        let catalog = vec![Tool::functions(vec![
+            decl("verify_identity"),
+            decl("get_balance"),
+        ])];
+        let mut verify = Phase::new("verify", "Verify the caller.");
+        verify.tools_enabled = Some(vec!["verify_identity".into()]);
+        verify.transitions.push(Transition {
+            target: "serve".into(),
+            guard: Arc::new(|s| s.get::<bool>("verified").unwrap_or(false)),
+            description: None,
+        });
+        let mut serve = Phase::new("serve", "Serve the caller.");
+        serve.tools_enabled = Some(vec!["get_balance".into()]);
+        let mut machine = PhaseMachine::new("verify");
+        machine.add_phase(verify);
+        machine.add_phase(serve);
+
+        let mut h = Harness::new();
+        h.phase = Some(tokio::sync::Mutex::new(machine));
+        h.control.steering_mode = SteeringMode::ContextUpdate;
+        h.control.base_instruction = Some("You are a bank agent.".into());
+        h.control.tool_scope = Some(Arc::new(ToolScope::new(
+            catalog,
+            h.control.base_instruction.clone(),
+            &["verify_identity".to_string()].into_iter().collect(),
+        )));
+        h
+    }
+
+    #[tokio::test]
+    async fn context_update_steering_replaces_instruction_and_tools_on_a_transition() {
+        let mut h = context_update_harness();
+        let _ = h.state.set("verified", true);
+
+        h.run_turn().await;
+
+        let updates: Vec<Write> = h
+            .writes()
+            .into_iter()
+            .filter(|w| !matches!(w, Write::ClientContent { .. }))
+            .collect();
+        assert_eq!(
+            updates,
+            vec![Write::ContextUpdate {
+                instruction: Some("You are a bank agent.\n\nServe the caller.".into()),
+                tools: Some(vec!["get_balance".into()]),
+            }],
+            "one contextUpdate carries the base-plus-phase instruction and only the phase's tools"
+        );
+        assert!(
+            !h.batches()
+                .concat()
+                .iter()
+                .any(|t| t.contains("I have access to these tools")),
+            "declared tools need no advisory"
+        );
+        assert_eq!(
+            h.state.session().get::<Vec<String>>("declared_tools"),
+            Some(vec!["get_balance".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn context_update_steering_sends_nothing_when_nothing_changed() {
+        let mut h = context_update_harness();
+        h.run_turn().await;
+        assert!(
+            !h.writes()
+                .iter()
+                .any(|w| matches!(w, Write::ContextUpdate { .. })),
+            "no transition and the same tools: no update, which would only reset the prefix cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn context_update_steering_follows_a_flow_step_at_the_turn_boundary() {
+        // No phase change: the flow alone moves from `verify` to `serve`.
+        let flow = Flow::new()
+            .step("verify")
+            .allow(["verify_identity"])
+            .done(Guard::is_true("verified"))
+            .step("serve")
+            .after("verify")
+            .allow(["get_balance"])
+            .done(Guard::is_true("served"))
+            .step("end")
+            .after("serve")
+            .terminal()
+            .build()
+            .expect("valid flow");
+        let mut h = context_update_harness();
+        h.phase = None;
+        h.control.flow = Some(
+            FlowMonitor::new(flow, Enforcement::Enforce)
+                .into_stack()
+                .into_shared(),
+        );
+        let _ = h.state.set("verified", true);
+
+        h.run_turn().await;
+
+        assert_eq!(
+            h.writes()
+                .into_iter()
+                .filter(|w| matches!(w, Write::ContextUpdate { .. }))
+                .collect::<Vec<_>>(),
+            vec![Write::ContextUpdate {
+                instruction: None,
+                tools: Some(vec!["get_balance".into()]),
+            }],
+            "the step's tools are re-declared; the instruction is left as it is"
         );
     }
 

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use gemini_genai_rs::prelude::{FunctionResponse, SessionEvent, SessionPhase, VadEvent};
+use gemini_genai_rs::protocol::ContextUpdate;
 use gemini_genai_rs::session::{SessionError, SessionHandle, SessionWriter};
 use parking_lot::Mutex;
 use serde::de::DeserializeOwned;
@@ -409,6 +410,17 @@ impl LiveHandle {
         instruction: impl Into<String>,
     ) -> Result<(), SessionError> {
         SessionWriter::update_instruction(&self.session, instruction.into()).await
+    }
+
+    /// Replace the declared tools and/or the system instruction mid-session
+    /// with a `contextUpdate` message (Gemini 3.8 Live). See
+    /// [`SessionHandle::update_context`](gemini_genai_rs::session::SessionHandle::update_context).
+    ///
+    /// With [`SteeringMode::ContextUpdate`](crate::live::SteeringMode::ContextUpdate)
+    /// the runtime sends these itself at phase and step changes; call this
+    /// only for changes the runtime does not know about.
+    pub async fn update_context(&self, update: ContextUpdate) -> Result<(), SessionError> {
+        SessionWriter::update_context(&self.session, update).await
     }
 
     /// Send tool responses manually (if not using auto-dispatch).

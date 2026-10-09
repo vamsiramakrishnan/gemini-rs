@@ -239,6 +239,7 @@ pub(in crate::live) async fn run_control_lane(
                         &extractors,
                         &middleware,
                         &control_plane.flow,
+                        &control_plane.tool_scope,
                         &mut tool_gate,
                         &completion_tx,
                         &barge_in,
@@ -250,6 +251,17 @@ pub(in crate::live) async fn run_control_lane(
                     // A background tool finished — advance the governed flow through
                     // the same gate as inline tools, deduped by call_id (#7).
                     tool_gate.observe_completion(&call_id, &name, ok, &control_plane.flow, &state);
+                    // The step may have changed: re-declare the tools it admits.
+                    if let Some(tools) = crate::live::tool_scope::rescope(
+                        &control_plane.tool_scope,
+                        &phase_machine,
+                        &control_plane.flow,
+                        &state,
+                    )
+                    .await
+                    {
+                        crate::live::tool_scope::send_tools(&writer, tools).await;
+                    }
                 }
                 ControlEvent::ToolCallCancelled(ids) => {
                     tracing::debug!(?ids, "server cancelled tool calls");

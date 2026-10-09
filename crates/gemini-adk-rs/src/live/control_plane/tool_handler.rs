@@ -58,6 +58,7 @@ pub(in crate::live) async fn handle_tool_calls(
     extractors: &[Arc<dyn TurnExtractor>],
     middleware: &Arc<crate::middleware::MiddlewareChain>,
     flow: &Option<crate::flow::SharedFlowStack>,
+    tool_scope: &Option<Arc<crate::live::tool_scope::ToolScope>>,
     tool_gate: &mut ToolGate,
     completion_tx: &tokio::sync::mpsc::WeakSender<crate::live::processor::ControlEvent>,
     barge_in: &CancellationToken,
@@ -329,6 +330,15 @@ pub(in crate::live) async fn handle_tool_calls(
         });
     }
 
+    // 4b. A result that moved the flow to another step changes the tools the
+    // model may call next. Under `ContextUpdate` steering they are re-declared
+    // before the responses, so the model reads the result with the new set.
+    if let Some(tools) =
+        crate::live::tool_scope::rescope(tool_scope, phase_machine, flow, state).await
+    {
+        crate::live::tool_scope::send_tools(writer, tools).await;
+    }
+
     // 5. Send tool responses (standard + ack) back to Gemini
     if !responses.is_empty()
         && let Err(e) = writer.send_tool_response(responses).await
@@ -550,6 +560,135 @@ mod tests {
         }
     }
 
+    /// Records the order of tool responses and `contextUpdate`s.
+    #[derive(Default)]
+    struct OrderWriter {
+        log: parking_lot::Mutex<Vec<String>>,
+    }
+    #[async_trait]
+    impl SessionWriter for OrderWriter {
+        async fn send_audio(&self, _: bytes::Bytes) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_text(&self, _: String) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_tool_response(&self, r: Vec<FunctionResponse>) -> Result<(), SessionError> {
+            for resp in r {
+                self.log.lock().push(format!("response:{}", resp.name));
+            }
+            Ok(())
+        }
+        async fn send_client_content(&self, _: Vec<Content>, _: bool) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_video(&self, _: bytes::Bytes) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn update_instruction(&self, _: String) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn update_context(
+            &self,
+            update: gemini_genai_rs::prelude::ContextUpdate,
+        ) -> Result<(), SessionError> {
+            let names: Vec<String> = update
+                .tools
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|t| t.function_declarations.as_ref())
+                .flatten()
+                .map(|d| d.name.clone())
+                .collect();
+            self.log.lock().push(format!("declare:{}", names.join(",")));
+            Ok(())
+        }
+        async fn signal_activity_start(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn signal_activity_end(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn disconnect(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_step_change_on_a_tool_result_redeclares_tools_before_the_response() {
+        use crate::live::tool_scope::ToolScope;
+        use gemini_genai_rs::prelude::Tool;
+
+        let mut d = ToolDispatcher::new();
+        for name in ["verify_identity", "get_balance"] {
+            d.register(SimpleTool::new(name, name, None, |_| async {
+                Ok(json!({ "ok": true }))
+            }));
+        }
+        let catalog: Vec<Tool> = d.to_tool_declarations();
+        let dispatcher = Some(Arc::new(d));
+        let flow = Flow::new()
+            .step("verify")
+            .allow(["verify_identity"])
+            .done(Guard::called_ok("verify_identity"))
+            .step("serve")
+            .after("verify")
+            .allow(["get_balance"])
+            .done(Guard::called_ok("get_balance"))
+            .step("end")
+            .after("serve")
+            .terminal()
+            .build()
+            .expect("valid flow");
+        let flow = Some(
+            FlowMonitor::new(flow, Enforcement::Enforce)
+                .into_stack()
+                .into_shared(),
+        );
+        let scope = Some(Arc::new(ToolScope::new(
+            catalog,
+            None,
+            &["verify_identity".to_string()].into_iter().collect(),
+        )));
+        let rec = Arc::new(OrderWriter::default());
+        let writer: Arc<dyn SessionWriter> = rec.clone();
+        let state = State::new();
+        let mut transcript = TranscriptBuffer::new();
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel::<ControlEvent>(8);
+
+        handle_tool_calls(
+            vec![FunctionCall {
+                name: "verify_identity".into(),
+                args: json!({}),
+                id: Some("c1".into()),
+            }],
+            &EventCallbacks::default(),
+            &dispatcher,
+            &writer,
+            &state,
+            &None,
+            &mut transcript,
+            &std::collections::HashMap::new(),
+            &None,
+            &[],
+            &Arc::new(MiddlewareChain::new()),
+            &flow,
+            &scope,
+            &mut ToolGate::new(),
+            &ctrl_tx.downgrade(),
+            &CancellationToken::new(),
+            &tx,
+        )
+        .await;
+
+        assert_eq!(
+            *rec.log.lock(),
+            vec!["declare:get_balance", "response:verify_identity"],
+            "the model reads the result with the next step's tools declared"
+        );
+    }
+
     fn dispatcher_with_counter(counter: Arc<AtomicUsize>) -> Arc<ToolDispatcher> {
         let mut d = ToolDispatcher::new();
         d.register(SimpleTool::new("echo", "echoes", None, move |args| {
@@ -588,6 +727,7 @@ mod tests {
             &None,
             &[],
             &middleware,
+            &None,
             &None,
             &mut ToolGate::new(),
             &ctrl_tx.downgrade(),
@@ -751,6 +891,7 @@ mod tests {
                 &[],
                 &middleware,
                 &flow,
+                &None,
                 &mut gate,
                 &ctrl_tx.downgrade(),
                 &barge_in,
@@ -826,6 +967,7 @@ mod tests {
             &[],
             &middleware,
             &None,
+            &None,
             &mut ToolGate::new(),
             &ctrl_tx.downgrade(),
             &barge_in,
@@ -895,6 +1037,7 @@ mod tests {
             &[],
             &middleware,
             &flow,
+            &None,
             &mut gate,
             &ctrl_tx.downgrade(),
             &CancellationToken::new(),

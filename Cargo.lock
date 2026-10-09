@@ -1062,6 +1062,7 @@ dependencies = [
 name = "example-context-update-spike"
 version = "4.0.0"
 dependencies = [
+ "gemini-adk-fluent-rs",
  "gemini-genai-rs",
  "serde_json",
  "tokio",

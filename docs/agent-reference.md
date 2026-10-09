@@ -676,7 +676,7 @@ let artifacts = A::json_output("report", "Analysis report")
 | `TextAgentTool` | Wraps a TextAgent as a callable tool |
 | `BackgroundAgentDispatcher` | Fire-and-forget agent dispatch |
 | `SoftTurnDetector` | Proactive silence awareness for `proactiveAudio` sessions |
-| `SteeringMode` | How phase machine steers: InstructionUpdate, ContextInjection, Hybrid |
+| `SteeringMode` | How phase machine steers: InstructionUpdate, ContextInjection, Hybrid, ContextUpdate (re-declares tools per phase and step on Gemini 3.8 Live) |
 | `ContextDelivery` | When context hits wire: Immediate (during TurnComplete) or Deferred (with next user send) |
 | `PendingContext` / `DeferredWriter` | Deferred context buffer + SessionWriter wrapper |
 | `NeedsFulfillment` / `RepairConfig` / `RepairAction` | Conversation repair protocol |

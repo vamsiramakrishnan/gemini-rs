@@ -6,7 +6,8 @@
 use super::errors::SessionError;
 use super::events::SessionEvent;
 use super::state::SessionPhase;
-use crate::protocol::{Content, FunctionResponse};
+use crate::protocol::{Content, ContextUpdate, FunctionResponse};
+use crate::transport::CodecError;
 use async_trait::async_trait;
 use bytes::Bytes;
 use tokio::sync::broadcast;
@@ -33,6 +34,19 @@ pub trait SessionWriter: Send + Sync + 'static {
     async fn send_video(&self, jpeg_data: Bytes) -> Result<(), SessionError>;
     /// Update the system instruction mid-session.
     async fn update_instruction(&self, instruction: String) -> Result<(), SessionError>;
+    /// Replace the declared tools and/or the system instruction mid-session
+    /// with a `contextUpdate` message; see
+    /// [`SessionHandle::update_context`](super::SessionHandle::update_context).
+    ///
+    /// The default refuses with a codec error, as the session does on a
+    /// model without `contextUpdate`: a writer that cannot reach a live
+    /// session must not report tools as replaced.
+    async fn update_context(&self, update: ContextUpdate) -> Result<(), SessionError> {
+        let _ = update;
+        Err(SessionError::Codec(CodecError::Serialize(
+            "this session writer does not send contextUpdate".into(),
+        )))
+    }
     /// Signal that user speech activity has started.
     async fn signal_activity_start(&self) -> Result<(), SessionError>;
     /// Signal that user speech activity has ended.

@@ -848,6 +848,7 @@ fn gen_runtime(runtime: &RuntimeSpec) -> String {
             SteeringSpec::InstructionUpdate => "InstructionUpdate",
             SteeringSpec::ContextInjection => "ContextInjection",
             SteeringSpec::Hybrid => "Hybrid",
+            SteeringSpec::ContextUpdate => "ContextUpdate",
         };
         let _ = writeln!(out, "        .steering_mode(SteeringMode::{variant})");
     }

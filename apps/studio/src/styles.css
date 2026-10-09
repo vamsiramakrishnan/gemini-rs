@@ -345,6 +345,10 @@ button.tab.active {
 .chip-tool {
   border-color: #4cc38a66;
 }
+.chip-tool.declared {
+  border-color: #4cc38a;
+  font-weight: 600;
+}
 .chip-tool.blocked {
   border-color: var(--err);
   color: var(--err);
