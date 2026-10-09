@@ -45,7 +45,7 @@ pub struct ServerContentMessage {
 }
 
 /// Payload for server content.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerContentPayload {
     /// Model output content for this turn.
@@ -354,6 +354,16 @@ impl ServerMessage {
             Ok(ServerMessage::VoiceActivity(VoiceActivityMessage {
                 voice_activity,
             }))
+        } else if let Some(usage_metadata) = raw.usage_metadata {
+            // Usage on its own, with no content: deliver it as content with an
+            // empty payload so the usage still reaches the session, rather
+            // than dropping it as an unknown message.
+            Ok(ServerMessage::ServerContent(Box::new(
+                ServerContentMessage {
+                    server_content: ServerContentPayload::default(),
+                    usage_metadata: Some(usage_metadata),
+                },
+            )))
         } else {
             // No known key: unknown message type (forward compatibility).
             serde_json::from_str::<serde_json::Value>(text).map(ServerMessage::Unknown)
