@@ -386,6 +386,9 @@ impl Live {
         if let Some(interval) = self.telemetry_interval {
             builder = builder.telemetry_interval(interval);
         }
+        if let Some(capacity) = self.event_capacity {
+            builder = builder.event_capacity(capacity);
+        }
 
         // Spawn fire-and-forget warm-up tasks for OOB LLMs
         // (pre-establishes TCP+TLS so first extract call is fast)

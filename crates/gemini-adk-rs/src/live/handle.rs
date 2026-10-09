@@ -603,7 +603,9 @@ impl LiveHandle {
     /// Subscribe to semantic events from the processor.
     ///
     /// Returns a broadcast receiver. Call multiple times for independent
-    /// subscribers. Zero-cost when no subscribers exist.
+    /// subscribers. A subscriber that falls more than
+    /// [`LiveSessionBuilder::event_capacity`](super::builder::LiveSessionBuilder::event_capacity)
+    /// events behind receives `RecvError::Lagged` and skips the oldest.
     pub fn events(&self) -> broadcast::Receiver<super::events::LiveEvent> {
         self.event_tx.subscribe()
     }

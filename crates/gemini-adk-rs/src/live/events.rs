@@ -1,8 +1,8 @@
 //! Semantic events emitted by the L1 processor.
 //!
 //! Subscribe via `LiveHandle::events()` (broadcast receiver) or
-//! `LiveHandle::stream()` (a [`futures_util::Stream`]). Zero-cost when no
-//! subscribers.
+//! `LiveHandle::stream()` (a [`futures_util::Stream`]). Sending with no
+//! subscribers is a no-op.
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -12,6 +12,12 @@ use bytes::Bytes;
 use futures_util::Stream;
 use tokio::sync::broadcast;
 
+/// How many [`LiveEvent`]s a subscriber can fall behind before it skips the
+/// oldest, unless [`LiveSessionBuilder::event_capacity`](super::builder::LiveSessionBuilder::event_capacity)
+/// says otherwise. Matches the depth the wire layer gives its own
+/// subscribers (`TransportConfig::event_channel_capacity`).
+pub const DEFAULT_EVENT_CAPACITY: usize = 512;
+
 /// Semantic events emitted by the Live session processor.
 ///
 /// The L1 equivalent of L0's [`SessionEvent`](gemini_genai_rs::prelude::SessionEvent).
@@ -19,8 +25,10 @@ use tokio::sync::broadcast;
 /// phases transitioned, tools executed).
 ///
 /// Subscribe via [`LiveHandle::events()`](super::handle::LiveHandle::events).
-/// Multiple independent subscribers supported. Zero-cost when no subscribers
-/// exist (`broadcast::send` with 0 receivers is a no-op).
+/// Multiple independent subscribers supported. Sending with no subscribers
+/// is a no-op (`broadcast::send` with 0 receivers stores nothing); the
+/// buffer itself is allocated when the session starts, sized by
+/// [`LiveSessionBuilder::event_capacity`](super::builder::LiveSessionBuilder::event_capacity).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum LiveEvent {

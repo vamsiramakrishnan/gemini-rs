@@ -76,17 +76,27 @@ with.
 
 | Sessions | Turns | Idle RSS per session | Connect p99 | First text p50 / p99 | Turn p99 |
 |---|---|---|---|---|---|
-| 100 | 10 | 787 kB | 1.2 ms | 21.7 / 22.6 ms | 22.6 ms |
-| 500 | 5 | 772 kB | 1.7 ms | 22.8 / 26.2 ms | 26.0 ms |
+| 100 | 10 | 244 kB | 0.5 ms | 21.9 / 23.0 ms | 23.0 ms |
+| 500 | 5 | 221 kB | 0.6 ms | 22.9 / 24.9 ms | 24.9 ms |
 
 Subtracting the 20 ms scripted delay, the runtime adds about 2 ms at p50 and
-under 3 ms at p99 with 100 concurrent sessions, and about 6 ms at p99 with
-500, all turns in flight at once. Idle memory is under 1 MB per session, so a
-process holding 1,000 idle sessions needs on the order of 800 MB before any
+3 ms at p99 with 100 concurrent sessions, and about 5 ms at p99 with 500,
+all turns in flight at once. Idle memory is about 250 kB per session, so a
+process holding 1,000 idle sessions needs on the order of 250 MB before any
 audio buffers, tools or extractors are added.
 
-RSS after disconnect stays above the baseline (21 MB after the 100-session
-run, 75 MB after 500). That is allocator retention of freed pages, not a
+Most of that figure is two event buffers that each session allocates in full
+when it starts, at roughly 170 bytes per slot: the wire layer's
+(`TransportConfig::event_channel_capacity`, 512 slots) and the runtime's
+(`Live::event_capacity` or `LiveSessionBuilder::event_capacity`, 512 slots).
+Each is about 90 kB. The runtime's capacity is how many events a
+`handle.events()` subscriber can fall behind before it skips the oldest.
+Raise it only for a subscriber that does slow work inline; every built-in
+consumer (the voice pump, telephony bridges, the web bridge) hands events on
+without waiting.
+
+RSS after disconnect stays above the baseline (31 MB after the 100-session
+run, 119 MB after 500). That is allocator retention of freed pages, not a
 per-session leak: a second run of the same size in a fresh process reaches
 the same `after_connect_kb`, and `after_disconnect_kb` does not grow with
 repeated runs. Use `--hold-secs` with a long idle period to look for the
