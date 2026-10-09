@@ -68,6 +68,7 @@ pub struct LiveSessionBuilder {
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
     clock: Option<crate::clock::SharedClock>,
     lockstep: Option<Arc<super::processor::Lockstep>>,
+    event_capacity: usize,
 }
 
 impl LiveSessionBuilder {
@@ -100,6 +101,7 @@ impl LiveSessionBuilder {
             redactor: None,
             clock: None,
             lockstep: None,
+            event_capacity: super::events::DEFAULT_EVENT_CAPACITY,
         }
     }
 
@@ -313,6 +315,22 @@ impl LiveSessionBuilder {
     /// and `LiveEvent::TurnMetrics` to the event stream.
     pub fn telemetry_interval(mut self, interval: std::time::Duration) -> Self {
         self.telemetry_interval = Some(interval);
+        self
+    }
+
+    /// Set how many [`LiveEvent`](super::events::LiveEvent)s a subscriber
+    /// can fall behind before it starts skipping the oldest ones.
+    ///
+    /// The buffer behind [`LiveHandle::events`](super::handle::LiveHandle::events)
+    /// is allocated in full when the session starts, at roughly 170 bytes
+    /// per slot, whether or not anyone subscribes. The default,
+    /// [`DEFAULT_EVENT_CAPACITY`](super::events::DEFAULT_EVENT_CAPACITY), is
+    /// enough for a subscriber that hands each event on without waiting.
+    /// Raise it when a subscriber does slow work inline, such as pacing
+    /// audio to a device from its receive loop; a lagging subscriber gets
+    /// `RecvError::Lagged` and skips events. Values below 1 are raised to 1.
+    pub fn event_capacity(mut self, capacity: usize) -> Self {
+        self.event_capacity = capacity.max(1);
         self
     }
 
@@ -564,6 +582,7 @@ impl LiveSessionBuilder {
             redactor: self.redactor,
             clock: self.clock,
             lockstep: self.lockstep,
+            event_capacity: self.event_capacity,
         })
     }
 }
@@ -609,6 +628,7 @@ pub(crate) struct SessionPlan {
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
     clock: Option<crate::clock::SharedClock>,
     lockstep: Option<Arc<super::processor::Lockstep>>,
+    event_capacity: usize,
 }
 
 /// Fully wired runtime for a connected Live session, ready for lane spawning.
@@ -768,7 +788,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
     // Create LiveEvent broadcast channel
     use super::events::LiveEvent;
     use tokio::sync::broadcast;
-    let (live_event_tx, _) = broadcast::channel::<LiveEvent>(4096);
+    let (live_event_tx, _) = broadcast::channel::<LiveEvent>(plan.event_capacity);
 
     SessionRuntime {
         session,
@@ -1156,6 +1176,58 @@ mod tests {
             plan.soft_turn_timeout,
             Some(std::time::Duration::from_secs(2))
         );
+    }
+
+    #[test]
+    fn into_plan_carries_event_capacity() {
+        let default = LiveSessionBuilder::new(SessionConfig::new("test-key"))
+            .into_plan()
+            .expect("plan derivation should succeed");
+        assert_eq!(
+            default.event_capacity,
+            super::super::events::DEFAULT_EVENT_CAPACITY
+        );
+
+        let custom = LiveSessionBuilder::new(SessionConfig::new("test-key"))
+            .event_capacity(64)
+            .into_plan()
+            .expect("plan derivation should succeed");
+        assert_eq!(custom.event_capacity, 64);
+
+        // `broadcast::channel(0)` panics, so zero is raised to one.
+        let zero = LiveSessionBuilder::new(SessionConfig::new("test-key"))
+            .event_capacity(0)
+            .into_plan()
+            .expect("plan derivation should succeed");
+        assert_eq!(zero.event_capacity, 1);
+    }
+
+    #[tokio::test]
+    async fn event_capacity_bounds_how_far_a_subscriber_can_lag() {
+        use super::super::events::LiveEvent;
+        use gemini_genai_rs::session::SessionState;
+        use tokio::sync::broadcast::error::RecvError;
+
+        let (command_tx, _command_rx) = tokio::sync::mpsc::channel(8);
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        let (phase_tx, phase_rx) = tokio::sync::watch::channel(SessionPhase::Active);
+        let state = Arc::new(SessionState::with_events(phase_tx, event_tx.clone()));
+        let session = SessionHandle::new(command_tx, event_tx, state, phase_rx);
+
+        let plan = LiveSessionBuilder::new(SessionConfig::new("test-key"))
+            .event_capacity(4)
+            .into_plan()
+            .expect("plan derivation should succeed");
+        let runtime = build_runtime(plan, session);
+        let mut rx = runtime.live_event_tx.subscribe();
+        for _ in 0..5 {
+            let _ = runtime.live_event_tx.send(LiveEvent::TurnComplete);
+        }
+        // Five sends into four slots: the oldest is gone.
+        assert!(matches!(rx.recv().await, Err(RecvError::Lagged(1))));
+        for _ in 0..4 {
+            assert!(matches!(rx.recv().await, Ok(LiveEvent::TurnComplete)));
+        }
     }
 
     #[test]

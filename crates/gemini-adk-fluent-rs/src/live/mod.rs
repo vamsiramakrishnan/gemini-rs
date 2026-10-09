@@ -186,6 +186,7 @@ pub struct Live {
     pub(crate) session_id: Option<String>,
     pub(crate) tool_advisory: bool,
     pub(crate) telemetry_interval: Option<Duration>,
+    pub(crate) event_capacity: Option<usize>,
     pub(crate) clock: Option<gemini_adk_rs::clock::SharedClock>,
     // Middleware layers run around tool dispatch in the control lane.
     pub(crate) middleware_layers: Vec<Arc<dyn gemini_adk_rs::middleware::Middleware>>,
@@ -313,6 +314,7 @@ impl Live {
             session_id: None,
             tool_advisory: true,
             telemetry_interval: None,
+            event_capacity: None,
             clock: None,
             middleware_layers: Vec::new(),
             confirmation_provider: None,
@@ -575,6 +577,17 @@ impl Live {
     /// and `LiveEvent::TurnMetrics` at this rate.
     pub fn telemetry_interval(mut self, interval: Duration) -> Self {
         self.telemetry_interval = Some(interval);
+        self
+    }
+
+    /// Set how many events a [`LiveHandle::events`](gemini_adk_rs::live::LiveHandle::events)
+    /// subscriber can fall behind before it skips the oldest. The default
+    /// (512) suits subscribers that hand events on without waiting; raise
+    /// it for one that does slow work inline. See
+    /// [`LiveSessionBuilder::event_capacity`](gemini_adk_rs::live::LiveSessionBuilder::event_capacity)
+    /// for the memory cost.
+    pub fn event_capacity(mut self, capacity: usize) -> Self {
+        self.event_capacity = Some(capacity);
         self
     }
 
