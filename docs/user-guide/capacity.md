@@ -54,13 +54,12 @@ before it starts the next turn; do the same in a load generator of your own,
 or the first-text figures will be attributed to the wrong turn.
 
 **Known limitation.** The runtime's first-text latency is recorded by the
-telemetry lane, a third consumer of the L0 event broadcast, while
-`send_text` stamps the send time from the caller's task. If the next
-`send_text` is issued before the telemetry lane has consumed the previous
-turn's first delta, that delta is attributed to the new send and the new
-turn's real first delta is dropped, so `telemetry_response_count` falls
-short. The window is the lane's scheduling lag, microseconds in practice,
-and only `--think-ms 0` reaches it. Keep a non-zero think time when the
+router as it consumes the L0 event broadcast, while `send_text` stamps the
+send time from the caller's task. If the next `send_text` is issued before
+the router has consumed the previous turn's first delta, that delta is
+attributed to the new send and the new turn's real first delta is dropped,
+so `telemetry_response_count` falls short. The window is the router's
+scheduling lag, microseconds in practice, and only `--think-ms 0` reaches it. Keep a non-zero think time when the
 cross-check matters.
 
 `--think-ms` is the pause between one session's turns. With `--think-ms 0`

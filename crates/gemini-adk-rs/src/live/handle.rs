@@ -553,8 +553,8 @@ impl LiveHandle {
             }
         }
 
-        // Stop the telemetry lane (it runs on its own broadcast receiver and
-        // would otherwise idle on its debounce timer for the handle's lifetime).
+        // Stop the telemetry lane now rather than when the router exits; until
+        // then it would keep running its debounce timer.
         self.telem_cancel.cancel();
         result
     }

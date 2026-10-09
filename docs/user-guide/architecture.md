@@ -119,23 +119,26 @@ runs extractors concurrently via `join_all`.
 
 ### Telemetry Lane (async, debounced)
 
-Runs on its own broadcast receiver. Collects `SessionSignals` (activity
-timestamps, timing, token usage) and `SessionTelemetry` (atomic counters for
-audio chunks, tool calls, interruptions, latency tracking, token counts).
-Flushes periodically (100 ms debounce) on a separate receiver. Measure
-scheduling and queue overhead under the target workload.
+Writes `SessionSignals` to state (activity, timing, token usage) and flushes
+the derived timing signals every 100 ms. The router forwards it only the
+events whose signals write state: VAD edges, transcripts, phase changes,
+usage, lifecycle. Audio and text deltas never wake it. Measure scheduling and
+queue overhead under the target workload.
 
 The telemetry lane also handles `UsageMetadata` events from the Gemini API,
-recording prompt/response/cached/thoughts token counts in both SessionSignals
-(as `session:` state keys) and SessionTelemetry (as atomic counters). The
+recording prompt/response/cached/thoughts token counts as `session:` state
+keys; the router has already added them to SessionTelemetry's counters. The
 `.on_usage()` callback fires here for real-time token observation.
 
 ### The Router
 
-The router is the zero-work dispatcher that sits between the broadcast
-channel and the two processing lanes. It pattern-matches each `SessionEvent`
-and sends it to the correct lane(s) via mpsc channels. No session signals,
-no telemetry, no allocations on the hot path.
+The router is the dispatcher that sits between the broadcast channel and the
+lanes. It pattern-matches each `SessionEvent` and sends it to the correct
+lane(s) via mpsc channels. It also records `SessionTelemetry` (atomic
+counters for audio chunks, interruptions, latency tracking and token counts)
+inline, in event order, so the per-frame cost is a few atomic operations
+rather than a wake of another task. No state writes and no allocations on
+the audio hot path.
 
 ## Key Traits
 

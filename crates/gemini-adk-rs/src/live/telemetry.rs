@@ -1,9 +1,9 @@
 //! Lightweight session telemetry — atomic fast-lane counters + periodic aggregation.
 //!
 //! All hot-path operations (counter increments, timestamp recording) are lock-free
-//! and zero-allocation (~1ns per call). Aggregation only happens periodically on
-//! the telemetry lane or at turn boundaries, ensuring no impact on the
-//! latency-sensitive audio pipeline.
+//! and zero-allocation (~1ns per call), so the router records them inline.
+//! Aggregation only happens at snapshot time or at turn boundaries, ensuring no
+//! impact on the latency-sensitive audio pipeline.
 //!
 //! The number a voice product is judged on is **response latency**: the time
 //! from the user's end of speech to the model's first audio byte. It is
@@ -208,7 +208,7 @@ impl LatencyRecorder {
 ///
 /// Designed for the three-lane processor model:
 /// - **Fast lane** (sync, <1ms): No telemetry calls — pure audio/text forwarding.
-/// - **Telemetry lane** (async, debounced): Calls `record_*` methods on every event.
+/// - **Router**: Calls `record_*` methods on every event, in event order.
 ///   These use only atomic operations — no allocations, no locks, no syscalls.
 /// - **Control lane** (async): Calls `snapshot()` at turn boundaries to get
 ///   aggregated stats as a JSON value ready to send to the browser.
@@ -283,7 +283,7 @@ impl SessionTelemetry {
 
     // ── Atomic methods (~1ns each) ──
 
-    /// Record an outgoing audio chunk. Called from the telemetry lane.
+    /// Record an outgoing audio chunk. Called from the router.
     ///
     /// Returns the response latency when this chunk is the model's first
     /// output after the user's end of speech (or text send) — once per turn,
