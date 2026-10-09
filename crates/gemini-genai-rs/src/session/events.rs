@@ -7,7 +7,7 @@
 
 use super::errors::SessionError;
 use super::state::SessionPhase;
-use crate::protocol::{Content, FunctionCall, FunctionResponse, UsageMetadata};
+use crate::protocol::{Content, ContextUpdate, FunctionCall, FunctionResponse, UsageMetadata};
 use bytes::Bytes;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
@@ -142,6 +142,10 @@ pub enum SessionCommand {
     SendVideo(Bytes),
     /// Update system instruction mid-session (sends client_content with role=system).
     UpdateInstruction(String),
+    /// Replace the declared tools and/or the system instruction mid-session
+    /// (`contextUpdate`). Once sent, the update also becomes the setup for
+    /// any reconnect.
+    UpdateContext(ContextUpdate),
     /// Gracefully disconnect.
     Disconnect,
 }

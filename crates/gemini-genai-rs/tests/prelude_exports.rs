@@ -35,6 +35,12 @@ fn type_safety_additions() {
 }
 
 #[test]
+fn context_update_is_accessible() {
+    let update = ContextUpdate::new().system_instruction("x").clear_tools();
+    assert!(!update.is_empty());
+}
+
+#[test]
 fn existing_types_still_accessible() {
     let _model = ModelId::from_static("models/gemini-2.0-flash-live-001");
     let _voice = Voice::Puck;

@@ -843,6 +843,76 @@ pub enum EndpointEnvError {
     Missing(&'static str),
 }
 
+/// A mid-session replacement of the model preamble: the system instruction,
+/// the declared tools, or both. Sent as a `contextUpdate` message.
+///
+/// Only the fields that are set change. `tools: None` keeps the current
+/// tools; `Some(vec![])` clears them. A new system instruction replaces the
+/// one given at setup. Updates are processed in order with the rest of the
+/// client's input, so an update sent before a tool response is in effect
+/// when the model reads that response.
+///
+/// Both fields are part of the model preamble, so every update invalidates
+/// the server's prefix cache. Send one only when something changed.
+///
+/// Gemini 3.8 Live accepts it on Google AI and Vertex AI; Gemini 2.5 Live
+/// does not (see [`SessionConfig::supports_context_update`]).
+///
+/// ```
+/// # use gemini_genai_rs::protocol::{ContextUpdate, FunctionDeclaration, Tool};
+/// let update = ContextUpdate::new()
+///     .system_instruction("The caller is verified. Never read balances aloud.")
+///     .tools(vec![Tool::functions(vec![FunctionDeclaration {
+///         name: "get_balance".into(),
+///         description: "Fetch the verified caller's balance.".into(),
+///         parameters: None,
+///         behavior: None,
+///     }])]);
+/// assert!(!update.is_empty());
+/// assert!(ContextUpdate::new().is_empty());
+/// ```
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct ContextUpdate {
+    /// Replacement system instruction. `None` keeps the current one.
+    pub system_instruction: Option<Content>,
+    /// Replacement tool list. `None` keeps the current tools; an empty list
+    /// clears them.
+    pub tools: Option<Vec<Tool>>,
+}
+
+impl ContextUpdate {
+    /// An update that changes nothing until a field is set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Replace the system instruction with `instruction`.
+    pub fn system_instruction(mut self, instruction: impl Into<String>) -> Self {
+        self.system_instruction = Some(Content {
+            role: None,
+            parts: vec![Part::text(instruction)],
+        });
+        self
+    }
+
+    /// Replace the whole tool list with `tools`.
+    pub fn tools(mut self, tools: Vec<Tool>) -> Self {
+        self.tools = Some(tools);
+        self
+    }
+
+    /// Remove every declared tool.
+    pub fn clear_tools(self) -> Self {
+        self.tools(Vec::new())
+    }
+
+    /// `true` when the update would change nothing.
+    pub fn is_empty(&self) -> bool {
+        self.system_instruction.is_none() && self.tools.is_none()
+    }
+}
+
 /// Complete session configuration — the builder entrypoint.
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
@@ -1505,6 +1575,20 @@ impl SessionConfig {
     /// prefer context injection or a new session for a persona change.
     pub fn supports_system_role_updates(&self) -> bool {
         self.is_vertex()
+    }
+
+    /// Whether the configured model accepts a `contextUpdate` message, which
+    /// replaces the declared tools and the system instruction mid-session
+    /// (see [`ContextUpdate`](crate::protocol::ContextUpdate)).
+    ///
+    /// Measured on Google AI (2026-10-09): Gemini 3.8 Live and 3.8 Live
+    /// Extended Thinking apply it; Gemini 2.5 native audio closes the session
+    /// over it (1007). The Vertex AI Live API defines the same message. Where
+    /// this is `false`, declare every tool at setup and change the
+    /// instruction with
+    /// [`update_instruction`](crate::session::SessionHandle::update_instruction).
+    pub fn supports_context_update(&self) -> bool {
+        self.model_profile().context_update
     }
 
     /// Settings in this config that the target does not accept and that

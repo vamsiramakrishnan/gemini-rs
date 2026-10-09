@@ -252,6 +252,227 @@ mod tests {
         assert_eq!(super::session_loop::close_code("no code"), None);
     }
 
+    /// A server that accepts every setup and, on the first connection, sends
+    /// `goAway` as soon as it has received a `contextUpdate`.
+    struct GoAwayAfterUpdate {
+        connects: usize,
+        current: std::collections::VecDeque<Vec<u8>>,
+        sent: std::sync::Arc<parking_lot::Mutex<Vec<serde_json::Value>>>,
+        /// Issue a resumption handle on the first connection, so the
+        /// reconnect resumes.
+        issue_handle: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::transport::ws::Transport for GoAwayAfterUpdate {
+        type Error = std::io::Error;
+
+        async fn connect(
+            &mut self,
+            _url: &str,
+            _headers: Vec<(String, String)>,
+        ) -> Result<(), Self::Error> {
+            self.connects += 1;
+            self.current = vec![br#"{"setupComplete":{}}"#.to_vec()].into();
+            if self.issue_handle && self.connects == 1 {
+                self.current.push_back(
+                    br#"{"sessionResumptionUpdate":{"newHandle":"h-1","resumable":true}}"#.to_vec(),
+                );
+            }
+            Ok(())
+        }
+
+        async fn send(&mut self, data: Vec<u8>) -> Result<(), Self::Error> {
+            let message: serde_json::Value = serde_json::from_slice(&data).unwrap();
+            if self.connects == 1 && message.get("contextUpdate").is_some() {
+                self.current
+                    .push_back(br#"{"goAway":{"timeLeft":"0s"}}"#.to_vec());
+            }
+            self.sent.lock().push(message);
+            Ok(())
+        }
+
+        async fn recv(&mut self) -> Result<Option<Vec<u8>>, Self::Error> {
+            match self.current.pop_front() {
+                Some(frame) => Ok(Some(frame)),
+                None => std::future::pending().await,
+            }
+        }
+
+        async fn close(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reconnect_after_a_context_update_declares_the_updated_preamble() {
+        let sent = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let transport = GoAwayAfterUpdate {
+            connects: 0,
+            current: Default::default(),
+            sent: sent.clone(),
+            issue_handle: false,
+        };
+        let config = SessionConfig::from_vertex("p", "us-central1", "t")
+            .model(ModelId::LIVE_3_8)
+            .system_instruction("Unverified caller.")
+            .add_tool(Tool::functions(vec![FunctionDeclaration {
+                name: "verify_identity".into(),
+                description: "Verify the caller.".into(),
+                parameters: None,
+                behavior: None,
+            }]));
+        let transport_config = TransportConfig {
+            max_reconnect_attempts: 1,
+            reconnect_base_delay_ms: 10,
+            reconnect_max_delay_ms: 10,
+            ..no_reconnect_config()
+        };
+        let handle = connect_with(config, transport_config, transport, JsonCodec)
+            .await
+            .unwrap();
+        handle.wait_for_phase(SessionPhase::Active).await;
+        handle
+            .update_context(
+                ContextUpdate::new()
+                    .system_instruction("Verified caller.")
+                    .tools(vec![Tool::functions(vec![FunctionDeclaration {
+                        name: "get_balance".into(),
+                        description: "Fetch the balance.".into(),
+                        parameters: None,
+                        behavior: None,
+                    }])]),
+            )
+            .await
+            .unwrap();
+
+        let setups = || -> Vec<serde_json::Value> {
+            sent.lock()
+                .iter()
+                .filter(|m| m.get("setup").is_some())
+                .cloned()
+                .collect()
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while setups().len() < 2 && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let setups = setups();
+        assert_eq!(setups.len(), 2, "one setup per connection");
+        let declared = |i: usize| {
+            setups[i]
+                .pointer("/setup/tools/0/functionDeclarations/0/name")
+                .cloned()
+        };
+        let instruction = |i: usize| {
+            setups[i]
+                .pointer("/setup/systemInstruction/parts/0/text")
+                .cloned()
+        };
+        assert_eq!(declared(0), Some("verify_identity".into()));
+        assert_eq!(instruction(0), Some("Unverified caller.".into()));
+        assert_eq!(
+            declared(1),
+            Some("get_balance".into()),
+            "the reconnect declares the tools in effect, not the starting ones"
+        );
+        assert_eq!(instruction(1), Some("Verified caller.".into()));
+        let updates = sent
+            .lock()
+            .iter()
+            .filter(|m| m.get("contextUpdate").is_some())
+            .count();
+        assert_eq!(
+            updates, 1,
+            "a fresh session needs no replay: its setup declares the update"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_resume_replays_the_fields_updates_replaced() {
+        let sent = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let transport = GoAwayAfterUpdate {
+            connects: 0,
+            current: Default::default(),
+            sent: sent.clone(),
+            issue_handle: true,
+        };
+        let mut config = SessionConfig::from_vertex("p", "us-central1", "t")
+            .model(ModelId::LIVE_3_8)
+            .system_instruction("Unverified caller.")
+            .add_tool(Tool::functions(vec![FunctionDeclaration {
+                name: "verify_identity".into(),
+                description: "Verify the caller.".into(),
+                parameters: None,
+                behavior: None,
+            }]));
+        config.session_resumption = Some(SessionResumptionConfig {
+            handle: None,
+            transparent: None,
+        });
+        let transport_config = TransportConfig {
+            max_reconnect_attempts: 1,
+            reconnect_base_delay_ms: 10,
+            reconnect_max_delay_ms: 10,
+            ..no_reconnect_config()
+        };
+        let handle = connect_with(config, transport_config, transport, JsonCodec)
+            .await
+            .unwrap();
+        handle.wait_for_phase(SessionPhase::Active).await;
+        handle
+            .update_context(ContextUpdate::new().tools(vec![Tool::functions(vec![
+                FunctionDeclaration {
+                    name: "get_balance".into(),
+                    description: "Fetch the balance.".into(),
+                    parameters: None,
+                    behavior: None,
+                },
+            ])]))
+            .await
+            .unwrap();
+
+        // A resume ignores the setup's tools, and the client cannot tell
+        // whether the update reached the server before the goAway.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        // The frames sent after the second (resumed) setup, once there is one.
+        let after_resume = || -> Option<Vec<serde_json::Value>> {
+            let sent = sent.lock();
+            let resume_at = sent
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.get("setup").is_some())
+                .nth(1)?
+                .0;
+            assert_eq!(
+                sent[resume_at].pointer("/setup/sessionResumption/handle"),
+                Some(&serde_json::json!("h-1"))
+            );
+            Some(sent[resume_at + 1..].to_vec())
+        };
+        let replay = loop {
+            let found = after_resume()
+                .and_then(|after| after.into_iter().find(|m| m.get("contextUpdate").is_some()));
+            if let Some(replay) = found {
+                break replay;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "no replay after the resume"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        assert_eq!(
+            replay.pointer("/contextUpdate/tools/tools/0/functionDeclarations/0/name"),
+            Some(&serde_json::json!("get_balance")),
+            "the resumed session is brought back to the updated tools"
+        );
+        assert!(
+            replay.pointer("/contextUpdate/systemInstruction").is_none(),
+            "only the fields an update replaced are sent again"
+        );
+    }
+
     #[tokio::test]
     async fn a_reconnect_after_go_away_resumes_with_the_latest_handle() {
         let setups = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));

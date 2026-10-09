@@ -23,6 +23,7 @@ members = [
     "examples/voice-spec-demo",
     "examples/redteam-call",
     "examples/session-bench",
+    "examples/context-update-spike",
     "tools/gemini-adk-transpiler-rs",
     "tools/gemini-adk-cli-rs",
 ]

@@ -7,7 +7,7 @@ use super::errors::SessionError;
 use super::events::{SessionCommand, SessionEvent};
 use super::state::{SessionPhase, SessionState};
 use super::traits::{SessionReader, SessionWriter};
-use crate::protocol::{Content, FunctionResponse};
+use crate::protocol::{Content, ContextUpdate, FunctionResponse};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::sync::Arc;
@@ -174,6 +174,23 @@ impl SessionHandle {
         instruction: impl Into<String>,
     ) -> Result<(), SessionError> {
         self.send_command(SessionCommand::UpdateInstruction(instruction.into()))
+            .await
+    }
+
+    /// Replace the declared tools and/or the system instruction mid-session
+    /// with a `contextUpdate` message (Gemini 3.8 Live).
+    ///
+    /// Only the fields set on `update` change, and an empty update sends
+    /// nothing. Each update invalidates the server's prefix cache, so send
+    /// one only when the tool set or instruction actually changes. Once sent,
+    /// the update also shapes the setup message of any reconnect.
+    ///
+    /// On a model without `contextUpdate` (Gemini 2.5 Live; see
+    /// [`SessionConfig::supports_context_update`](crate::protocol::SessionConfig::supports_context_update))
+    /// nothing is sent and the session reports a
+    /// [`SessionError::Codec`] error event; the session itself stays up.
+    pub async fn update_context(&self, update: ContextUpdate) -> Result<(), SessionError> {
+        self.send_command(SessionCommand::UpdateContext(update))
             .await
     }
 

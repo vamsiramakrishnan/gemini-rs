@@ -75,22 +75,7 @@ impl SessionConfig {
     ///   `avatarConfig.avatarName` / `customizedAvatar`.
     pub fn to_setup_message(&self) -> SetupMessage {
         let profile = self.model_profile();
-        let tools = if self.supports_async_tools() {
-            self.tools.clone()
-        } else {
-            self.tools
-                .iter()
-                .map(|tool| {
-                    let mut t = tool.clone();
-                    if let Some(ref mut decls) = t.function_declarations {
-                        for d in decls.iter_mut() {
-                            d.behavior = None;
-                        }
-                    }
-                    t
-                })
-                .collect()
-        };
+        let tools = self.wire_tools(&self.tools);
 
         let mut generation_config = self.generation_config.clone();
         let mut output_audio_transcription = self.output_audio_transcription.clone();
@@ -143,6 +128,52 @@ impl SessionConfig {
     pub fn to_setup_json(&self) -> String {
         serde_json::to_string(&self.to_setup_message())
             .expect("setup message serialization is infallible for valid config")
+    }
+
+    /// Build the `contextUpdate` message for `update`, with tools shaped
+    /// for this target the same way the setup message shapes them.
+    pub fn to_context_update_message(&self, update: &ContextUpdate) -> ContextUpdateMessage {
+        ContextUpdateMessage {
+            context_update: ContextUpdatePayload {
+                system_instruction: update.system_instruction.clone(),
+                tools: update.tools.as_ref().map(|tools| ContextUpdateTools {
+                    tools: self.wire_tools(tools),
+                }),
+            },
+        }
+    }
+
+    /// Fold `update` into this configuration, so the next setup message (on
+    /// a reconnect) declares the current tools and instruction rather than
+    /// the ones the session started with. The session loop calls this when
+    /// it sends an update.
+    pub fn apply_context_update(&mut self, update: &ContextUpdate) {
+        if let Some(instruction) = &update.system_instruction {
+            self.system_instruction = Some(instruction.clone());
+        }
+        if let Some(tools) = &update.tools {
+            self.tools = tools.clone();
+        }
+    }
+
+    /// `tools` as this target accepts them: `behavior` is removed from
+    /// function declarations where async tool calling is not supported.
+    fn wire_tools(&self, tools: &[Tool]) -> Vec<Tool> {
+        if self.supports_async_tools() {
+            return tools.to_vec();
+        }
+        tools
+            .iter()
+            .map(|tool| {
+                let mut t = tool.clone();
+                if let Some(ref mut decls) = t.function_declarations {
+                    for d in decls.iter_mut() {
+                        d.behavior = None;
+                    }
+                }
+                t
+            })
+            .collect()
     }
 }
 
@@ -218,6 +249,35 @@ pub struct ToolResponseMessage {
 pub struct ToolResponsePayload {
     /// Function call responses to return to the model.
     pub function_responses: Vec<FunctionResponse>,
+}
+
+/// Mid-session preamble update message (`contextUpdate`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextUpdateMessage {
+    /// The context update payload.
+    pub context_update: ContextUpdatePayload,
+}
+
+/// Payload of a `contextUpdate` message. Unset fields are left off the wire,
+/// which is what keeps their current values on the server.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextUpdatePayload {
+    /// Replacement system instruction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_instruction: Option<Content>,
+    /// Replacement tool list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<ContextUpdateTools>,
+}
+
+/// The `tools` wrapper of a `contextUpdate`. Its presence means "replace":
+/// the list is always serialized, so an empty list clears every tool.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextUpdateTools {
+    /// The complete replacement tool list.
+    pub tools: Vec<Tool>,
 }
 
 /// Activity signal for client-side VAD events.
