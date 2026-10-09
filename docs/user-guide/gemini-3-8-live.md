@@ -68,6 +68,58 @@ Context injected mid-session as client content with `turnComplete: false`
 triggering speech, and the model uses it. So is a tool response scheduled
 `SILENT`: it adds its result to the context without the model speaking.
 
+## Replacing tools and the instruction mid-session
+
+`SessionHandle::update_context` sends a `contextUpdate` message. It replaces
+the declared tools, the system instruction, or both, without starting a new
+session:
+
+```rust,ignore
+use gemini_genai_rs::prelude::*;
+
+session
+    .update_context(
+        ContextUpdate::new()
+            .system_instruction("The caller is verified. Read balances with play_value.")
+            .tools(vec![Tool::functions(servicing_tools)]),
+    )
+    .await?;
+```
+
+Only the fields you set change. `tools(vec![])` clears every tool, and an
+update with nothing set sends nothing. Updates are processed in order with
+the rest of your input. So an update sent just before a tool response is in
+effect when the model reads that response, and the response can point the
+model at a tool the update has just declared.
+
+Each update invalidates the server's prefix cache, so send one when the tool
+set or the instruction actually changes, not on every turn. After an update
+reaches the wire, a reconnect declares the updated tools and instruction in
+its setup message, not the ones the session started with.
+
+Measured on Google AI on 2026-10-09 with `examples/context-update-spike`
+(three runs, same results each time):
+
+| Model | Result |
+|---|---|
+| Gemini 3.8 Live | Applied. The model called a tool that only the update declared, said it had no tool for one the update removed, and followed a replaced instruction on the next turn. |
+| Gemini 3.8 Live Extended Thinking | Applied, as above. |
+| Gemini 2.5 native audio | Refused: the session closes with 1007, "Request contains an invalid argument". |
+
+With Gemini 3.8 Live, an update sent while a tool call was pending was
+accepted. The tool response then named the next step, and the model called
+the tool the update had just declared. An update sent while the model was
+speaking did not interrupt it. After a resume whose setup declared the old
+tools, the updated tools were still in effect. Shrinking the declarations
+from twelve tools to one cut the prompt from about 1,650 to about 700 tokens
+per turn. Extended Thinking reported no such drop.
+
+`SessionConfig::supports_context_update()` reports whether the configured
+model accepts the message. Where it does not, the session reports a codec
+error event and stays up rather than sending a message that would close it.
+Vertex AI defines the same message; the measurements above are from Google
+AI.
+
 ## Live Avatar (Vertex AI)
 
 `.avatar(..)` makes the model answer with synchronized 24 FPS video and sets

@@ -79,6 +79,7 @@ cargo run -p example-sip-agent       # 0.0.0.0:5060/udp — raw SIP agent, dial 
 cargo run -p example-audiohook       # 0.0.0.0:8080 — AudioHook bot server for contact-center platforms
 cargo run -p example-redteam-call    # no server — two Live sessions call each other, adversarially
 cargo run -p example-session-bench   # no server, no model — N concurrent sessions, memory and turn latency
+cargo run -p example-context-update-spike  # no server — probes how the model handles a mid-session contextUpdate
 ```
 
 ### Multi-app Web UI
@@ -171,6 +172,15 @@ Writes a transcript, a stereo recording (collector left, caller right, so crosst
 - **Run:** `GEMINI_API_KEY=… cargo run -p example-redteam-call -- --seconds 300 --turns 40`
 - **Features:** 24→16 kHz resampling, realtime-paced jitter buffer, open-line silence so VAD can close a turn, barge-in flush, full duplex on purpose
 - **Costs money:** two concurrent native-audio sessions for the wall-clock duration of the call
+
+### context-update-spike (L0 wire)
+
+Six live probes of `contextUpdate`, the message that replaces the declared tools and the system instruction mid-session. Each probe opens its own session over a raw transport, so it controls exactly which frame goes out when. It sends the update even where the session codec would refuse it, so it reports what the server does: is the update accepted between turns, while a tool call is pending, and while the model is speaking? Does the model see only the new tools? Which tools survive a resume? How do prompt tokens move when the tool list shrinks?
+
+- **Layer:** L0 (`gemini_genai_rs::transport::{TungsteniteTransport, JsonCodec}`)
+- **Run:** `GEMINI_API_KEY=… cargo run -p example-context-update-spike -- --json report.json --log wire.jsonl` (`--model`, `--only replace_tools,resume`)
+- **Docs:** [Replacing tools and the instruction mid-session](../docs/user-guide/gemini-3-8-live.md#replacing-tools-and-the-instruction-mid-session)
+- **Costs money:** six to seven short sessions
 
 ### agents (L2 Fluent)
 

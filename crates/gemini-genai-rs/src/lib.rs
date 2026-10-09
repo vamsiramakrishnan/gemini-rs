@@ -49,16 +49,16 @@ pub mod prelude {
     pub use crate::protocol::types::{
         AccessToken, ActivityHandling, ApiEndpoint, AudioFormat, AudioTranscriptionConfig,
         AutomaticActivityDetection, AvatarConfig, Blob, CodeExecutionResult, Content,
-        ContextWindowCompressionConfig, EndpointEnvError, ExecutableCode, FunctionCall,
-        FunctionCallingBehavior, FunctionCallingConfig, FunctionCallingMode, FunctionDeclaration,
-        FunctionResponse, FunctionResponseScheduling, GenerationConfig, GoogleSearch,
-        GoogleSearchRetrieval, GroundingMetadata, HistoryConfig, InputAudioTranscription,
-        LIVE_INPUT_SAMPLE_RATE, LiveModelProfile, MediaResolution, Modality, ModalityTokenCount,
-        ModelId, OutputAudioTranscription, Part, PrebuiltVoiceConfig, ProactivityConfig,
-        RealtimeInputConfig, ReplicatedVoiceConfig, Role, Sensitivity, SessionConfig,
-        SessionResumptionConfig, SlidingWindow, SpeechConfig, ThinkingConfig, ThinkingLevel, Tool,
-        ToolCodeExecution, ToolConfig, ToolProvider, TurnCoverage, UrlContext, UrlContextMetadata,
-        UsageMetadata, VertexConfig, Voice, VoiceConfig,
+        ContextUpdate, ContextWindowCompressionConfig, EndpointEnvError, ExecutableCode,
+        FunctionCall, FunctionCallingBehavior, FunctionCallingConfig, FunctionCallingMode,
+        FunctionDeclaration, FunctionResponse, FunctionResponseScheduling, GenerationConfig,
+        GoogleSearch, GoogleSearchRetrieval, GroundingMetadata, HistoryConfig,
+        InputAudioTranscription, LIVE_INPUT_SAMPLE_RATE, LiveModelProfile, MediaResolution,
+        Modality, ModalityTokenCount, ModelId, OutputAudioTranscription, Part, PrebuiltVoiceConfig,
+        ProactivityConfig, RealtimeInputConfig, ReplicatedVoiceConfig, Role, Sensitivity,
+        SessionConfig, SessionResumptionConfig, SlidingWindow, SpeechConfig, ThinkingConfig,
+        ThinkingLevel, Tool, ToolCodeExecution, ToolConfig, ToolProvider, TurnCoverage, UrlContext,
+        UrlContextMetadata, UsageMetadata, VertexConfig, Voice, VoiceConfig,
     };
     // The decoded server message is the one envelope applications do match on.
     pub use crate::protocol::messages::ServerMessage;

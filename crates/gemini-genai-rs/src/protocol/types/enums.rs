@@ -185,6 +185,7 @@ impl PartialEq<&str> for ModelId {
 /// # use gemini_genai_rs::protocol::types::{LiveModelProfile, ModelId};
 /// let p = LiveModelProfile::of(&ModelId::LIVE_3_8);
 /// assert!(!p.thinking && !p.affective_dialog_flag && p.vertex_async_tools);
+/// assert!(p.context_update);
 /// let x = LiveModelProfile::of(&ModelId::LIVE_3_8_EXTENDED_THINKING);
 /// assert!(x.thinking && x.thinking_level_required);
 /// assert_eq!(LiveModelProfile::of(&ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO), LiveModelProfile::DEFAULT);
@@ -208,6 +209,10 @@ pub struct LiveModelProfile {
     /// Accepts `behavior` / `scheduling` on Vertex AI (Google AI always
     /// does).
     pub vertex_async_tools: bool,
+    /// Accepts a `contextUpdate` message, which replaces the declared tools
+    /// and the system instruction mid-session. Gemini 2.5 Live closes the
+    /// session over one (1007, "Request contains an invalid argument").
+    pub context_update: bool,
 }
 
 impl LiveModelProfile {
@@ -218,6 +223,7 @@ impl LiveModelProfile {
         affective_dialog_flag: true,
         proactivity_flag: true,
         vertex_async_tools: false,
+        context_update: false,
     };
 
     /// Gemini 3.8 Live. No thinking: `thinkingLevel` is refused and a
@@ -228,6 +234,7 @@ impl LiveModelProfile {
         affective_dialog_flag: false,
         proactivity_flag: false,
         vertex_async_tools: true,
+        context_update: true,
     };
 
     /// Gemini 3.8 Live Extended Thinking: requires `thinkingLevel`, and
@@ -239,6 +246,7 @@ impl LiveModelProfile {
         affective_dialog_flag: false,
         proactivity_flag: false,
         vertex_async_tools: true,
+        context_update: true,
     };
 
     /// The profile for `model`, matched on its name (with or without a

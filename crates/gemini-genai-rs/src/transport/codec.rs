@@ -198,6 +198,22 @@ impl Codec for JsonCodec {
                 };
                 serde_json::to_vec(&msg).map_err(|e| CodecError::Serialize(e.to_string()))
             }
+            // Refused here rather than sent: a model without `contextUpdate`
+            // closes the session over it (1007), and silently dropping it
+            // would leave the caller believing the tools changed. The session
+            // loop reports a codec error as an event and keeps the connection.
+            SessionCommand::UpdateContext(_) if !config.supports_context_update() => {
+                Err(CodecError::Serialize(format!(
+                    "{} does not accept contextUpdate; declare the tools at setup instead",
+                    config.resolved_model()
+                )))
+            }
+            // Nothing to change: sending would only invalidate the prefix cache.
+            SessionCommand::UpdateContext(update) if update.is_empty() => Ok(Vec::new()),
+            SessionCommand::UpdateContext(update) => {
+                serde_json::to_vec(&config.to_context_update_message(update))
+                    .map_err(|e| CodecError::Serialize(e.to_string()))
+            }
             SessionCommand::Disconnect => Ok(Vec::new()),
         }
     }
@@ -469,6 +485,132 @@ mod tests {
         assert_eq!(turns[0]["role"], "system");
         assert_eq!(turns[0]["parts"][0]["text"], "New instruction");
         assert_eq!(json["clientContent"]["turnComplete"], false);
+    }
+
+    fn decl(name: &str) -> FunctionDeclaration {
+        FunctionDeclaration {
+            name: name.into(),
+            description: format!("{name} tool"),
+            parameters: None,
+            behavior: Some(FunctionCallingBehavior::NonBlocking),
+        }
+    }
+
+    fn encode_update(config: &SessionConfig, update: ContextUpdate) -> serde_json::Value {
+        let bytes = JsonCodec
+            .encode_command(&SessionCommand::UpdateContext(update), config)
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[test]
+    fn json_codec_encode_context_update_replaces_both() {
+        let config = SessionConfig::from_vertex("p", "us-central1", "t").model(ModelId::LIVE_3_8);
+        let json = encode_update(
+            &config,
+            ContextUpdate::new()
+                .system_instruction("Verified caller.")
+                .tools(vec![Tool::functions(vec![decl("get_balance")])]),
+        );
+        let update = &json["contextUpdate"];
+        assert_eq!(
+            update["systemInstruction"]["parts"][0]["text"],
+            "Verified caller."
+        );
+        let decls = &update["tools"]["tools"][0]["functionDeclarations"];
+        assert_eq!(decls[0]["name"], "get_balance");
+        // 3.8 Live on Vertex accepts async tool calling, so `behavior` stays.
+        assert_eq!(decls[0]["behavior"], "NON_BLOCKING");
+    }
+
+    #[test]
+    fn json_codec_encode_context_update_presence_semantics() {
+        let config = SessionConfig::new("k").model(ModelId::LIVE_3_8);
+
+        // Unset fields stay off the wire: the server keeps their values.
+        let json = encode_update(&config, ContextUpdate::new().system_instruction("x"));
+        assert!(json["contextUpdate"].get("tools").is_none(), "{json}");
+
+        let json = encode_update(&config, ContextUpdate::new().tools(vec![]));
+        assert!(
+            json["contextUpdate"].get("systemInstruction").is_none(),
+            "{json}"
+        );
+        // An empty list is still sent: its presence means "clear all tools".
+        assert_eq!(
+            json["contextUpdate"]["tools"]["tools"],
+            serde_json::json!([])
+        );
+    }
+
+    #[test]
+    fn context_update_shapes_tools_like_setup() {
+        // Vertex AI Live models before 3.8 refuse `behavior`; an update
+        // shapes its tools the same way the setup message does.
+        let config = SessionConfig::from_vertex("p", "us-central1", "t")
+            .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
+        assert!(!config.supports_async_tools());
+        let message = config.to_context_update_message(
+            &ContextUpdate::new().tools(vec![Tool::functions(vec![decl("f")])]),
+        );
+        let decls = message.context_update.tools.unwrap().tools[0]
+            .function_declarations
+            .clone()
+            .unwrap();
+        assert_eq!(decls[0].behavior, None);
+    }
+
+    #[test]
+    fn json_codec_empty_context_update_sends_nothing() {
+        let config = SessionConfig::new("k").model(ModelId::LIVE_3_8);
+        let bytes = JsonCodec
+            .encode_command(
+                &SessionCommand::UpdateContext(ContextUpdate::new()),
+                &config,
+            )
+            .unwrap();
+        assert!(
+            bytes.is_empty(),
+            "an empty update must not reset the prefix cache"
+        );
+    }
+
+    #[test]
+    fn json_codec_refuses_context_update_on_models_without_it() {
+        // Gemini 2.5 Live closes the session over a contextUpdate (1007).
+        for config in [
+            SessionConfig::new("k").model(ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST),
+            SessionConfig::from_vertex("p", "us-central1", "t")
+                .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO),
+        ] {
+            assert!(!config.supports_context_update());
+            let err = JsonCodec
+                .encode_command(
+                    &SessionCommand::UpdateContext(ContextUpdate::new().system_instruction("x")),
+                    &config,
+                )
+                .unwrap_err();
+            assert!(
+                err.to_string().contains("does not accept contextUpdate"),
+                "{err}"
+            );
+        }
+    }
+
+    #[test]
+    fn context_update_is_available_on_3_8_live_on_both_platforms() {
+        for model in [ModelId::LIVE_3_8, ModelId::LIVE_3_8_EXTENDED_THINKING] {
+            assert!(
+                SessionConfig::new("k")
+                    .model(model.clone())
+                    .supports_context_update()
+            );
+            assert!(
+                SessionConfig::from_vertex("p", "us-central1", "t")
+                    .model(model)
+                    .supports_context_update()
+            );
+        }
     }
 
     #[test]

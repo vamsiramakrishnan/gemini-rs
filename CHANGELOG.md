@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Replace tools and the instruction mid-session.**
+  `SessionHandle::update_context(ContextUpdate)` sends a `contextUpdate`
+  message, which replaces the declared tools, the system instruction, or
+  both. An update that reaches the wire also becomes the setup for any
+  reconnect. `SessionConfig::supports_context_update()` reports model
+  support. Measured on Google AI: Gemini 3.8 Live applies the update; Gemini
+  2.5 closes the session over it (1007), so the codec refuses to send it
+  there. Sending only the current step's tools cut prompt tokens per turn
+  from about 1,650 to about 700 in a twelve-tool test. See
+  [Gemini 3.8 Live](docs/user-guide/gemini-3-8-live.md#replacing-tools-and-the-instruction-mid-session).
+- `examples/context-update-spike` probes how a model handles the message:
+  between turns, while a tool call is pending, during speech, across a
+  resume, and its effect on prompt tokens.
+- **Breaking:** `SessionCommand` has a new variant, `UpdateContext`. A
+  `match` over `SessionCommand` outside this crate needs an arm for it.
+
 ## [4.0.0] - 2026-10-02
 
 ### Multi-capability agents

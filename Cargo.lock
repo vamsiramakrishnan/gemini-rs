@@ -1059,6 +1059,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-context-update-spike"
+version = "4.0.0"
+dependencies = [
+ "gemini-genai-rs",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "example-cookbook"
 version = "0.1.0"
 dependencies = [

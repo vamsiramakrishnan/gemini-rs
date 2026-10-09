@@ -28,7 +28,7 @@ use super::reconnect::{DisconnectReason, reconnect_delay};
 /// 4. Runs the full-duplex session loop
 /// 5. On disconnect, decides whether to reconnect or give up
 pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
-    config: SessionConfig,
+    mut config: SessionConfig,
     transport_config: TransportConfig,
     state: Arc<SessionState>,
     mut command_rx: mpsc::Receiver<SessionCommand>,
@@ -150,7 +150,7 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                         // Run main session loop
                         metrics::record_session_connected();
                         let reason = generic_run_session(
-                            &config,
+                            &mut config,
                             &mut transport,
                             &codec,
                             &state,
@@ -331,11 +331,15 @@ async fn wait_for_setup<T: Transport, C: Codec>(
 /// - `transport.recv()` — incoming server messages
 /// - `command_rx.recv()` — outgoing commands from application code
 ///
+/// A `contextUpdate` that reaches the wire is folded into `config`, so the
+/// setup of the next connection declares the session's current tools and
+/// instruction, not the ones it started with.
+///
 /// Because `tokio::select!` drops the losing branch's future, there is no
 /// concurrent mutable borrow of `transport`: when the command branch wins,
 /// the recv future is dropped before `transport.send()` is called.
 async fn generic_run_session<T: Transport, C: Codec>(
-    config: &SessionConfig,
+    config: &mut SessionConfig,
     transport: &mut T,
     codec: &C,
     state: &Arc<SessionState>,
@@ -397,6 +401,9 @@ async fn generic_run_session<T: Transport, C: Codec>(
                                             "send failed: {e}"
                                         )),
                                     ));
+                                }
+                                if let SessionCommand::UpdateContext(update) = &cmd {
+                                    config.apply_context_update(update);
                                 }
                             }
                             Ok(_) => {}
