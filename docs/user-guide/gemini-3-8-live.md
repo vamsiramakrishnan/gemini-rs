@@ -93,9 +93,12 @@ effect when the model reads that response, and the response can point the
 model at a tool the update has just declared.
 
 Each update invalidates the server's prefix cache, so send one when the tool
-set or the instruction actually changes, not on every turn. After an update
-reaches the wire, a reconnect declares the updated tools and instruction in
-its setup message, not the ones the session started with.
+set or the instruction actually changes, not on every turn. After an update,
+a reconnect declares the updated tools and instruction in its setup message,
+not the ones the session started with. A resume ignores those declarations:
+the server restores the session it holds, which lacks an update whose frame
+was lost with the connection. So after a resumed setup, the session sends the
+fields that updates have replaced once more.
 
 Measured on Google AI on 2026-10-09 with `examples/context-update-spike`
 (three runs, same results each time):
@@ -110,7 +113,10 @@ With Gemini 3.8 Live, an update sent while a tool call was pending was
 accepted. The tool response then named the next step, and the model called
 the tool the update had just declared. An update sent while the model was
 speaking did not interrupt it. After a resume whose setup declared the old
-tools, the updated tools were still in effect. Shrinking the declarations
+tools, the updated tools were still in effect. The reverse also held: when
+the first connection never sent the update and the resume's setup declared
+the new tools, the model said it had no such tool until the update was sent
+again after the resumed setup. Shrinking the declarations
 from twelve tools to one cut the prompt from about 1,650 to about 700 tokens
 per turn. Extended Thinking reported no such drop.
 

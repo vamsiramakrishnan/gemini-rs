@@ -19,6 +19,37 @@ use crate::transport::ws::Transport;
 use super::message_handler::{MessageAction, handle_server_msg};
 use super::reconnect::{DisconnectReason, reconnect_delay};
 
+/// Which parts of the setup `contextUpdate`s have replaced this session.
+///
+/// A resume restores the session the server holds, and the setup's
+/// declarations do not override it. The client cannot tell whether an update's
+/// frame reached the server before the connection went, so after every resume
+/// the replaced fields are sent again from `config`.
+#[derive(Default)]
+struct ReplacedContext {
+    instruction: bool,
+    tools: bool,
+}
+
+impl ReplacedContext {
+    fn record(&mut self, update: &ContextUpdate) {
+        self.instruction |= update.system_instruction.is_some();
+        self.tools |= update.tools.is_some();
+    }
+
+    /// The update that brings a resumed session back to `config`.
+    fn replay(&self, config: &SessionConfig) -> ContextUpdate {
+        let mut update = ContextUpdate::new();
+        if self.instruction {
+            update.system_instruction = config.system_instruction.clone();
+        }
+        if self.tools {
+            update.tools = Some(config.tools.clone());
+        }
+        update
+    }
+}
+
 /// The main connection loop — manages connect, setup, send/recv, and reconnection.
 ///
 /// Generic over any `Transport` + `Codec`. On each attempt it:
@@ -37,6 +68,7 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
     codec: C,
 ) {
     let mut attempt = 0u32;
+    let mut replaced = ReplacedContext::default();
 
     if config.text_via_transcription() {
         state.set_text_from_transcription(true);
@@ -112,6 +144,10 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                     }
                     _ => &config,
                 };
+                let resuming = setup_config
+                    .session_resumption
+                    .as_ref()
+                    .is_some_and(|r| r.handle.is_some());
                 let setup_bytes = match codec.encode_setup(setup_config) {
                     Ok(b) => b,
                     Err(e) => {
@@ -151,6 +187,8 @@ pub(super) async fn generic_connection_loop<T: Transport, C: Codec>(
                         metrics::record_session_connected();
                         let reason = generic_run_session(
                             &mut config,
+                            &mut replaced,
+                            resuming,
                             &mut transport,
                             &codec,
                             &state,
@@ -331,21 +369,43 @@ async fn wait_for_setup<T: Transport, C: Codec>(
 /// - `transport.recv()` — incoming server messages
 /// - `command_rx.recv()` — outgoing commands from application code
 ///
-/// A `contextUpdate` that reaches the wire is folded into `config`, so the
-/// setup of the next connection declares the session's current tools and
-/// instruction, not the ones it started with.
+/// A `contextUpdate` is folded into `config` as it is sent, so the setup of
+/// the next connection declares the session's current tools and instruction,
+/// not the ones it started with. Folding before the send means an update
+/// whose send fails still reaches the next connection. On a resumed
+/// connection, the fields updates have replaced are first sent again (see
+/// [`ReplacedContext`]).
 ///
 /// Because `tokio::select!` drops the losing branch's future, there is no
 /// concurrent mutable borrow of `transport`: when the command branch wins,
 /// the recv future is dropped before `transport.send()` is called.
+#[allow(clippy::too_many_arguments)]
 async fn generic_run_session<T: Transport, C: Codec>(
     config: &mut SessionConfig,
+    replaced: &mut ReplacedContext,
+    resumed: bool,
     transport: &mut T,
     codec: &C,
     state: &Arc<SessionState>,
     command_rx: &mut mpsc::Receiver<SessionCommand>,
     event_tx: &broadcast::Sender<SessionEvent>,
 ) -> DisconnectReason {
+    let replay = replaced.replay(config);
+    if resumed && !replay.is_empty() {
+        match codec.encode_command(&SessionCommand::UpdateContext(replay), config) {
+            Ok(bytes) => {
+                metrics::record_ws_bytes_sent(bytes.len() as u64);
+                if let Err(e) = transport.send(bytes).await {
+                    return DisconnectReason::Error(SessionError::WebSocket(
+                        WebSocketError::ProtocolError(format!("send failed: {e}")),
+                    ));
+                }
+            }
+            Err(e) => {
+                let _ = event_tx.send(SessionEvent::Error(SessionError::Codec(e)));
+            }
+        }
+    }
     loop {
         tokio::select! {
             data = transport.recv() => {
@@ -394,6 +454,10 @@ async fn generic_run_session<T: Transport, C: Codec>(
                     Some(cmd) => {
                         match codec.encode_command(&cmd, config) {
                             Ok(bytes) if !bytes.is_empty() => {
+                                if let SessionCommand::UpdateContext(update) = &cmd {
+                                    config.apply_context_update(update);
+                                    replaced.record(update);
+                                }
                                 metrics::record_ws_bytes_sent(bytes.len() as u64);
                                 if let Err(e) = transport.send(bytes).await {
                                     return DisconnectReason::Error(SessionError::WebSocket(
@@ -401,9 +465,6 @@ async fn generic_run_session<T: Transport, C: Codec>(
                                             "send failed: {e}"
                                         )),
                                     ));
-                                }
-                                if let SessionCommand::UpdateContext(update) = &cmd {
-                                    config.apply_context_update(update);
                                 }
                             }
                             Ok(_) => {}

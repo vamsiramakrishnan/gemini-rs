@@ -29,6 +29,7 @@
 //! | `before_tool_response` | Is an update accepted while a tool call is pending, and can the tool response then point at a tool the update declared? |
 //! | `during_generation` | Does an update sent while the model is speaking interrupt it? |
 //! | `resume` | After a resume whose setup declares the old tools, which tools are in effect? |
+//! | `resume_lost_update` | When an update is lost with the connection and the resume's setup declares the updated tools, which tools are in effect, with and without the update re-sent after the resumed setup? |
 //! | `token_cost` | How do prompt and cached token counts move when the tool list shrinks? |
 
 use std::time::{Duration, Instant};
@@ -43,12 +44,13 @@ use serde_json::{Value, json};
 
 const TURN_TIMEOUT: Duration = Duration::from_secs(30);
 
-const ALL_PROBES: [&str; 6] = [
+const ALL_PROBES: [&str; 7] = [
     "replace_tools",
     "replace_instruction",
     "before_tool_response",
     "during_generation",
     "resume",
+    "resume_lost_update",
     "token_cost",
 ];
 
@@ -712,6 +714,106 @@ async fn during_generation(base: &SessionConfig) -> Result<Finding, String> {
     Ok(f)
 }
 
+/// An update lost with the connection: the server never saw it, and the
+/// resume's setup declares the updated tools (as the session loop's folded
+/// config does). Run twice: once as is, once re-sending the update right
+/// after the resumed setup, which is what the session loop does.
+async fn resume_lost_update(base: &SessionConfig) -> Result<Finding, String> {
+    let name = "resume_lost_update";
+    let update = ContextUpdate::new().tools(tools(vec![get_time()]));
+    let mut log = Vec::new();
+    let mut after = Vec::new();
+    for replay in [false, true] {
+        let mut config = base
+            .clone()
+            .system_instruction(TERSE)
+            .add_tool(Tool::functions(vec![get_weather()]));
+        config.session_resumption = Some(SessionResumptionConfig {
+            handle: None,
+            transparent: None,
+        });
+        let mut w = Wire::open(config.clone()).await?;
+        w.ask("Say ok.", scripted).await?;
+        let mut idle = Turn::default();
+        w.read(&mut idle, Duration::from_secs(3), |_| false).await;
+        let handle = w.resume_handle.clone();
+        // The update is never sent: its frame is lost with the connection.
+        log.extend(w.close().await);
+        let Some(handle) = handle else {
+            let mut f = Finding::new(
+                name,
+                "inconclusive",
+                "no resumption handle was issued",
+                json!({}),
+            );
+            f.log = log;
+            return Ok(f);
+        };
+
+        config.apply_context_update(&update);
+        config.session_resumption = Some(SessionResumptionConfig {
+            handle: Some(handle),
+            transparent: None,
+        });
+        let mut w = match Wire::open(config).await {
+            Ok(w) => w,
+            Err(e) => {
+                let mut f =
+                    Finding::new(name, "refused", format!("resume refused: {e}"), json!({}));
+                f.log = log;
+                return Ok(f);
+            }
+        };
+        if replay {
+            w.update(&update, Shape::Wrapped).await?;
+        }
+        after.push(
+            w.ask(
+                "What time is it in Tokyo right now? Use your tool.",
+                scripted,
+            )
+            .await?,
+        );
+        log.extend(w.close().await);
+    }
+
+    let (plain, replayed) = (&after[0], &after[1]);
+    let data = json!({
+        "without_replay": plain.summary(),
+        "with_replay": replayed.summary(),
+    });
+    let mut f = match (
+        plain.called("get_time").is_some(),
+        replayed.called("get_time").is_some(),
+    ) {
+        (false, true) => Finding::new(
+            name,
+            "pass",
+            "the resumed setup's tools are ignored, so a lost update stays lost; re-sending it \
+             after the resumed setup restores it",
+            data,
+        ),
+        (true, true) => Finding::new(
+            name,
+            "observed",
+            "the resumed setup's tools took effect; re-sending the update is harmless",
+            data,
+        ),
+        _ => Finding::new(
+            name,
+            "inconclusive",
+            format!(
+                "calls without replay: {:?}, with replay: {:?}",
+                plain.call_names(),
+                replayed.call_names()
+            ),
+            data,
+        ),
+    };
+    f.log = log;
+    Ok(f)
+}
+
 async fn resume(base: &SessionConfig) -> Result<Finding, String> {
     let name = "resume";
     let mut config = base
@@ -926,6 +1028,7 @@ async fn main() {
             "before_tool_response" => before_tool_response(&base).await,
             "during_generation" => during_generation(&base).await,
             "resume" => resume(&base).await,
+            "resume_lost_update" => resume_lost_update(&base).await,
             "token_cost" => token_cost(&base).await,
             _ => unreachable!(),
         };

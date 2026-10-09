@@ -145,8 +145,8 @@ impl SessionConfig {
 
     /// Fold `update` into this configuration, so the next setup message (on
     /// a reconnect) declares the current tools and instruction rather than
-    /// the ones the session started with. The session loop calls this once
-    /// an update has been sent.
+    /// the ones the session started with. The session loop calls this when
+    /// it sends an update.
     pub fn apply_context_update(&mut self, update: &ContextUpdate) {
         if let Some(instruction) = &update.system_instruction {
             self.system_instruction = Some(instruction.clone());

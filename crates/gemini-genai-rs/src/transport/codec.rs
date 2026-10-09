@@ -198,6 +198,9 @@ impl Codec for JsonCodec {
                 };
                 serde_json::to_vec(&msg).map_err(|e| CodecError::Serialize(e.to_string()))
             }
+            // Nothing to change: sending would only invalidate the prefix
+            // cache. Checked first, so it is a no-op on every model.
+            SessionCommand::UpdateContext(update) if update.is_empty() => Ok(Vec::new()),
             // Refused here rather than sent: a model without `contextUpdate`
             // closes the session over it (1007), and silently dropping it
             // would leave the caller believing the tools changed. The session
@@ -208,8 +211,6 @@ impl Codec for JsonCodec {
                     config.resolved_model()
                 )))
             }
-            // Nothing to change: sending would only invalidate the prefix cache.
-            SessionCommand::UpdateContext(update) if update.is_empty() => Ok(Vec::new()),
             SessionCommand::UpdateContext(update) => {
                 serde_json::to_vec(&config.to_context_update_message(update))
                     .map_err(|e| CodecError::Serialize(e.to_string()))
@@ -562,17 +563,21 @@ mod tests {
 
     #[test]
     fn json_codec_empty_context_update_sends_nothing() {
-        let config = SessionConfig::new("k").model(ModelId::LIVE_3_8);
-        let bytes = JsonCodec
-            .encode_command(
-                &SessionCommand::UpdateContext(ContextUpdate::new()),
-                &config,
-            )
-            .unwrap();
-        assert!(
-            bytes.is_empty(),
-            "an empty update must not reset the prefix cache"
-        );
+        // On every model: where the message is unsupported, an empty update
+        // is still a no-op rather than a codec error.
+        for model in [ModelId::LIVE_3_8, ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST] {
+            let config = SessionConfig::new("k").model(model);
+            let bytes = JsonCodec
+                .encode_command(
+                    &SessionCommand::UpdateContext(ContextUpdate::new()),
+                    &config,
+                )
+                .unwrap();
+            assert!(
+                bytes.is_empty(),
+                "an empty update must not reset the prefix cache"
+            );
+        }
     }
 
     #[test]
