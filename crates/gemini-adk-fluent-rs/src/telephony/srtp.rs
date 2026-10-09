@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use aes::Aes128;
-use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
+use aes::cipher::{Block, BlockCipherEncrypt, KeyInit};
 use base64::Engine as _;
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
@@ -228,7 +228,7 @@ fn derive<const N: usize>(master: &MasterKey, label: u8) -> [u8; N] {
                 14 => (i >> 8) as u8,
                 _ => i as u8,
             });
-            let mut block = GenericArray::from(counter);
+            let mut block = Block::<Aes128>::from(counter);
             cipher.encrypt_block(&mut block);
             block.into()
         })
@@ -378,7 +378,7 @@ impl SrtpSession {
             counter[8 + i] ^= b;
         }
         for chunk in data.chunks_mut(16) {
-            let mut block = GenericArray::from(counter);
+            let mut block = Block::<Aes128>::from(counter);
             self.cipher.encrypt_block(&mut block);
             for (d, k) in chunk.iter_mut().zip(block.iter()) {
                 *d ^= k;
