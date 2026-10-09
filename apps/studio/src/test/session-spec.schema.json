@@ -3008,6 +3008,13 @@
             "hybrid"
           ],
           "type": "string"
+        },
+        {
+          "description": "Replace the instruction and the declared tools with `contextUpdate` at each phase and flow-step change, so the model is offered only the current tools (Gemini 3.8 Live; `hybrid` on other models).",
+          "enum": [
+            "context_update"
+          ],
+          "type": "string"
         }
       ]
     },

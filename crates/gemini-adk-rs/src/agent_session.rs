@@ -11,6 +11,7 @@
 //! ONE queue, ONE consumer task, zero-copy on the hot path.
 
 use gemini_genai_rs::prelude::{Content, FunctionResponse};
+use gemini_genai_rs::protocol::ContextUpdate;
 use gemini_genai_rs::session::{SessionError, SessionEvent, SessionHandle, SessionWriter};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -223,6 +224,9 @@ impl SessionWriter for NoOpSessionWriter {
         Ok(())
     }
     async fn update_instruction(&self, _instruction: String) -> Result<(), SessionError> {
+        Ok(())
+    }
+    async fn update_context(&self, _update: ContextUpdate) -> Result<(), SessionError> {
         Ok(())
     }
     async fn signal_activity_start(&self) -> Result<(), SessionError> {

@@ -33,6 +33,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 
 use gemini_genai_rs::prelude::{Content, FunctionResponse};
+use gemini_genai_rs::protocol::ContextUpdate;
 use gemini_genai_rs::session::{SessionError, SessionWriter};
 
 /// Thread-safe buffer for pending context turns awaiting delivery.
@@ -213,6 +214,11 @@ impl SessionWriter for DeferredWriter {
     async fn update_instruction(&self, instruction: String) -> Result<(), SessionError> {
         // Instruction updates are SDK-internal — don't flush context here.
         self.inner.update_instruction(instruction).await
+    }
+
+    async fn update_context(&self, update: ContextUpdate) -> Result<(), SessionError> {
+        // Like an instruction update: SDK-internal, so no flush.
+        self.inner.update_context(update).await
     }
 
     async fn signal_activity_start(&self) -> Result<(), SessionError> {

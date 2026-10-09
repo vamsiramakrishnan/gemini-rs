@@ -285,6 +285,10 @@ impl SessionWriter for SessionHandle {
             .await
     }
 
+    async fn update_context(&self, update: ContextUpdate) -> Result<(), SessionError> {
+        SessionHandle::update_context(self, update).await
+    }
+
     async fn signal_activity_start(&self) -> Result<(), SessionError> {
         self.send_command(SessionCommand::ActivityStart).await
     }

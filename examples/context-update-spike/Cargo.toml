@@ -10,12 +10,19 @@ description = "Live probe: does the target accept contextUpdate, and how does it
 # exactly which frame goes out when. Needs a TLS backend; no audio hardware.
 [dependencies]
 gemini-genai-rs = { workspace = true, features = ["live", "tls-native"] }
+gemini-adk-fluent-rs = { workspace = true, default-features = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 serde_json = "1"
 
 [[bin]]
 name = "context-update-spike"
 path = "src/main.rs"
+
+# The runtime's `SteeringMode::ContextUpdate` on a two-phase agent, against
+# `Hybrid`: which tools the model calls in each phase, and which are refused.
+[[bin]]
+name = "context-update-steering"
+path = "src/steering.rs"
 
 [lints]
 workspace = true

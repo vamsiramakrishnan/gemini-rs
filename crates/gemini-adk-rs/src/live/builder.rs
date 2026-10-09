@@ -28,6 +28,7 @@ use super::soft_turn::SoftTurnDetector;
 use super::steering::{ContextDelivery, SteeringMode};
 use super::telemetry::SessionTelemetry;
 use super::temporal::TemporalRegistry;
+use super::tool_scope::{self, ToolScope};
 use super::watcher::WatcherRegistry;
 
 /// Builder for a callback-driven Live session.
@@ -484,9 +485,60 @@ impl LiveSessionBuilder {
                 .join("\n")
         });
 
+        // `ContextUpdate` steering needs a model that accepts the message;
+        // elsewhere it would close the session, so steer as the nearest mode.
+        let steering_mode = match self.steering_mode {
+            SteeringMode::ContextUpdate if !config.supports_context_update() => {
+                tracing::warn!(
+                    model = %config.resolved_model(),
+                    "SteeringMode::ContextUpdate needs a model that accepts contextUpdate; steering as Hybrid"
+                );
+                SteeringMode::Hybrid
+            }
+            mode => mode,
+        };
+
+        // Under `ContextUpdate` steering the setup already declares only what
+        // the initial phase and flow step admit, with the base instruction
+        // followed by the initial phase's own. Later changes replace both
+        // through `contextUpdate`, so the full declarations are kept here.
+        let tool_scope = if steering_mode == SteeringMode::ContextUpdate {
+            let state = self.state.clone().unwrap_or_default();
+            let phase = self
+                .phase_machine
+                .as_ref()
+                .and_then(PhaseMachine::current_phase);
+            let admitted = tool_scope::admitted_names(
+                &config.tools,
+                phase.and_then(|p| p.tools_enabled.as_deref()),
+                self.flow.as_ref(),
+                &state,
+            );
+            let scope = ToolScope::new(
+                std::mem::take(&mut config.tools),
+                base_instruction.clone(),
+                &admitted,
+            );
+            config.tools = scope.tools_for(&admitted);
+            if let Some(phase) = phase {
+                let instruction = scope.instruction_for(
+                    &phase
+                        .instruction
+                        .resolve_with_modifiers(&state, &phase.modifiers),
+                );
+                if !instruction.is_empty() {
+                    config = config.system_instruction(instruction);
+                }
+            }
+            Some(Arc::new(scope))
+        } else {
+            None
+        };
+
         Ok(SessionPlan {
             config: Some(config),
             base_instruction,
+            tool_scope,
             callbacks: self.callbacks,
             dispatcher: self.dispatcher,
             extractors: self.extractors,
@@ -498,7 +550,7 @@ impl LiveSessionBuilder {
             state: self.state,
             execution_modes: self.execution_modes,
             soft_turn_timeout: self.soft_turn_timeout,
-            steering_mode: self.steering_mode,
+            steering_mode,
             context_delivery: self.context_delivery,
             delivery: self.delivery,
             repair_config: self.repair_config,
@@ -530,6 +582,8 @@ pub(crate) struct SessionPlan {
     /// The connect-time system instruction as text, for amendments to compose
     /// onto when there is no phase to supply a base.
     base_instruction: Option<String>,
+    /// Every tool declaration, under `ContextUpdate` steering.
+    tool_scope: Option<Arc<ToolScope>>,
     callbacks: EventCallbacks,
     dispatcher: Option<Arc<ToolDispatcher>>,
     extractors: Vec<Arc<dyn TurnExtractor>>,
@@ -631,6 +685,13 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         }
     }
 
+    // What the setup message declares, for the application and Studio to read.
+    if let Some(scope) = &plan.tool_scope {
+        let _ = state
+            .session()
+            .set(super::tool_scope::DECLARED_TOOLS_KEY, scope.declared());
+    }
+
     let phase_machine_mutex = plan.phase_machine.map(|mut machine| {
         machine.set_clock(state.clock());
         tokio::sync::Mutex::new(machine)
@@ -652,6 +713,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         persistence: plan.persistence,
         session_id: plan.session_id,
         tool_advisory: plan.tool_advisory,
+        tool_scope: plan.tool_scope,
         base_instruction: plan.base_instruction,
         pending_context: None, // set after PendingContext is created below
         middleware: {
@@ -962,6 +1024,117 @@ mod tests {
         assert_eq!(plan.steering_mode, SteeringMode::ContextInjection);
         assert_eq!(plan.context_delivery, ContextDelivery::Deferred);
         assert!(!plan.tool_advisory);
+    }
+
+    fn two_phase_machine() -> PhaseMachine {
+        use super::super::phase::Phase;
+        let mut verify = Phase::new("verify", "Verify the caller.");
+        verify.tools_enabled = Some(vec!["verify_identity".into()]);
+        let mut serve = Phase::new("serve", "Serve the caller.");
+        serve.tools_enabled = Some(vec!["get_balance".into()]);
+        let mut machine = PhaseMachine::new("verify");
+        machine.add_phase(verify);
+        machine.add_phase(serve);
+        machine
+    }
+
+    fn banking_config(model: gemini_genai_rs::prelude::ModelId) -> SessionConfig {
+        use gemini_genai_rs::prelude::{FunctionDeclaration, Tool};
+        let decl = |name: &str| FunctionDeclaration {
+            name: name.into(),
+            description: name.into(),
+            parameters: None,
+            behavior: None,
+        };
+        SessionConfig::new("test-key")
+            .model(model)
+            .system_instruction("You are a bank agent.")
+            .add_tool(Tool::functions(vec![
+                decl("verify_identity"),
+                decl("get_balance"),
+            ]))
+    }
+
+    fn declared(config: &SessionConfig) -> Vec<String> {
+        config
+            .tools
+            .iter()
+            .filter_map(|t| t.function_declarations.as_ref())
+            .flatten()
+            .map(|d| d.name.clone())
+            .collect()
+    }
+
+    fn instruction_text(config: &SessionConfig) -> String {
+        config
+            .system_instruction
+            .iter()
+            .flat_map(|c| &c.parts)
+            .filter_map(|p| match p {
+                gemini_genai_rs::prelude::Part::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn context_update_steering_declares_only_the_initial_phase_at_setup() {
+        use gemini_genai_rs::prelude::ModelId;
+        let plan = LiveSessionBuilder::new(banking_config(ModelId::LIVE_3_8))
+            .phase_machine(two_phase_machine())
+            .steering_mode(SteeringMode::ContextUpdate)
+            .into_plan()
+            .expect("plan derivation should succeed");
+
+        assert_eq!(plan.steering_mode, SteeringMode::ContextUpdate);
+        let config = plan.config.as_ref().unwrap();
+        assert_eq!(declared(config), vec!["verify_identity"]);
+        assert_eq!(
+            instruction_text(config),
+            "You are a bank agent.\n\nVerify the caller."
+        );
+        // The full catalog stays with the scope for later phases.
+        let scope = plan.tool_scope.as_ref().expect("scope under ContextUpdate");
+        assert_eq!(scope.declared(), vec!["verify_identity"]);
+        assert_eq!(
+            plan.base_instruction.as_deref(),
+            Some("You are a bank agent.")
+        );
+    }
+
+    #[test]
+    fn context_update_steering_falls_back_to_hybrid_without_model_support() {
+        use gemini_genai_rs::prelude::ModelId;
+        let plan = LiveSessionBuilder::new(banking_config(ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST))
+            .phase_machine(two_phase_machine())
+            .steering_mode(SteeringMode::ContextUpdate)
+            .into_plan()
+            .expect("plan derivation should succeed");
+
+        assert_eq!(plan.steering_mode, SteeringMode::Hybrid);
+        assert!(plan.tool_scope.is_none());
+        let config = plan.config.as_ref().unwrap();
+        assert_eq!(
+            declared(config),
+            vec!["verify_identity", "get_balance"],
+            "every tool is declared, as under the other modes"
+        );
+        assert_eq!(instruction_text(config), "You are a bank agent.");
+    }
+
+    #[test]
+    fn other_steering_modes_declare_every_tool_at_setup() {
+        use gemini_genai_rs::prelude::ModelId;
+        let plan = LiveSessionBuilder::new(banking_config(ModelId::LIVE_3_8))
+            .phase_machine(two_phase_machine())
+            .steering_mode(SteeringMode::Hybrid)
+            .into_plan()
+            .expect("plan derivation should succeed");
+        assert!(plan.tool_scope.is_none());
+        assert_eq!(
+            declared(plan.config.as_ref().unwrap()),
+            vec!["verify_identity", "get_balance"]
+        );
     }
 
     #[test]

@@ -245,7 +245,8 @@ fn main() {
     println!("Steering modes:");
     println!("  SteeringMode::ContextInjection   -- base instruction once, phase via context");
     println!("  SteeringMode::InstructionUpdate   -- full instruction replacement on transition");
-    println!("  SteeringMode::Hybrid              -- both instruction + context\n");
+    println!("  SteeringMode::Hybrid              -- both instruction + context");
+    println!("  SteeringMode::ContextUpdate       -- tools + instruction per phase (3.8)\n");
 
     println!("Context delivery:");
     println!("  ContextDelivery::Immediate  -- send during TurnComplete");

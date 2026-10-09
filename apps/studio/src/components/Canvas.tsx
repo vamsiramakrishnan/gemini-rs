@@ -18,14 +18,23 @@ import {
 } from '@xyflow/react';
 import dagre from '@dagrejs/dagre';
 import { canvasStatus, useStudio } from '../store';
-import { addNode, connect, disconnect, graphOf, isSkillsOnly, modeOf, removeNode, type GraphEdge, type GraphNode, type Spec } from '../spec/graph';
+import { addNode, connect, declaresTools, disconnect, graphOf, isSkillsOnly, modeOf, removeNode, type GraphEdge, type GraphNode, type Spec } from '../spec/graph';
 import type { FlowStatus } from '../api';
 import { SkillOverview } from './SkillOverview';
 
 const NODE_WIDTH = 240;
 const NODE_HEIGHT = 110;
 
-type NodeData = Record<string, unknown> & GraphNode & { state: 'active' | 'done' | 'idle' | 'waiting'; blocked: string[] };
+type NodeData = Record<string, unknown> &
+  GraphNode & {
+    state: 'active' | 'done' | 'idle' | 'waiting';
+    blocked: string[];
+    /** The step's tools are declared to the model, not only enforced. */
+    declared: boolean;
+  };
+
+const DECLARED_TITLE = 'tool offered to the model while this step is active (contextUpdate steering)';
+const ALLOWED_TITLE = 'allowed tool: the model sees every tool, and calls to tools outside this list are refused';
 type StudioNode = Node<NodeData, 'studio'>;
 
 function layout(nodes: GraphNode[], edges: GraphEdge[]): Record<string, { x: number; y: number }> {
@@ -67,7 +76,11 @@ const StudioNodeView = memo(function StudioNodeView({ data, selected }: NodeProp
           </span>
         ))}
         {data.allow.map((tool) => (
-          <span key={`a-${tool}`} className={`chip chip-tool ${data.blocked.includes(tool) ? 'blocked' : ''}`} title="allowed tool">
+          <span
+            key={`a-${tool}`}
+            className={`chip chip-tool ${data.declared ? 'declared' : ''} ${data.blocked.includes(tool) ? 'blocked' : ''}`}
+            title={data.declared ? DECLARED_TITLE : ALLOWED_TITLE}
+          >
             {tool}
           </span>
         ))}
@@ -142,11 +155,12 @@ function FlowCanvas() {
   }, [positions, spec]);
 
   const blocked = Object.keys(status?.blocked_tools ?? {});
+  const declared = declaresTools(spec);
   const nodes: StudioNode[] = graph.nodes.map((node) => ({
     id: node.id,
     type: 'studio',
     position: positions[node.id] ?? { x: 0, y: 0 },
-    data: { ...node, state: stateOf(node.id, status), blocked },
+    data: { ...node, state: stateOf(node.id, status), blocked, declared },
     selected: selection?.kind === 'node' && selection.id === node.id,
   }));
   const edges: Edge[] = graph.edges.map((edge) => ({

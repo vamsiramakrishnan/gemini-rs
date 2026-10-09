@@ -5,7 +5,7 @@ The modes change message timing and instruction updates; measure their effect
 with the model and conversation you deploy. Configuration alone does not
 establish lower latency or better adherence.
 
-## The Three Modes
+## The Modes
 
 ### ContextInjection (recommended)
 
@@ -76,6 +76,68 @@ Live::builder()
 
 **When to use:** When you need persona shifts on transition but also want lightweight per-turn context updates within each phase. Uncommon in practice -- pick `ContextInjection` or `InstructionUpdate` unless you have a specific reason for both.
 
+### ContextUpdate (Gemini 3.8 Live)
+
+Under the other modes, a phase's `tools(..)` list and a flow step's `allow`
+list are enforced by refusing calls: the model is still offered every tool the
+session declares. `ContextUpdate` changes what the model is offered. At each
+phase transition or flow-step change, the runtime sends a `contextUpdate`
+message that replaces the declared tools with those the phase lists and an
+enforcing flow admits, and the system instruction with the connect-time
+instruction followed by the phase's instruction.
+
+```rust,ignore
+Live::builder()
+    .model(ModelId::LIVE_3_8)
+    .instruction("You are a bank's phone agent.")
+    .steering_mode(SteeringMode::ContextUpdate)
+    .phase("verify")
+        .instruction("Verify the caller before anything else.")
+        .tools(vec!["verify_identity".into()])
+        .transition("serve", |s| s.get::<bool>("verified").unwrap_or(false))
+        .done()
+    .phase("serve")
+        .instruction("Answer the caller's account questions.")
+        .tools(vec!["get_balance".into(), "list_transactions".into()])
+        .done()
+    .initial_phase("verify")
+```
+
+**What happens:**
+1. The setup message already declares only the initial phase's tools, with the
+   base instruction followed by the initial phase's instruction.
+2. On a phase transition, one `contextUpdate` carries the new instruction and
+   the new tool list. It goes out before that turn's context turns.
+3. When a flow step changes at a turn boundary, or on a tool result, the tools
+   are re-declared. On a tool result the update goes out before the tool
+   response, so the model reads the result with the next step's tools.
+4. Per-turn modifiers are delivered as model-role context turns, as in
+   `Hybrid`. No tool advisory is sent: the declared list is the advisory.
+
+Calls to tools outside the list are still refused, so a model that calls a tool
+it remembers from earlier in the conversation gets the same error as before.
+An `instruction_template` still replaces the whole instruction. The names
+declared now are in session state under `declared_tools`.
+
+Each `contextUpdate` invalidates the server's prefix cache, so the runtime
+sends one only when the instruction or the tool list actually changes. Fewer
+declarations make each turn's prompt smaller: shrinking twelve declarations to
+one cut the prompt from about 1,650 to about 700 tokens per turn on Gemini 3.8
+Live (see [Gemini 3.8 Live](gemini-3-8-live.md#replacing-tools-and-the-instruction-mid-session)).
+
+On a model without `contextUpdate` (Gemini 2.5 Live), the session logs a
+warning at connect and steers as `Hybrid`, declaring every tool. In a
+`SessionSpec`, set `"runtime": {"steering": "context_update"}`.
+
+**When to use:** Gemini 3.8 Live sessions whose phases or flow steps use
+different tools, where the model should not see tools it may not call yet.
+
+To compare it with `Hybrid` on your model, run
+`cargo run -p example-context-update-spike --bin context-update-steering`. It
+drives a two-phase agent through the same script under both modes and reports
+the tools called in each phase, any refused calls, and the prompt tokens per
+turn.
+
 ## Decision Matrix
 
 | Question | Yes | No |
@@ -85,6 +147,7 @@ Live::builder()
 | Do you need per-turn dynamic context (state summaries, conditional hints)? | `ContextInjection` or `Hybrid` | `InstructionUpdate` is fine |
 | Are phases just different *stages* of the same conversation? | `ContextInjection` | -- |
 | Are phases genuinely different *agents* (receptionist vs doctor)? | `InstructionUpdate` | -- |
+| On Gemini 3.8 Live, do phases or flow steps use different tools? | `ContextUpdate` | Any of the others |
 
 ## Anti-Patterns
 

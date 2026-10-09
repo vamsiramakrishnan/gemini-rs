@@ -283,6 +283,10 @@ impl PhaseBuilder {
     }
 
     /// Set the tool filter for this phase. Only these tools will be enabled.
+    ///
+    /// Calls to other tools are refused. Under
+    /// [`SteeringMode::ContextUpdate`](gemini_adk_rs::live::SteeringMode::ContextUpdate)
+    /// the model is also offered only these tools while the phase is active.
     pub fn tools(mut self, tools: Vec<String>) -> Self {
         self.tools_enabled = Some(tools);
         self

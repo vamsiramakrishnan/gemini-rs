@@ -33,6 +33,13 @@ export interface GraphEdge {
   label?: string;
 }
 
+/** Whether the session re-declares tools per step (`contextUpdate` steering):
+ * then a step's tools are all the model is offered while it is active, not
+ * only the calls the runtime lets through. */
+export function declaresTools(spec: Spec): boolean {
+  return isObject(spec.runtime) && spec.runtime.steering === 'context_update';
+}
+
 export function modeOf(spec: Spec): Mode {
   return isObject(spec.conversation) ? 'conversation' : 'flow';
 }

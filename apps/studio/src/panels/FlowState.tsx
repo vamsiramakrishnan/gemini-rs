@@ -1,8 +1,10 @@
 import type { FlowStatus, Trace } from '../api';
 
 /** Active steps, admitted and blocked tools, and the guard truth tree of
- * each active step: exactly which atom it is waiting on. */
-export function FlowState({ status }: { status: FlowStatus }) {
+ * each active step: exactly which atom it is waiting on. With `declared`
+ * (`contextUpdate` steering) the admitted tools are the only ones the model
+ * is offered; otherwise it sees every tool and the rest are refused. */
+export function FlowState({ status, declared = false }: { status: FlowStatus; declared?: boolean }) {
   const blocked = Object.entries(status.blocked_tools ?? {});
   const progress = Object.entries(status.active_progress ?? {});
   return (
@@ -13,7 +15,9 @@ export function FlowState({ status }: { status: FlowStatus }) {
         {status.overlay_path.length > 0 && <><dt>Digression</dt><dd>{status.overlay_path.join(' → ')}</dd></>}
         <dt>Active</dt>
         <dd>{status.active?.join(', ') || '—'}</dd>
-        <dt>Tools allowed</dt>
+        <dt title={declared ? 'Declared to the model through contextUpdate' : 'Calls to other tools are refused'}>
+          {declared ? 'Tools declared' : 'Tools allowed'}
+        </dt>
         <dd>{status.allowed_tools?.join(', ') || '—'}</dd>
         <dt>Missing</dt>
         <dd>{status.missing_requirements?.join(', ') || 'none'}</dd>

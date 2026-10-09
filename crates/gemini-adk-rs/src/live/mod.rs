@@ -59,6 +59,7 @@ pub mod soft_turn;
 pub mod steering;
 pub mod telemetry;
 pub mod temporal;
+pub(crate) mod tool_scope;
 pub mod transcript;
 pub mod turn_commit;
 pub(crate) mod turn_trace;

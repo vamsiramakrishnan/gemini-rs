@@ -6,6 +6,7 @@ import {
   addNode,
   connect,
   disconnect,
+  declaresTools,
   graphOf,
   guardSummary,
   modeOf,
@@ -98,6 +99,12 @@ const conversationSpec: Spec = {
 };
 
 describe('graph', () => {
+  it('knows when steps declare their tools to the model', () => {
+    expect(declaresTools({ runtime: { steering: 'context_update' } })).toBe(true);
+    expect(declaresTools({ runtime: { steering: 'hybrid' } })).toBe(false);
+    expect(declaresTools({})).toBe(false);
+  });
+
   it('derives a flow graph', () => {
     const { nodes, edges } = graphOf(flowSpec);
     expect(modeOf(flowSpec)).toBe('flow');
