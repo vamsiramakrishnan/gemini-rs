@@ -120,9 +120,9 @@ metrics-exporter-prometheus = { version = "0.16", optional = true }
 # incompatible copies of `opentelemetry` in the graph and every `KeyValue`,
 # `Tracer` and `SpanExporter` stops matching across the seam. A lone
 # `opentelemetry_sdk` 0.31 → 0.32 bump broke `--all-features` exactly that way.
-# The current family is 0.31; `opentelemetry-otlp` and the two
-# `opentelemetry*gcloud*` exporters must publish a 0.32-compatible release
-# before this block can move.
+# The current family is 0.31. Every crate here has a 0.33 release except
+# `opentelemetry_gcloud_monitoring_exporter`, whose latest (0.23) is built on
+# 0.31; move the whole block, exporters included, once it has one.
 opentelemetry = { version = "0.31", optional = true }
 opentelemetry_sdk = { version = "0.31", features = ["rt-tokio", "metrics"], optional = true }
 tracing-opentelemetry = { version = "0.32", optional = true }
