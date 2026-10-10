@@ -283,6 +283,13 @@ In a spec, digressions go in `overlays`:
 ]
 ```
 
+Nothing in the runtime sets `intent:{name}` flags. Something must write the
+trigger's key: in a spec, an extractor field promoted to it, such as
+`{ "field": "intent_cancel", "to": "intent:cancel", "policy": "true_only" }`
+on an extractor whose schema has a boolean `intent_cancel` ("the caller
+wants to cancel"); in code, your own `State` write. Without a writer the
+digression never fires.
+
 An overlay authored with the builder has no trigger until `.trigger(..)` is
 set, and never fires without one. An overlay with no `require` is complete
 when its terminal stages are done.
@@ -319,7 +326,8 @@ and every tool is denied with a reason naming the digression. The state key
 watch that key and close the session.
 
 `Policy::safety_handoff(intents)` is lowered to a digression named `safety`
-that triggers on any `intent:{name}` flag and resumes with `Terminate`.
+that triggers on any `intent:{name}` flag and resumes with `Terminate`. Its
+flags need writers in the same way.
 
 ## Repair escalation
 
