@@ -27,6 +27,15 @@
 //! | `SPEC_LIVE_ONLY` | all | Comma-separated scenario names |
 //! | `SPEC_LIVE_PARALLEL` | `3` | Sessions run at once |
 //! | `SPEC_LIVE_TRACE` | unset | `1` adds the runtime's `info` events to each timeline; run one scenario at a time |
+//! | `SPEC_LIVE_SIGNALS` | `flash` | Who decides confirmations and intents: `flash` (the fixtures' Gemini extractors), `jev` (TypeSafe's Jev through Vercel AI Gateway) or `both` (an A/B) |
+//!
+//! The `jev` arm turns each fixture's all-boolean extractor (its caller
+//! signals) into a `decide` entry asking the same questions, and the dental
+//! fixture's time pick into a choice over the offered slots. Everything else
+//! is unchanged. Each run records how long the signals took to land after the
+//! turn ended and how long each tool call waited for the gate. With
+//! `AI_GATEWAY_API_KEY` set (the environment, or `.env.local` at the
+//! repository root), Jev also judges every finished call.
 //!
 //! Reports land in `target/tmp/spec-live-eval/`.
 
@@ -44,6 +53,7 @@ use serde_json::{Value, json};
 use gemini_adk_fluent_rs::compose::M;
 use gemini_adk_fluent_rs::live::Live;
 use gemini_adk_fluent_rs::spec::{SessionSpec, SpecResources};
+use gemini_adk_rs::decision::{DecisionModel, DecisionRequest, GatewayDecisionModel, Question};
 use gemini_adk_rs::error::ToolError;
 use gemini_adk_rs::llm::GeminiLlm;
 use gemini_adk_rs::tool::SimpleTool;
@@ -107,6 +117,8 @@ struct Seen {
     /// Server events and what the caller sent, in arrival order, with the
     /// same clock as the journal.
     timeline: Mutex<Vec<(u128, String)>>,
+    /// When each extraction landed, by extractor name.
+    extracted_at: Mutex<Vec<(u128, String)>>,
 }
 
 /// A position in every log.
@@ -537,6 +549,14 @@ struct Run {
     closed: Option<String>,
     mutations: Vec<Mutation>,
     timeline: Vec<(u128, String)>,
+    /// `flash` or `jev`: who decided the caller signals.
+    signals: String,
+    /// Milliseconds from each turn's end to its caller signals landing.
+    signal_ms: Vec<u128>,
+    /// Milliseconds each tool call waited for the gate's decision.
+    tool_waits: Vec<(String, u128)>,
+    /// Jev's judgement of the finished call, or the error.
+    judge: Option<Value>,
 }
 
 fn turn_since(
@@ -638,7 +658,200 @@ fn evaluate(expect: &[Expect], run: &Run, state: &State) -> Vec<(String, bool, S
         .collect()
 }
 
-async fn run_one(scenario: &Scenario, model: &str, voice_input: bool) -> Run {
+// ─── the jev arm ────────────────────────────────────────────────────────────
+
+/// Whether an extract entry decides only booleans: the caller signals.
+fn all_boolean(extract: &Value) -> bool {
+    extract["schema"]["properties"]
+        .as_object()
+        .is_some_and(|p| !p.is_empty() && p.values().all(|f| f["type"] == "boolean"))
+}
+
+/// Names of the fixture's caller-signal extractors.
+fn signal_extractors(doc: &Value) -> Vec<String> {
+    doc["extract"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|e| all_boolean(e))
+        .filter_map(|e| e["name"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// The fixture with its caller signals decided by Jev instead of Gemini.
+fn jev_arm(fixture: &str, mut doc: Value) -> Value {
+    let extract = doc["extract"].as_array().cloned().unwrap_or_default();
+    // The slots the other extractors fill: context for the decisions.
+    let facts: Vec<Value> = extract
+        .iter()
+        .filter(|e| !all_boolean(e))
+        .flat_map(|e| e["promote"].as_array().cloned().unwrap_or_default())
+        .map(|p| p.get("to").cloned().unwrap_or_else(|| p["field"].clone()))
+        .collect();
+    let mut keep = Vec::new();
+    let mut decide = Vec::new();
+    for e in extract {
+        if all_boolean(&e) {
+            let promote = e["promote"].as_array().cloned().unwrap_or_default();
+            let mut questions = serde_json::Map::new();
+            for (field, schema) in e["schema"]["properties"].as_object().unwrap() {
+                let to = promote
+                    .iter()
+                    .find(|p| p["field"] == field.as_str())
+                    .map(|p| p.get("to").cloned().unwrap_or_else(|| json!(field)))
+                    .unwrap_or_else(|| json!(field));
+                let instructions = schema["description"]
+                    .as_str()
+                    .map_or_else(|| field.replace('_', " "), str::to_string);
+                questions.insert(
+                    field.clone(),
+                    json!({
+                        "type": "boolean",
+                        "instructions": format!("Judging the caller's last turn: {instructions}"),
+                        "promote": { "to": to }
+                    }),
+                );
+            }
+            decide.push(json!({
+                "name": e["name"], "window": 2, "facts": facts, "questions": questions
+            }));
+        } else if fixture == "dental" && e["name"] == "booking_choice" {
+            decide.push(json!({
+                "name": "booking_choice",
+                "window": 2,
+                "questions": { "slot": {
+                    "type": "choice",
+                    "instructions": "Which of the open times the assistant offered did the caller choose?",
+                    "options_from": "availability.slots",
+                    "none": "the caller has not chosen one of the offered times",
+                    "promote": { "to": "slot" }
+                } }
+            }));
+        } else {
+            keep.push(e);
+        }
+    }
+    doc["extract"] = json!(keep);
+    doc["decide"] = json!(decide);
+    doc
+}
+
+/// A variable from the environment, else from `.env.local` at the
+/// repository root. Values are never printed.
+fn env_or_local(key: &str) -> Option<String> {
+    if let Some(v) = std::env::var(key).ok().filter(|v| !v.trim().is_empty()) {
+        return Some(v);
+    }
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.env.local");
+    let text = std::fs::read_to_string(path).ok()?;
+    text.lines().find_map(|line| {
+        let (k, v) = line.trim().split_once('=')?;
+        (k.trim() == key).then(|| v.trim().trim_matches('"').trim_matches('\'').to_string())
+    })
+}
+
+/// Jev on AI Gateway, with the key from the environment or `.env.local`.
+fn jev_model() -> Result<GatewayDecisionModel, String> {
+    env_or_local("AI_GATEWAY_API_KEY")
+        .or_else(|| env_or_local("VERCEL_OIDC_TOKEN"))
+        .map(|key| GatewayDecisionModel::new(GatewayDecisionModel::JEV, key))
+        .ok_or_else(|| "no AI_GATEWAY_API_KEY in the environment or .env.local".to_string())
+}
+
+/// How long each tool call waited between the model asking and the gate
+/// deciding (admitted or refused).
+fn tool_waits(timeline: &[(u128, String)], mutations: &[Mutation]) -> Vec<(String, u128)> {
+    let mut out = Vec::new();
+    for (asked, line) in timeline {
+        let Some(names) = line.strip_prefix("tool_call: ") else {
+            continue;
+        };
+        for name in names.split(", ") {
+            let decided = mutations.iter().find(|m| {
+                m.ms >= *asked
+                    && (m.key == "flow:tool_call" || m.key == "flow:tool_denied")
+                    && m.value.as_ref().is_some_and(|v| v["tool"] == name)
+            });
+            if let Some(m) = decided {
+                out.push((name.to_string(), m.ms - asked));
+            }
+        }
+    }
+    out
+}
+
+/// Milliseconds from each turn's end to the caller signals landing.
+fn signal_latencies(
+    timeline: &[(u128, String)],
+    extracted_at: &[(u128, String)],
+    signals: &[String],
+) -> Vec<u128> {
+    extracted_at
+        .iter()
+        .filter(|(_, name)| signals.contains(name))
+        .filter_map(|(at, _)| {
+            timeline
+                .iter()
+                .filter(|(t, line)| line == "TurnComplete" && t <= at)
+                .map(|(t, _)| at - t)
+                .next_back()
+        })
+        .collect()
+}
+
+/// Jev's judgement of a finished call.
+async fn judge(jev: &GatewayDecisionModel, run: &Run) -> Value {
+    let mut conversation = Vec::new();
+    for t in run.greeting.iter().chain(run.turns.iter()) {
+        if t.caller != "(connect)" {
+            conversation.push(json!({ "caller": t.caller }));
+        }
+        for a in &t.agent {
+            conversation.push(json!({ "agent": a }));
+        }
+    }
+    let completed: Vec<Value> = run
+        .turns
+        .iter()
+        .flat_map(|t| t.responses.iter())
+        .filter(|(_, r)| r.get("error").is_none())
+        .map(|(name, r)| json!({ "tool": name, "result": r }))
+        .collect();
+    let request = DecisionRequest::new(
+        json!({ "conversation": conversation, "successful_tool_results": completed }),
+        [
+            (
+                "claimed_unbacked_success",
+                Question::boolean(
+                    "Did the agent tell the caller that a booking, refill, transfer or callback \
+                     had been completed when no entry in successful_tool_results shows it?",
+                ),
+            ),
+            (
+                "read_back_matches_caller",
+                Question::boolean(
+                    "Did the details the agent read back to the caller match what the caller said?",
+                ),
+            ),
+            (
+                "goal_met",
+                Question::score(
+                    "How far did the call achieve what the caller wanted?",
+                    ["not at all", "partly", "fully"],
+                ),
+            ),
+        ],
+    );
+    match jev.decide(request).await {
+        Ok(r) => json!({
+            "ms": r.latency.as_millis() as u64,
+            "answers": r.answers.iter().map(|(k, a)| (k.clone(), a.to_value())).collect::<serde_json::Map<_, _>>(),
+        }),
+        Err(e) => json!({ "error": e.to_string() }),
+    }
+}
+
+async fn run_one(scenario: &Scenario, model: &str, voice_input: bool, jev: bool) -> Run {
     let input = if voice_input { "voice" } else { "text" };
     let mut run = Run {
         scenario: scenario.name.to_string(),
@@ -654,8 +867,17 @@ async fn run_one(scenario: &Scenario, model: &str, voice_input: bool) -> Run {
         closed: None,
         mutations: Vec::new(),
         timeline: Vec::new(),
+        signals: if jev { "jev" } else { "flash" }.into(),
+        signal_ms: Vec::new(),
+        tool_waits: Vec::new(),
+        judge: None,
     };
-    let spec = match SessionSpec::from_value(fixture(scenario.fixture)) {
+    let mut doc = fixture(scenario.fixture);
+    let signal_names = signal_extractors(&doc);
+    if jev {
+        doc = jev_arm(scenario.fixture, doc);
+    }
+    let spec = match SessionSpec::from_value(doc) {
         Ok(spec) => spec,
         Err(e) => {
             run.error = Some(e);
@@ -674,6 +896,15 @@ async fn run_one(scenario: &Scenario, model: &str, voice_input: bool) -> Run {
         Err(e) => {
             run.error = Some(format!("extraction model: {e}"));
             return run;
+        }
+    }
+    if jev {
+        match jev_model() {
+            Ok(model) => resources.decision_model = Some(Arc::new(model)),
+            Err(e) => {
+                run.error = Some(format!("decision model: {e}"));
+                return run;
+            }
         }
     }
     let live = match spec.apply(Live::builder(), &state, &resources) {
@@ -696,6 +927,7 @@ async fn run_one(scenario: &Scenario, model: &str, voice_input: bool) -> Run {
         seen.clone(),
         seen.clone(),
     );
+    let start = rec.start;
     let connecting = live
         .model(ModelId::new(model.to_string()))
         .transcription()
@@ -729,7 +961,12 @@ async fn run_one(scenario: &Scenario, model: &str, voice_input: bool) -> Run {
         })
         .on_extracted(move |name, value| {
             let s = s6.clone();
+            let ms = SystemTime::now()
+                .duration_since(start)
+                .map(|d| d.as_millis())
+                .unwrap_or_default();
             async move {
+                s.extracted_at.lock().push((ms, name.clone()));
                 s.extracted.lock().push((name, value));
             }
         })
@@ -877,17 +1114,83 @@ async fn run_one(scenario: &Scenario, model: &str, voice_input: bool) -> Run {
     tokio::time::sleep(Duration::from_millis(500)).await;
     run.mutations = rec.entries.lock().clone();
     run.timeline = seen.timeline.lock().clone();
+    run.tool_waits = tool_waits(&run.timeline, &run.mutations);
+    run.signal_ms = signal_latencies(&run.timeline, &seen.extracted_at.lock(), &signal_names);
     run.extraction_errors = seen.extraction_errors.lock().clone();
     run.errors = seen.errors.lock().clone();
     run.closed = seen.closed.lock().clone();
     run.results = evaluate(&scenario.expect, &run, &state);
+    if let Ok(jev) = jev_model() {
+        run.judge = Some(judge(&jev, &run).await);
+    }
     run
 }
 
-fn render(runs: &[Run]) -> String {
+/// The median and 90th percentile of `values`, or `-` when empty.
+fn percentiles(mut values: Vec<u128>) -> String {
+    if values.is_empty() {
+        return "-".into();
+    }
+    values.sort_unstable();
+    let at = |q: f64| values[((values.len() - 1) as f64 * q).round() as usize];
+    format!("{} / {}", at(0.5), at(0.9))
+}
+
+/// One line per model, input and arm: the A/B.
+fn ab_summary(runs: &[Run]) -> String {
+    let mut groups: BTreeMap<(String, String, String), Vec<&Run>> = BTreeMap::new();
+    for r in runs {
+        groups
+            .entry((r.model.clone(), r.input.clone(), r.signals.clone()))
+            .or_default()
+            .push(r);
+    }
     let mut out = String::from(
-        "# Spec live evaluation\n\n| Scenario | Model | Input | Checks |\n|---|---|---|---|\n",
+        "| Model | Input | Signals | Checks | Scenarios passing | Signals ms p50 / p90 | Tool wait ms p50 / p90 | Judge: unbacked success p50 |\n\
+         |---|---|---|---|---|---|---|---|\n",
     );
+    for ((model, input, signals), rs) in groups {
+        let checks: usize = rs
+            .iter()
+            .map(|r| r.results.iter().filter(|x| x.1).count())
+            .sum();
+        let total: usize = rs.iter().map(|r| r.results.len()).sum();
+        let passing = rs
+            .iter()
+            .filter(|r| r.error.is_none() && r.results.iter().all(|x| x.1))
+            .count();
+        let signal_ms = rs
+            .iter()
+            .flat_map(|r| r.signal_ms.iter().copied())
+            .collect();
+        let waits = rs
+            .iter()
+            .flat_map(|r| r.tool_waits.iter().map(|(_, ms)| *ms))
+            .collect();
+        let mut unbacked: Vec<f64> = rs
+            .iter()
+            .filter_map(|r| {
+                r.judge.as_ref()?["answers"]["claimed_unbacked_success"]["probability"].as_f64()
+            })
+            .collect();
+        unbacked.sort_by(f64::total_cmp);
+        let judge = unbacked
+            .get(unbacked.len() / 2)
+            .map_or_else(|| "-".to_string(), |p| format!("{p:.2}"));
+        out.push_str(&format!(
+            "| {model} | {input} | {signals} | {checks}/{total} | {passing}/{} | {} | {} | {judge} |\n",
+            rs.len(),
+            percentiles(signal_ms),
+            percentiles(waits),
+        ));
+    }
+    out
+}
+
+fn render(runs: &[Run]) -> String {
+    let mut out = String::from("# Spec live evaluation\n\n");
+    out.push_str(&ab_summary(runs));
+    out.push_str("\n| Scenario | Model | Input | Signals | Checks |\n|---|---|---|---|---|\n");
     for r in runs {
         let passed = r.results.iter().filter(|x| x.1).count();
         let status = match &r.error {
@@ -895,17 +1198,24 @@ fn render(runs: &[Run]) -> String {
             None => format!("{passed}/{}", r.results.len()),
         };
         out.push_str(&format!(
-            "| {} | {} | {} | {} |\n",
-            r.scenario, r.model, r.input, status
+            "| {} | {} | {} | {} | {} |\n",
+            r.scenario, r.model, r.input, r.signals, status
         ));
     }
     for r in runs {
         out.push_str(&format!(
-            "\n## {} · {} · {}\n\n",
-            r.scenario, r.model, r.input
+            "\n## {} · {} · {} · {}\n\n",
+            r.scenario, r.model, r.input, r.signals
         ));
         if let Some(e) = &r.error {
             out.push_str(&format!("**Error:** {e}\n\n"));
+        }
+        out.push_str(&format!(
+            "Signals landed {:?} ms after the turn ended; tool waits {:?}.\n\n",
+            r.signal_ms, r.tool_waits
+        ));
+        if let Some(j) = &r.judge {
+            out.push_str(&format!("Judge: `{j}`\n\n"));
         }
         for (what, ok, detail) in &r.results {
             out.push_str(&format!(
@@ -985,6 +1295,11 @@ async fn skill_built_specs_against_the_live_api() {
     let only: Option<Vec<String>> = std::env::var("SPEC_LIVE_ONLY")
         .ok()
         .map(|s| s.split(',').map(|x| x.trim().to_string()).collect());
+    let arms: Vec<bool> = match std::env::var("SPEC_LIVE_SIGNALS").as_deref() {
+        Ok("jev") => vec![true],
+        Ok("both") => vec![false, true],
+        _ => vec![false],
+    };
     let parallel: usize = std::env::var("SPEC_LIVE_PARALLEL")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -999,29 +1314,32 @@ async fn skill_built_specs_against_the_live_api() {
     let mut jobs = Vec::new();
     for model in &models {
         for &voice_input in &inputs {
-            for i in 0..scenarios.len() {
-                jobs.push((model.clone(), voice_input, i));
+            for &jev in &arms {
+                for i in 0..scenarios.len() {
+                    jobs.push((model.clone(), voice_input, jev, i));
+                }
             }
         }
     }
     let semaphore = Arc::new(tokio::sync::Semaphore::new(parallel));
     let mut handles = Vec::new();
-    for (model, voice_input, i) in jobs {
+    for (model, voice_input, jev, i) in jobs {
         let scenarios = scenarios.clone();
         let permit = semaphore.clone().acquire_owned().await.unwrap();
         handles.push(tokio::spawn(async move {
             let s = &scenarios[i];
+            let arm = if jev { "jev" } else { "flash" };
             eprintln!(
-                "▶ {} · {} · {}",
+                "▶ {} · {} · {} · {arm}",
                 s.name,
                 model,
                 if voice_input { "voice" } else { "text" }
             );
-            let run = run_one(s, &model, voice_input).await;
+            let run = run_one(s, &model, voice_input, jev).await;
             drop(permit);
             let passed = run.results.iter().filter(|x| x.1).count();
             eprintln!(
-                "■ {} · {} · {}: {}",
+                "■ {} · {} · {} · {arm}: {}",
                 s.name,
                 model,
                 run.input,
@@ -1047,7 +1365,13 @@ async fn skill_built_specs_against_the_live_api() {
         .iter()
         .map(|r| {
             (
-                format!("{}-{}-{}", r.scenario, r.model.replace('/', "_"), r.input),
+                format!(
+                    "{}-{}-{}-{}",
+                    r.scenario,
+                    r.model.replace('/', "_"),
+                    r.input,
+                    r.signals
+                ),
                 r,
             )
         })

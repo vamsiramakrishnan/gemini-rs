@@ -174,6 +174,8 @@ pub async fn call(spec_path: &str, tool: &str, args: Option<&str>) -> CliResult 
 /// terminal REPL; audio specs use the microphone and speakers when `adk` is
 /// built with the `voice` feature.
 pub async fn run(spec_path: &str) -> CliResult {
+    // `.env.local` first: dotenvy never overrides a variable already set.
+    dotenvy::from_filename(".env.local").ok();
     dotenvy::dotenv().ok();
     let spec = load(spec_path)?;
     if spec.requires_memory() {
@@ -186,6 +188,16 @@ pub async fn run(spec_path: &str) -> CliResult {
     let mut resources = SpecResources::default();
     if spec.requires_extraction() {
         resources.extraction_llm = Some(Arc::new(GeminiLlm::from_env()?));
+    } else if spec.decide.iter().any(|d| d.needs_llm()) {
+        // The fallback for uncertain decisions; without it they stay undecided.
+        resources.extraction_llm = GeminiLlm::from_env()
+            .ok()
+            .map(|llm| Arc::new(llm) as Arc<dyn gemini_adk_rs::llm::BaseLlm>);
+    }
+    if !spec.decide.is_empty() {
+        resources.decision_model = Some(Arc::new(
+            gemini_adk_rs::decision::GatewayDecisionModel::from_env()?,
+        ));
     }
     let state = State::new();
     let live = spec.apply(Live::builder(), &state, &resources)?;

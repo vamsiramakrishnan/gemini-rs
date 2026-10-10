@@ -84,6 +84,24 @@
         }
       ]
     },
+    "BooleanCriteriaSpec": {
+      "description": "What the true and false cases of a boolean question mean.",
+      "properties": {
+        "false": {
+          "description": "When it is false.",
+          "type": "string"
+        },
+        "true": {
+          "description": "When it is true.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "false",
+        "true"
+      ],
+      "type": "object"
+    },
     "ClientVadPreset": {
       "description": "Named client-VAD starting points.",
       "oneOf": [
@@ -427,6 +445,271 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "DecideFallback": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DecideFallbackMode"
+            }
+          ],
+          "description": "`\"llm\"` (the default): the session's extraction model, through structured output, for the uncertain questions only. `\"none\"`: leave them undecided."
+        },
+        {
+          "description": "AI Gateway reruns the whole decision with `model` when `when` matches (a Gateway decision fallback; both stages are billed).",
+          "properties": {
+            "gateway": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/GatewayFallbackSpec"
+                }
+              ],
+              "description": "The fallback."
+            }
+          },
+          "required": [
+            "gateway"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "What answers an uncertain question."
+    },
+    "DecideFallbackMode": {
+      "description": "See [`DecideFallback::Mode`].",
+      "oneOf": [
+        {
+          "description": "Ask the extraction model.",
+          "enum": [
+            "llm"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "No fallback.",
+          "enum": [
+            "none"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "DecidePromoteSpec": {
+      "description": "Where an answer goes, and how sure it must be.",
+      "properties": {
+        "at_least": {
+          "description": "Boolean: the probability needed for `true` (default 0.85). Choice and score: the certainty needed (default 0.6).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "keep_known": {
+          "description": "Keep a value already in state.",
+          "type": "boolean"
+        },
+        "to": {
+          "description": "The state key written.",
+          "type": "string"
+        },
+        "write_false": {
+          "description": "Boolean: also write `false` for a confident no. Off by default, so a signal latches true.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "to"
+      ],
+      "type": "object"
+    },
+    "DecideQuestionSpec": {
+      "description": "One question and where its answer goes.",
+      "oneOf": [
+        {
+          "description": "Answered with the probability that it is true.",
+          "properties": {
+            "criteria": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/BooleanCriteriaSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What the true and false cases mean."
+            },
+            "instructions": {
+              "description": "The question.",
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "boolean"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "instructions",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Answered with one option.",
+          "properties": {
+            "criteria": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Option name to description (1 to 255). May be empty with `options_from`.",
+              "type": "object"
+            },
+            "instructions": {
+              "description": "The question.",
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "choice"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "instructions",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Answered with a position on an ordered scale, from 0.",
+          "properties": {
+            "criteria": {
+              "description": "Level descriptions, lowest first (2 to 10).",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "instructions": {
+              "description": "The question.",
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "score"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "criteria",
+            "instructions",
+            "type"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "active_in": {
+          "description": "Ask only while one of these stages is active.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "none": {
+          "description": "For a choice: an extra option, `none_of_these`, with this description. Choosing it decides nothing. A choice always picks some option, so \"which offered time did the caller pick?\" needs a way to say they have not picked yet.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options_from": {
+          "description": "For a choice: the state path (`key` or `key.field`) holding an array of options, read each turn, such as the slots a tool offered.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "promote": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DecidePromoteSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Write the answer to state."
+        }
+      },
+      "type": "object"
+    },
+    "DecideSpec": {
+      "description": "One decision-model pipeline: typed questions about the latest turns.",
+      "properties": {
+        "facts": {
+          "description": "State keys sent with the conversation as `facts`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fallback": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DecideFallback"
+            }
+          ],
+          "description": "What answers a question whose answer was uncertain."
+        },
+        "name": {
+          "description": "The state key holding the decided values and the raw answers.",
+          "type": "string"
+        },
+        "questions": {
+          "additionalProperties": {
+            "$ref": "#/definitions/DecideQuestionSpec"
+          },
+          "description": "Questions by id. Each id is also the answer's field in the result.",
+          "type": "object"
+        },
+        "timeout_ms": {
+          "description": "How long to wait for the decision model, in milliseconds (default 2000). A slow or failed call goes to the fallback.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "trigger": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TriggerSpec"
+            }
+          ],
+          "default": "every_turn",
+          "description": "When it runs."
+        },
+        "window": {
+          "default": 2,
+          "description": "Transcript window in turns. Default 2: the agent's last turn and the caller's reply.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "questions"
       ],
       "type": "object"
     },
@@ -1007,6 +1290,23 @@
       "required": [
         "name",
         "slots"
+      ],
+      "type": "object"
+    },
+    "GatewayFallbackSpec": {
+      "description": "A Gateway decision fallback.",
+      "properties": {
+        "model": {
+          "description": "The model that reruns the decision.",
+          "type": "string"
+        },
+        "when": {
+          "description": "The Gateway condition, such as `{\"probabilityBetween\": [0.15, 0.85]}` or `{\"question\": \"route\", \"confidenceBelow\": 0.6}`."
+        }
+      },
+      "required": [
+        "model",
+        "when"
       ],
       "type": "object"
     },
@@ -4266,6 +4566,13 @@
         }
       ],
       "description": "The conversation: stages, slots, digressions, commits, timing and policies, compiled by the [conversation compiler](crate::conversation). The higher-level alternative to `flow`; set one or the other. Stage resolvers bind to the declared `tools` by name."
+    },
+    "decide": {
+      "description": "Decision-model pipelines: typed questions (boolean, choice, score) about the latest turns, answered by a decision model such as Jev. Requires [`SpecResources::decision_model`].",
+      "items": {
+        "$ref": "#/definitions/DecideSpec"
+      },
+      "type": "array"
     },
     "description": {
       "default": "",

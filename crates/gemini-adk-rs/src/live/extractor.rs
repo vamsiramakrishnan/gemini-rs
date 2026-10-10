@@ -132,6 +132,14 @@ impl FieldPromotion {
     }
 }
 
+/// Whether the newest turn of `window` has no caller words while an earlier
+/// one does: a turn the caller said nothing in, with input transcription on.
+/// Extracting it cannot find anything new from the caller.
+pub(crate) fn nothing_new_from_caller(window: &[TranscriptTurn]) -> bool {
+    window.last().is_some_and(|t| t.user.trim().is_empty())
+        && window.iter().any(|t| !t.user.trim().is_empty())
+}
+
 /// Strip markdown code fences from LLM output.
 ///
 /// Handles `` ```json\n...\n``` ``, `` ```\n...\n``` ``, and bare JSON.
@@ -604,10 +612,7 @@ impl TurnExtractor for LlmExtractor {
         // the next tool call by seconds. Only when the window shows the
         // caller's words are transcribed at all, so a session without input
         // transcription still extracts.
-        if self.trigger == ExtractionTrigger::EveryTurn
-            && window.last().is_some_and(|t| t.user.trim().is_empty())
-            && window.iter().any(|t| !t.user.trim().is_empty())
-        {
+        if self.trigger == ExtractionTrigger::EveryTurn && nothing_new_from_caller(window) {
             return false;
         }
         if self.min_words == 0 {

@@ -21,6 +21,7 @@ names. This page is the part you need to write a voice agent.
 | `runtime` | `{"steering": "context_update"}` offers the model only the tools the active stage allows (Gemini 3.8 Live). Without it, other tools are still offered but refused |
 | `tools` | Declared tools: what the model sees. See [Tools](#tools) |
 | `extract` | Out-of-band extractors that fill state from what the caller says |
+| `decide` | Decision-model questions (Jev on Vercel AI Gateway): confirmations, intents, picks among offered options, stage routing. See [Decisions](#decisions) |
 | `conversation` | The stages, digressions and policies |
 | `scenarios` | Offline tests; see scenarios.md |
 
@@ -71,6 +72,7 @@ succeeded stay denied.
 |---|---|---|
 | A stage's `collect` | Slots the caller gives | `"collect": ["party_size"]` |
 | `extract` + `promote` | Filling slots and flags from speech | see the worked example |
+| `decide` + `promote` | Confirmations, intents and picks, decided fast | see [Decisions](#decisions) |
 | A tool's `set_state` | Facts a tool establishes | `"set_state": {"dob_verified": true}` |
 | A tool's `save_response_as` | Keeping the tool's response | `"save_response_as": "availability"` |
 | The runtime | `verbatim:{stage}`, `repair:{stage}:*`, `flow:*` | read only |
@@ -84,6 +86,49 @@ never leaves its first stage on a real call. Confirmations and intents (`book_co
 `caller_signals`, with boolean fields and `"policy": "true_only"`; a key with
 a colon is promoted with `"to"`. Extractors need an extraction model at run
 time; `adk spec run` creates one from the environment.
+
+## Decisions
+
+When the person has an AI Gateway key with Jev access, confirmations,
+intents and picks among offered options can go to a decision model instead
+of `caller_signals`. It answers in well under a second with a probability,
+instead of a language model's seconds. Use it when they ask for Jev or for
+faster confirmations; it needs `AI_GATEWAY_API_KEY` at run time.
+
+```json
+"decide": [{
+  "name": "caller_signals",
+  "window": 2,
+  "facts": ["party_size", "slot", "guest_name"],
+  "questions": {
+    "book_table_confirmed": {
+      "type": "boolean",
+      "instructions": "In their last turn, did the caller agree to the booking that was read back?",
+      "criteria": { "true": "the caller said yes in their own words",
+                    "false": "they hesitated, changed a detail, or only picked an option" },
+      "active_in": ["confirm"],
+      "promote": { "to": "book_table_confirmed", "at_least": 0.85 }
+    },
+    "intent_human_agent": {
+      "type": "boolean",
+      "instructions": "Did the caller ask to speak to a person?",
+      "promote": { "to": "intent:human_agent" }
+    }
+  }
+}]
+```
+
+- A `boolean` writes `true` at `at_least` (default 0.85) and above, and
+  writes nothing below. A `choice` with `options_from` picks among options
+  in state; give it `none` ("the caller has not picked one yet"), since a
+  choice always picks something. Slots with free values (names, dates) stay
+  in `extract`.
+- Answers between the thresholds go to the extraction model by default
+  (`"fallback": "llm"`).
+- `active_in` asks a question only in the stages where it matters, which is
+  also how a choice drives stage routing: promote it to a key the stages'
+  `next` guards compare.
+- Don't keep a `caller_signals` extract entry writing the same keys.
 
 ## Tools
 

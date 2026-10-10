@@ -69,6 +69,12 @@ impl SessionSpec {
                  ExtractionTrigger, FieldPromotion, LlmExtractor,\n};\n",
             );
         }
+        if !self.decide.is_empty() {
+            out.push_str(
+                "use gemini_adk_fluent_rs::gemini_adk_rs::decision::{\n    \
+                 DecisionExtractor, DecisionQuestion, GatewayDecisionModel, Promote, Question,\n};\n",
+            );
+        }
         if !self.computed.is_empty() {
             out.push_str("use gemini_adk_fluent_rs::gemini_adk_rs::expr::Expr;\n");
         }
@@ -101,6 +107,7 @@ impl SessionSpec {
             out.push_str("use gemini_memory_rs::runtime::LiveMemoryExt;\n");
         }
         let needs_arc = !self.extract.is_empty()
+            || !self.decide.is_empty()
             || self.memory.is_some()
             || self
                 .runtime
@@ -248,6 +255,9 @@ impl SessionSpec {
         }
         for extract in &self.extract {
             out.push_str(&gen_extract(extract));
+        }
+        for decide in &self.decide {
+            out.push_str(&gen_decide(decide));
         }
         for phase in &self.phases {
             out.push_str(&gen_phase(phase));
@@ -551,6 +561,100 @@ fn gen_extract(extract: &super::ExtractSpec) -> String {
             let _ = writeln!(out, "                {rule},");
         }
         out.push_str("            ])\n");
+    }
+    out.push_str("        ))\n");
+    out
+}
+
+fn gen_decide(decide: &super::DecideSpec) -> String {
+    use super::{DecideFallback, DecideFallbackMode};
+    let mut out = String::new();
+    out.push_str("        .extractor(Arc::new(\n");
+    let _ = writeln!(
+        out,
+        "            DecisionExtractor::new({}, Arc::new(GatewayDecisionModel::from_env()?), {})",
+        rust_str(&decide.name),
+        decide.window
+    );
+    if !decide.facts.is_empty() {
+        let facts: Vec<String> = decide.facts.iter().map(|f| rust_str(f)).collect();
+        let _ = writeln!(out, "            .facts([{}])", facts.join(", "));
+    }
+    if let Some(ms) = decide.timeout_ms {
+        let _ = writeln!(
+            out,
+            "            .with_timeout(std::time::Duration::from_millis({ms}))"
+        );
+    }
+    for (id, q) in &decide.questions {
+        let kind = serde_json::to_value(&q.kind).unwrap_or_default();
+        let _ = write!(
+            out,
+            "            .question(\n                DecisionQuestion::new({}, serde_json::from_value::<Question>(json!({}))?)",
+            rust_str(id),
+            compact(&kind)
+        );
+        if let Some(path) = &q.options_from {
+            let _ = write!(
+                out,
+                "\n                    .options_from({})",
+                rust_str(path)
+            );
+        }
+        if let Some(none) = &q.none {
+            let _ = write!(out, "\n                    .or_none({})", rust_str(none));
+        }
+        if !q.active_in.is_empty() {
+            let stages: Vec<String> = q.active_in.iter().map(|s| rust_str(s)).collect();
+            let _ = write!(
+                out,
+                "\n                    .active_in([{}])",
+                stages.join(", ")
+            );
+        }
+        if let Some(p) = &q.promote {
+            let mut promote = format!("Promote::to({})", rust_str(&p.to));
+            if let Some(t) = p.at_least {
+                let _ = write!(promote, ".at_least({t:?})");
+            }
+            if p.write_false {
+                promote.push_str(".write_false()");
+            }
+            if p.keep_known {
+                promote.push_str(".keep_known()");
+            }
+            let _ = write!(out, "\n                    .promote({promote})");
+        }
+        out.push_str(",\n            )\n");
+    }
+    if decide.trigger != TriggerSpec::EveryTurn {
+        let trigger = match decide.trigger {
+            TriggerSpec::EveryTurn => "EveryTurn",
+            TriggerSpec::AfterToolCall => "AfterToolCall",
+            TriggerSpec::OnGenerationComplete => "OnGenerationComplete",
+            TriggerSpec::OnPhaseChange => "OnPhaseChange",
+        };
+        let _ = writeln!(
+            out,
+            "            .with_trigger(gemini_adk_fluent_rs::gemini_adk_rs::live::extractor::ExtractionTrigger::{trigger})"
+        );
+    }
+    match &decide.fallback {
+        DecideFallback::Mode(DecideFallbackMode::Llm) => out.push_str(
+            "            // Uncertain answers go to the extraction model.\n            \
+             .with_llm_fallback(Arc::new(GeminiLlm::new(Default::default())))\n",
+        ),
+        DecideFallback::Mode(DecideFallbackMode::None) => {}
+        DecideFallback::Gateway { gateway } => {
+            let options = serde_json::json!({
+                "gateway": { "models": [{ "model": gateway.model, "when": gateway.when }] }
+            });
+            let _ = writeln!(
+                out,
+                "            .with_provider_options(json!({}))",
+                compact(&options)
+            );
+        }
     }
     out.push_str("        ))\n");
     out
@@ -1187,5 +1291,53 @@ mod tests {
         assert!(code.contains("spec.apply(Live::builder()"));
         assert!(code.contains("submit_adjustment"));
         assert!(code.contains("task_scenarios"));
+    }
+
+    #[test]
+    fn decide_entries_lower_to_decision_extractors() {
+        let spec = SessionSpec::from_value(json!({
+            "name": "booking",
+            "instruction": "Book tables.",
+            "decide": [{
+                "name": "signals",
+                "facts": ["party_size"],
+                "questions": {
+                    "confirmed": {
+                        "type": "boolean", "instructions": "Agreed?",
+                        "active_in": [],
+                        "promote": { "to": "book_table_confirmed", "at_least": 0.9, "write_false": true }
+                    },
+                    "picked": {
+                        "type": "choice", "instructions": "Which time?",
+                        "options_from": "availability.options",
+                        "none": "not picked yet",
+                        "promote": { "to": "slot", "keep_known": true }
+                    }
+                }
+            }, {
+                "name": "routing",
+                "questions": { "next": { "type": "choice", "instructions": "Next?",
+                                         "criteria": { "book": "b", "stay": "s" } } },
+                "fallback": { "gateway": { "model": "google/gemini-3.8-flash",
+                                           "when": { "confidenceBelow": 0.6 } } }
+            }],
+            "phases": [{"name": "main"}],
+            "initial_phase": "main"
+        }))
+        .expect("valid spec");
+        let code = spec.to_rust();
+        assert!(code.contains("use gemini_adk_fluent_rs::gemini_adk_rs::decision::{"));
+        assert!(code.contains(
+            "DecisionExtractor::new(\"signals\", Arc::new(GatewayDecisionModel::from_env()?), 2)"
+        ));
+        assert!(code.contains(".facts([\"party_size\"])"));
+        assert!(code.contains(
+            ".promote(Promote::to(\"book_table_confirmed\").at_least(0.9).write_false())"
+        ));
+        assert!(code.contains(".options_from(\"availability.options\")"));
+        assert!(code.contains(".or_none(\"not picked yet\")"));
+        assert!(code.contains(".promote(Promote::to(\"slot\").keep_known())"));
+        assert!(code.contains(".with_llm_fallback(Arc::new(GeminiLlm::new(Default::default())))"));
+        assert!(code.contains("\"confidenceBelow\":0.6"), "{code}");
     }
 }

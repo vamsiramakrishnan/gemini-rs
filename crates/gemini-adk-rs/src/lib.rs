@@ -79,6 +79,7 @@ pub mod code_executors;
 pub mod confirmation;
 pub mod context;
 pub mod credentials;
+pub mod decision;
 pub mod error;
 pub mod evaluation;
 pub mod events;

@@ -22,11 +22,16 @@
 
 pub mod authoring;
 mod codegen;
+mod decide;
 pub mod project;
 mod simulate;
 mod skills;
 pub mod store;
 
+pub use decide::{
+    BooleanCriteriaSpec, DecideFallback, DecideFallbackMode, DecidePromoteSpec, DecideQuestionKind,
+    DecideQuestionSpec, DecideSpec, GatewayFallbackSpec,
+};
 pub use project::{ProjectFile, ProjectLanguage, ProjectOptions, SdkSource};
 pub use store::{BundleRef, BundleStore, BundleVersion, StoreError, open_store};
 
@@ -814,6 +819,11 @@ pub struct SessionSpec {
     /// Out-of-band extraction pipelines.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extract: Vec<ExtractSpec>,
+    /// Decision-model pipelines: typed questions (boolean, choice, score)
+    /// about the latest turns, answered by a decision model such as Jev.
+    /// Requires [`SpecResources::decision_model`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decide: Vec<DecideSpec>,
     /// Declared state keys — the session's data dictionary.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub state: BTreeMap<String, StateFieldSpec>,
@@ -1017,7 +1027,12 @@ pub const MEMORY_TOOL_NAMES: [&str; 2] = ["recall_context", "manage_memory"];
 #[derive(Default, Clone)]
 pub struct SpecResources {
     /// The OOB model backing `extract` entries. Required when any are present.
+    /// Also answers uncertain `decide` questions (their default fallback).
     pub extraction_llm: Option<Arc<dyn BaseLlm>>,
+    /// The decision model backing `decide` entries, such as
+    /// `GatewayDecisionModel` (Jev on Vercel AI Gateway). Required when any
+    /// are present.
+    pub decision_model: Option<Arc<dyn gemini_adk_rs::decision::DecisionModel>>,
     /// The memory engine honoring the spec's `memory` section. Required when
     /// that section is present.
     pub memory: Option<Arc<dyn MemoryBinding>>,
@@ -1156,6 +1171,9 @@ impl SessionSpec {
             for p in &e.promote {
                 keys.insert(p.target().to_string());
             }
+        }
+        for d in &self.decide {
+            keys.extend(d.written_keys().map(str::to_string));
         }
         for p in &self.phases {
             for eff in &p.on_enter {
@@ -1386,6 +1404,7 @@ impl SessionSpec {
                 || !self.tools.is_empty()
                 || !self.mcp.is_empty()
                 || !self.extract.is_empty()
+                || !self.decide.is_empty()
                 || !self.computed.is_empty()
                 || !self.watch.is_empty()
                 || !self.patterns.is_empty()
@@ -1829,6 +1848,29 @@ impl SessionSpec {
             }
         }
 
+        // Decision pipelines.
+        let stage_ids: std::collections::BTreeSet<String> = self
+            .conversation
+            .iter()
+            .flat_map(|c| {
+                c.stages
+                    .iter()
+                    .chain(c.overlays.iter().flat_map(|o| &o.stages))
+            })
+            .map(|s| s.id.clone())
+            .collect();
+        let mut pipeline_names: std::collections::BTreeSet<&str> =
+            self.extract.iter().map(|e| e.name.as_str()).collect();
+        for d in &self.decide {
+            if !pipeline_names.insert(&d.name) {
+                errors.push(format!(
+                    "decide '{}' reuses the name of another extract or decide entry",
+                    d.name
+                ));
+            }
+            errors.extend(d.problems(&stage_ids));
+        }
+
         SpecValidation {
             valid: errors.is_empty(),
             errors,
@@ -1993,6 +2035,14 @@ impl SessionSpec {
         if self.requires_memory() && resources.memory.is_none() {
             return Err("spec declares memory but SpecResources.memory is not set".into());
         }
+        if !self.decide.is_empty() && resources.decision_model.is_none() {
+            return Err(
+                "spec declares decide entries but SpecResources.decision_model is not set \
+                 (for Jev on Vercel AI Gateway: GatewayDecisionModel::from_env(), which reads \
+                 AI_GATEWAY_API_KEY)"
+                    .into(),
+            );
+        }
         if let Some(name) = resources.tools.keys().find(|name| {
             !self.tools.iter().any(|t| &&t.name == name)
                 && !self.skills.iter().any(|skill| {
@@ -2104,6 +2154,13 @@ impl SessionSpec {
         if let Some(llm) = &resources.extraction_llm {
             for e in &self.extract {
                 live = live.extractor(Arc::new(compile_extractor(e, llm.clone())));
+            }
+        }
+        if let Some(model) = &resources.decision_model {
+            for d in &self.decide {
+                live = live.extractor(Arc::new(
+                    d.compile(model.clone(), resources.extraction_llm.clone()),
+                ));
             }
         }
 

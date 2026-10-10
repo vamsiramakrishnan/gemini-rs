@@ -417,6 +417,9 @@ fn rust_cargo_toml(spec: &SessionSpec, options: &ProjectOptions) -> String {
     {
         features.push("http-tools");
     }
+    if !spec.decide.is_empty() {
+        features.push("ai-gateway");
+    }
     let features = features
         .iter()
         .map(|f| quoted(f))
@@ -462,7 +465,8 @@ fn rust_main(spec: &SessionSpec) -> String {
          //! declarations and tests. `src/tools.rs` implements its tools.\n\n\
          mod tools;\n\n",
     );
-    if !spec.requires_extraction() && !spec.requires_memory() {
+    let decides = !spec.decide.is_empty();
+    if !spec.requires_extraction() && !spec.requires_memory() && !decides {
         out.push_str("use gemini_adk_fluent_rs::prelude::*;\n");
     } else {
         out.push_str("use std::sync::Arc;\n\nuse gemini_adk_fluent_rs::prelude::*;\n");
@@ -478,13 +482,29 @@ fn rust_main(spec: &SessionSpec) -> String {
          let spec = spec()?;\n    \
          let state = State::new();\n",
     );
-    let needs_more = spec.requires_extraction() || spec.requires_memory();
+    let needs_more = spec.requires_extraction() || spec.requires_memory() || decides;
     if needs_more {
         out.push_str("    let resources = gemini_adk_fluent_rs::spec::SpecResources {\n");
         if spec.requires_extraction() {
             out.push_str(
                 "        // The out-of-band model behind the spec's `extract` entries.\n        \
                  extraction_llm: Some(Arc::new(GeminiLlm::from_env()?)),\n",
+            );
+        } else if spec.decide.iter().any(super::DecideSpec::needs_llm) {
+            out.push_str(
+                "        // Answers the `decide` questions Jev is unsure of.\n        \
+                 extraction_llm: GeminiLlm::from_env()\n            \
+                 .ok()\n            \
+                 .map(|llm| Arc::new(llm) as Arc<dyn gemini_adk_fluent_rs::gemini_adk_rs::llm::BaseLlm>),\n",
+            );
+        }
+        if decides {
+            out.push_str(
+                "        // Jev on Vercel AI Gateway, behind the spec's `decide` entries. Reads\n        \
+                 // AI_GATEWAY_API_KEY (for example from .env.local).\n        \
+                 decision_model: Some(Arc::new(\n            \
+                 gemini_adk_fluent_rs::gemini_adk_rs::decision::GatewayDecisionModel::from_env()?,\n        \
+                 )),\n",
             );
         }
         if spec.requires_memory() {

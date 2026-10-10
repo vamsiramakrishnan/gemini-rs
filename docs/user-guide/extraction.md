@@ -368,6 +368,10 @@ then decides again. Each extractor reads its usual number of turns, ending
 with the turn in progress, so an older "yes" outside that window is not
 read again.
 
+A confirmation, an intent or a pick among offered options can instead go to a
+[decision model](decisions.md), which answers typed questions with
+probabilities instead of text.
+
 ## Extraction to State to Watchers
 
 The full data flow after each turn:

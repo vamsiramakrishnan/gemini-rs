@@ -685,6 +685,27 @@ fn unknown_fields(doc: &Value, out: &mut Vec<Diagnostic>) {
     for (i, t) in array(doc, "/tools") {
         unknown_in(t, &format!("/tools/{i}"), &tool, out);
     }
+    let decide = schema_fields(&schema, Some("DecideSpec"));
+    let mut question = schema_fields(&schema, Some("DecideQuestionSpec"));
+    // The question type's own fields are flattened in.
+    question.extend(["type", "instructions", "criteria"].map(String::from));
+    let promote = schema_fields(&schema, Some("DecidePromoteSpec"));
+    for (i, d) in array(doc, "/decide") {
+        let base = format!("/decide/{i}");
+        unknown_in(d, &base, &decide, out);
+        for (id, q) in d
+            .get("questions")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+        {
+            let qbase = format!("{base}/questions/{}", escape(id));
+            unknown_in(q, &qbase, &question, out);
+            if let Some(p) = q.get("promote") {
+                unknown_in(p, &format!("{qbase}/promote"), &promote, out);
+            }
+        }
+    }
     let Some(conv) = doc.get("conversation").filter(|c| c.is_object()) else {
         return;
     };
