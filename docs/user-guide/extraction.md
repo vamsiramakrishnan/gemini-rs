@@ -191,9 +191,9 @@ its schema. The runtime also adds three things:
   state a field. Without this, the model fills fields nobody mentioned with
   placeholders such as `"unknown"`, `""` or `0`.
 - **Known values.** When the extractor runs with access to state, the values
-  already promoted for its fields are listed as `Already known: {...}`.
-  The model returns a known field only when the caller's latest words change
-  it. A value equal to the known one apart from case, spacing or punctuation
+  already promoted for its fields are listed as `Already known: {...}`, and
+  the caller's latest turn is quoted after the transcript. The model returns
+  a known field only when that turn gives a different value. A value equal to the known one apart from case, spacing or punctuation
   (`"7 pm"` and `"7 PM"`) is not promoted again, so it is not taken for a
   correction.
 - **No thinking.** Requests send a thinking budget of 0. The turn pipeline
@@ -281,10 +281,21 @@ EXTRACTION_MODELS=gemini-3.5-flash-lite EXTRACTION_THINKING_BUDGET=64 \
   has not named one." `gemini-3.1-flash-lite` was right 20 of 20 with either
   wording, so it is the more forgiving choice when instructions are not
   tested.
-- In earlier testing `gemini-flash-lite-latest` marked "Seven o'clock is
-  perfect", said when picking a time, as agreeing to book. Signals that gate
-  a commit belong to a [decision model](decisions.md) or need explicit
-  criteria.
+- **Known values are re-stated without thinking.** Told to return a known
+  field "only if the user's latest turn changes it", it returned the known
+  slot on "Yes, that's all correct. Please book it." in 17 of 20 runs, 7 of
+  them in other words ("tomorrow at 7:00 PM" for "tomorrow at 7 pm"), which
+  read as a correction and sent a live booking back to the availability
+  stage. `gemini-3.1-flash-lite` and `gemini-flash-latest` did it in none of
+  20. Quoting the latest turn after the transcript, as the extractor now
+  does, brought it to 0 of 30, and every model still caught a real change
+  ("make that eight o'clock instead") in all runs.
+- **Picks read as agreement.** One live run took "Seven is fine." as
+  agreeing to book. Offline it did not recur for `gemini-3.5-flash-lite` (0
+  of 40), but `gemini-3.1-flash-lite` marked "Seven o'clock is perfect" as a
+  yes in 3 of 20, and `gemini-flash-lite-latest` did in earlier testing.
+  Signals that gate a commit belong to a [decision model](decisions.md) or
+  need explicit criteria.
 
 ## Schema Definition
 

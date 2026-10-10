@@ -346,10 +346,16 @@ const NULL_GUIDANCE: &str = "\n\nUse null for any field the transcript does not 
 
 /// Appended when some fields are already in state: re-reading the window
 /// every turn, the model would otherwise re-state known values in new words,
-/// and each re-statement would read as a correction.
+/// and each re-statement would read as a correction. The latest turn is also
+/// quoted after the transcript: told only to compare with "the latest turn",
+/// `gemini-3.5-flash-lite` without thinking re-stated a known slot in 17 of
+/// 20 turns that changed nothing (7 in other words, read as corrections);
+/// with the turn quoted, in none of 30, and it still caught a real change in
+/// 30 of 30.
 const KNOWN_GUIDANCE: &str = "\n\nSome fields are already known (listed before the transcript). \
-     Return a known field only if the user's latest turn changes it; otherwise return null \
-     for it, even if the transcript mentions it again in other words.";
+     Compare each known field only with the user's latest turn, quoted after the transcript: \
+     return it only if that turn gives a different value. Agreeing, confirming, repeating or \
+     rewording a known value is not a change: return null.";
 
 /// The schema with every top-level property allowed to be null, so the
 /// model can say "not stated" instead of inventing a value of the right type.
@@ -528,16 +534,26 @@ impl LlmExtractor {
         known: &serde_json::Map<String, Value>,
     ) -> Result<Value, LlmError> {
         let transcript = Self::format_transcript(window);
-        let (preamble, guidance) = if known.is_empty() {
-            (String::new(), "")
+        let (preamble, latest, guidance) = if known.is_empty() {
+            (String::new(), String::new(), "")
         } else {
+            let latest = window
+                .iter()
+                .rev()
+                .map(|t| t.user.trim())
+                .find(|u| !u.is_empty())
+                .unwrap_or_default();
             (
                 format!("Already known: {}\n\n", Value::Object(known.clone())),
+                format!(
+                    "The user's latest turn: {}\n\n",
+                    Value::String(latest.to_string())
+                ),
                 KNOWN_GUIDANCE,
             )
         };
         let mut request = LlmRequest::from_text(format!(
-            "{preamble}Transcript:\n{transcript}\nExtract the requested information."
+            "{preamble}Transcript:\n{transcript}\n{latest}Extract the requested information."
         ));
         request.system_instruction = Some(format!("{}{NULL_GUIDANCE}{guidance}", self.prompt));
 
@@ -952,6 +968,11 @@ mod tests {
         );
         let second = text(&requests[1]);
         assert!(second.starts_with("Already known: "), "{second}");
+        assert!(
+            second.contains("The user's latest turn: \"seven is perfect\""),
+            "{second}"
+        );
+        assert!(!text(&requests[0]).contains("latest turn"));
         assert!(
             second.contains(r#""party_size":4"#) && second.contains(r#""slot":"tomorrow at 7 pm""#)
         );
