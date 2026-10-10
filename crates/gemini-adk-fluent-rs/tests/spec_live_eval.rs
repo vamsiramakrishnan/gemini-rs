@@ -1078,6 +1078,8 @@ async fn run_one(scenario: &Scenario, model: &str, voice_input: bool, jev: bool)
         started.elapsed().as_millis(),
     ));
 
+    // Spoken input goes through a microphone that stays open between lines.
+    let mic = voice_input.then(|| voice::Mic::open(&handle));
     for line in scenario.lines {
         if seen.closed.lock().is_some() {
             break;
@@ -1089,9 +1091,9 @@ async fn run_one(scenario: &Scenario, model: &str, voice_input: bool, jev: bool)
             .map(|d| d.as_millis())
             .unwrap_or_default();
         seen.timeline.lock().push((ms, format!("CALLER: {line}")));
-        let sent = if voice_input {
+        let sent = if let Some(mic) = &mic {
             match voice::speak(line, CALLER_VOICE).await {
-                Some(pcm) => voice::say(&handle, &pcm).await.map_err(|e| e.to_string()),
+                Some(pcm) => mic.say(&pcm).await.map_err(|e| e.to_string()),
                 None => Err("TTS failed".to_string()),
             }
         } else {
@@ -1112,6 +1114,9 @@ async fn run_one(scenario: &Scenario, model: &str, voice_input: bool, jev: bool)
         ));
     }
 
+    if let Some(mic) = &mic {
+        mic.close();
+    }
     let _ = handle.disconnect().await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     run.mutations = rec.entries.lock().clone();

@@ -194,6 +194,67 @@ pub async fn say(
     Ok(())
 }
 
+/// A microphone that stays open for the whole call.
+///
+/// [`say`] streams an utterance and 700 ms of silence, then the socket goes
+/// quiet until the next utterance. Live models wait for more silence than
+/// that before they end the caller's turn, so with nothing arriving the turn
+/// stays open until the next utterance starts. In the live spec eval, 38 of 78
+/// spoken caller turns waited out the harness's 75 s timeout that way, and
+/// the model heard each line one line late. A real microphone (or phone line)
+/// sends frames all the time, silent ones between utterances; this does too.
+pub struct Mic {
+    speaking: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: gemini_adk_rs::live::LiveHandle,
+}
+
+impl Mic {
+    /// Open the microphone: silence flows until [`Mic::close`].
+    pub fn open(handle: &gemini_adk_rs::live::LiveHandle) -> Self {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let speaking = std::sync::Arc::new(AtomicBool::new(false));
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let (s, x, h) = (speaking.clone(), stop.clone(), handle.clone());
+        tokio::spawn(async move {
+            let silence = vec![0u8; (LIVE_INPUT_HZ as usize / 1000) * 2 * FRAME_MS];
+            let mut tick = tokio::time::interval(std::time::Duration::from_millis(FRAME_MS as u64));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            while !x.load(Ordering::Relaxed) {
+                tick.tick().await;
+                if !s.load(Ordering::Relaxed) && h.send_audio(silence.clone()).await.is_err() {
+                    break;
+                }
+            }
+        });
+        Self {
+            speaking,
+            stop,
+            handle: handle.clone(),
+        }
+    }
+
+    /// Speak `pcm` in real time; silence resumes when it ends.
+    pub async fn say(&self, pcm: &[u8]) -> Result<(), gemini_adk_rs::error::AgentError> {
+        use std::sync::atomic::Ordering;
+        self.speaking.store(true, Ordering::Relaxed);
+        let result = say(&self.handle, pcm).await;
+        self.speaking.store(false, Ordering::Relaxed);
+        result
+    }
+
+    /// Stop sending frames.
+    pub fn close(&self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl Drop for Mic {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
 /// Minimal standard-alphabet base64 decoder.
 ///
 /// Hand-rolled to avoid adding a dependency to the dev tree for one call site.
