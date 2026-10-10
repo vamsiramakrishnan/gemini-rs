@@ -528,7 +528,7 @@ impl LiveSessionBuilder {
                 .phase_machine
                 .as_ref()
                 .and_then(PhaseMachine::current_phase);
-            let admitted = tool_scope::admitted_names(
+            let admitted = tool_scope::offered_names(
                 &config.tools,
                 phase.and_then(|p| p.tools_enabled.as_deref()),
                 self.flow.as_ref(),
@@ -885,6 +885,30 @@ pub(crate) async fn spawn_lanes(rt: SessionRuntime) -> Result<LiveHandle, AgentE
         rt.telem_cancel.clone(),
         rt.on_usage_cb,
     );
+
+    // The opening steering goes out before the lanes start and before any
+    // greeting, so the model's first turn already has the first stage's
+    // posture. Deferred delivery queues it with the first user send instead.
+    let opening = super::control_plane::opening_steering(&rt.control_plane.flow, &rt.state);
+    if !opening.is_empty() {
+        let contents: Vec<_> = opening
+            .into_iter()
+            .map(gemini_genai_rs::prelude::Content::model)
+            .collect();
+        let delivery = rt
+            .state
+            .get::<crate::flow::VoiceTiming>(crate::flow::VOICE_TIMING_KEY)
+            .and_then(|t| t.context_delivery)
+            .unwrap_or(rt.control_plane.context_delivery);
+        match (&delivery, &rt.pending_context) {
+            (ContextDelivery::Deferred, Some(pending)) => pending.extend(contents),
+            _ => rt
+                .writer
+                .send_client_content(contents, false)
+                .await
+                .map_err(AgentError::Session)?,
+        }
+    }
 
     // Spawn fast + control lanes (no session_signals, no transcript mutex)
     let greeting_writer = rt.user_writer.clone();

@@ -66,3 +66,45 @@ fn a_verbatim_stage_holds_the_floor_and_asks_for_the_exact_text() {
     let spec = serde_json::to_value(convo.spec()).unwrap();
     assert_eq!(spec["stages"][0]["verbatim"], TERMS);
 }
+
+/// The first stage's posture, with its verbatim text, reaches the model before
+/// the greeting. In live runs a greeting asked to "say the disclosure line" had
+/// no line to say: the posture only arrived at the first turn boundary, and the
+/// stage waited for words the model never had.
+#[tokio::test]
+async fn the_opening_stage_is_sent_before_the_greeting() {
+    let run = ScriptedServer::new()
+        .speaks(TERMS)
+        .turn_complete()
+        .play(
+            Live::builder()
+                .greeting("Say the disclosure line, then offer to help.")
+                .converse(&disclosure()),
+        )
+        .await
+        .unwrap();
+
+    let sent = run.sent();
+    let steers = |m: &serde_json::Value| {
+        m["clientContent"]["turns"]
+            .as_array()
+            .is_some_and(|turns| turns.iter().any(|t| t.to_string().contains(TERMS)))
+    };
+    let opening = sent
+        .iter()
+        .position(steers)
+        .expect("the opening steering carries the verbatim text");
+    let greeting = sent
+        .iter()
+        .position(|m| m.to_string().contains("Say the disclosure line"))
+        .expect("the greeting was sent");
+    assert!(
+        opening < greeting,
+        "opening at {opening}, greeting at {greeting}"
+    );
+
+    // The first turn boundary does not send the same steering again.
+    let repeats = sent.iter().filter(|m| steers(m)).count();
+    assert_eq!(repeats, 1);
+    run.disconnect().await;
+}

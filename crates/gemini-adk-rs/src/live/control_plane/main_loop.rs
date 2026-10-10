@@ -281,6 +281,9 @@ pub(in crate::live) async fn run_control_lane(
                     }
                 }
                 ControlEvent::Interrupted { heard_chars } => {
+                    // The caller's words since the model began speaking open
+                    // the next turn.
+                    transcript_buffer.mark_interrupted();
                     // Keep only what the listener heard of the model's turn.
                     if let Some(chars) = heard_chars {
                         transcript_buffer.cut_current_model_turn(chars);

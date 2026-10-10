@@ -17,7 +17,7 @@ use crate::live::extractor::{ExtractionTrigger, TurnExtractor};
 use crate::live::phase::PhaseMachine;
 use crate::live::transcript::TranscriptBuffer;
 
-use super::extractors::run_extractors;
+use super::extractors::{refresh_extractors, run_extractors};
 use super::tool_gate::ToolGate;
 
 /// Handle tool calls: phase filtering -> user callback -> auto-dispatch -> interceptor -> send.
@@ -131,7 +131,7 @@ pub(in crate::live) async fn handle_tool_calls(
                     // once-violated, gated) in Enforce mode; record in Observe.
                     // Lock scope is the synchronous admissibility check only.
                     if let Some(mon) = flow {
-                        let denial = {
+                        let decide = || {
                             let mon = mon.lock();
                             match mon.admits_tool(&call.name, state) {
                                 Err(reason) if mon.mode() == crate::flow::Enforcement::Enforce => {
@@ -140,6 +140,42 @@ pub(in crate::live) async fn handle_tool_calls(
                                 _ => None,
                             }
                         };
+                        let mut denial = decide();
+                        // Refused only because a guard has not held yet: if
+                        // extractors write the keys it reads, extract the
+                        // turn in progress and decide again. The caller's
+                        // yes is otherwise extracted after the model has
+                        // answered, one turn too late.
+                        if denial.is_some() {
+                            let blocking = {
+                                let mon = mon.lock();
+                                if mon.offers_tool(&call.name, state) {
+                                    mon.blocking_keys(&call.name, state)
+                                } else {
+                                    std::collections::BTreeSet::new()
+                                }
+                            };
+                            let writers: Vec<Arc<dyn TurnExtractor>> = extractors
+                                .iter()
+                                .filter(|e| {
+                                    e.promotion_rules()
+                                        .iter()
+                                        .any(|r| blocking.contains(&r.state_key))
+                                })
+                                .cloned()
+                                .collect();
+                            if !writers.is_empty() {
+                                refresh_extractors(
+                                    &writers,
+                                    transcript_buffer,
+                                    state,
+                                    callbacks,
+                                    event_tx,
+                                )
+                                .await;
+                                denial = decide();
+                            }
+                        }
                         if let Some(reason) = denial {
                             tracing::info!(tool = %call.name, %reason, "tool denied by the flow gate");
                             let _ = state.set(
@@ -1063,6 +1099,193 @@ mod tests {
         assert!(
             mon.lock().marking().done.contains("run"),
             "background completion latched the step done"
+        );
+    }
+
+    /// Stands in for a signals extractor: reports `confirmed: true` when the
+    /// last turn it sees has the caller saying yes.
+    struct YesReader {
+        rules: Vec<crate::live::extractor::FieldPromotion>,
+        seen: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl TurnExtractor for YesReader {
+        fn name(&self) -> &str {
+            "signals"
+        }
+        fn window_size(&self) -> usize {
+            1
+        }
+        fn promotion_rules(&self) -> &[crate::live::extractor::FieldPromotion] {
+            &self.rules
+        }
+        async fn extract(
+            &self,
+            window: &[crate::live::transcript::TranscriptTurn],
+        ) -> Result<serde_json::Value, crate::llm::LlmError> {
+            let last = window.last().map(|t| t.user.clone()).unwrap_or_default();
+            self.seen.lock().unwrap().push(last.clone());
+            Ok(json!({ "confirmed": last.contains("yes") }))
+        }
+    }
+
+    fn charge_flow() -> crate::flow::SharedFlowStack {
+        let flow_def = Flow::new()
+            .step("confirm")
+            .commit("charge", Guard::is_true("confirmed"))
+            .done(Guard::called_ok("charge"))
+            .step("end")
+            .after("confirm")
+            .terminal()
+            .build()
+            .expect("valid flow");
+        FlowMonitor::new(flow_def, Enforcement::Enforce)
+            .into_stack()
+            .into_shared()
+    }
+
+    async fn call_charge(
+        transcript: &mut TranscriptBuffer,
+        state: &State,
+        extractors: &[Arc<dyn TurnExtractor>],
+        flow: &Option<crate::flow::SharedFlowStack>,
+        runs: Arc<AtomicUsize>,
+    ) {
+        let tool = SimpleTool::new("charge", "charge the card", None, move |_| {
+            let runs = runs.clone();
+            async move {
+                runs.fetch_add(1, Ordering::SeqCst);
+                Ok(json!({ "ok": true }))
+            }
+        });
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(tool));
+        let writer: Arc<dyn SessionWriter> = Arc::new(NoopWriter);
+        let (tx, _rx) = tokio::sync::broadcast::channel(64);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel::<ControlEvent>(8);
+        handle_tool_calls(
+            vec![FunctionCall {
+                name: "charge".into(),
+                args: json!({}),
+                id: Some("c1".into()),
+            }],
+            &EventCallbacks::default(),
+            &Some(Arc::new(dispatcher)),
+            &writer,
+            state,
+            &None,
+            transcript,
+            &std::collections::HashMap::new(),
+            &None,
+            extractors,
+            &Arc::new(MiddlewareChain::new()),
+            flow,
+            &None,
+            &mut ToolGate::new(),
+            &ctrl_tx.downgrade(),
+            &CancellationToken::new(),
+            &tx,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_yes_in_the_turn_in_progress_admits_the_commit() {
+        // The caller says yes and the model calls the commit tool in the same
+        // turn. Extraction after the turn would be too late; the tool lane
+        // extracts the turn in progress and admits the call.
+        let reader = Arc::new(YesReader {
+            rules: vec![crate::live::extractor::FieldPromotion::true_only(
+                "confirmed",
+            )],
+            seen: Default::default(),
+        });
+        let extractors: Vec<Arc<dyn TurnExtractor>> = vec![reader.clone()];
+        let state = State::new();
+        let flow = Some(charge_flow());
+        let mut transcript = TranscriptBuffer::new();
+        transcript.push_input("Two people at eight, please.");
+        transcript.push_output("Two at eight. Shall I book it?");
+        transcript.end_turn();
+        transcript.push_input("yes please");
+
+        let runs = Arc::new(AtomicUsize::new(0));
+        call_charge(&mut transcript, &state, &extractors, &flow, runs.clone()).await;
+
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "the commit ran");
+        assert_eq!(state.get::<bool>("confirmed"), Some(true));
+        assert_eq!(
+            reader.seen.lock().unwrap().as_slice(),
+            ["yes please"],
+            "the window kept its size and ended at the turn in progress"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_a_yes_the_commit_is_still_refused() {
+        let reader = Arc::new(YesReader {
+            rules: vec![crate::live::extractor::FieldPromotion::true_only(
+                "confirmed",
+            )],
+            seen: Default::default(),
+        });
+        let extractors: Vec<Arc<dyn TurnExtractor>> = vec![reader.clone()];
+        let state = State::new();
+        let flow = Some(charge_flow());
+        let mut transcript = TranscriptBuffer::new();
+        transcript.push_input("yes, two at eight");
+        transcript.push_output("Shall I book it?");
+        transcript.end_turn();
+        transcript.push_input("hmm, let me think");
+
+        let runs = Arc::new(AtomicUsize::new(0));
+        call_charge(&mut transcript, &state, &extractors, &flow, runs.clone()).await;
+
+        assert_eq!(runs.load(Ordering::SeqCst), 0, "the commit did not run");
+        assert_eq!(state.get::<bool>("confirmed"), None);
+        assert_eq!(
+            reader.seen.lock().unwrap().as_slice(),
+            ["hmm, let me think"],
+            "the older yes was outside the window"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tool_outside_the_step_does_not_trigger_extraction() {
+        let reader = Arc::new(YesReader {
+            rules: vec![crate::live::extractor::FieldPromotion::true_only(
+                "confirmed",
+            )],
+            seen: Default::default(),
+        });
+        let extractors: Vec<Arc<dyn TurnExtractor>> = vec![reader.clone()];
+        let state = State::new();
+        let flow_def = Flow::new()
+            .step("collect")
+            .allow(["lookup"])
+            .done(Guard::is_true("confirmed"))
+            .step("confirm")
+            .after("collect")
+            .commit("charge", Guard::is_true("confirmed"))
+            .terminal()
+            .build()
+            .expect("valid flow");
+        let flow = Some(
+            FlowMonitor::new(flow_def, Enforcement::Enforce)
+                .into_stack()
+                .into_shared(),
+        );
+        let mut transcript = TranscriptBuffer::new();
+        transcript.push_input("yes");
+
+        let runs = Arc::new(AtomicUsize::new(0));
+        call_charge(&mut transcript, &state, &extractors, &flow, runs.clone()).await;
+
+        assert_eq!(runs.load(Ordering::SeqCst), 0);
+        assert!(
+            reader.seen.lock().unwrap().is_empty(),
+            "a tool the step does not offer is refused without extraction"
         );
     }
 }

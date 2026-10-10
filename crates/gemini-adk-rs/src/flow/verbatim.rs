@@ -7,9 +7,11 @@
 //!
 //! - While the stage is active, the stack publishes the required text under
 //!   [`VERBATIM_KEY`].
-//! - At the end of each model turn, the control lane compares the model's
-//!   output transcript with the text ([`similarity`]) and writes the verdict
-//!   to [`verbatim_flag`]`(step)`. It also emits `LiveEvent::VerbatimChecked`.
+//! - At the end of each model turn, the control lane looks for the text in
+//!   the model's output transcript ([`contained_similarity`]) and writes the
+//!   verdict to [`verbatim_flag`]`(step)`. The text may be surrounded by
+//!   other words in the same turn, such as a greeting before a disclosure.
+//!   It also emits `LiveEvent::VerbatimChecked`.
 //! - The stage completes only once the flag is true. A paraphrase keeps the
 //!   conversation in the stage, where the posture asks for the exact text
 //!   again.
@@ -87,6 +89,43 @@ pub fn similarity(expected: &str, heard: &str) -> f64 {
     1.0 - prev[b.len()] as f64 / longest as f64
 }
 
+/// How closely `expected` appears somewhere in `heard`: the best
+/// [`similarity`] between `expected` and a run of consecutive words of
+/// `heard` about as long as it (within a tenth either way). A model turn
+/// that says the required text and something else, such as "Welcome to
+/// Bright Smile. This call may be recorded. How can I help?", scores as the
+/// text alone.
+pub fn contained_similarity(expected: &str, heard: &str) -> f64 {
+    let words = |s: &str| -> Vec<String> {
+        s.split_whitespace()
+            .map(|w| {
+                w.chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .flat_map(char::to_lowercase)
+                    .collect::<String>()
+            })
+            .filter(|w| !w.is_empty())
+            .collect()
+    };
+    let (want, got) = (words(expected), words(heard));
+    let n = want.len();
+    if n == 0 || got.len() <= n {
+        return similarity(expected, heard);
+    }
+    let slack = (n / 10).max(1);
+    let want = want.join(" ");
+    let mut best = 0.0_f64;
+    for len in n.saturating_sub(slack).max(1)..=(n + slack).min(got.len()) {
+        for start in 0..=got.len() - len {
+            best = best.max(similarity(&want, &got[start..start + len].join(" ")));
+            if best >= 1.0 {
+                return best;
+            }
+        }
+    }
+    best
+}
+
 /// Check a finished model turn against the active verbatim requirement, if
 /// any, and record the verdict in state. `heard` is the turn's output
 /// transcript; an empty transcript checks nothing.
@@ -95,7 +134,7 @@ pub fn check_turn(state: &State, heard: &str) -> Option<VerbatimVerdict> {
     if heard.trim().is_empty() {
         return None;
     }
-    let similarity = similarity(&requirement.text, heard);
+    let similarity = contained_similarity(&requirement.text, heard);
     let passed = similarity >= VERBATIM_MIN_SIMILARITY;
     // Once said verbatim, a later turn in the same stage cannot undo it.
     let flag = verbatim_flag(&requirement.step);
@@ -114,6 +153,33 @@ mod tests {
     use super::*;
 
     const TERMS: &str = "Calls may be recorded for quality and training purposes.";
+
+    #[test]
+    fn the_text_may_share_the_turn_with_other_words() {
+        let disclosure = "This call may be recorded.";
+        let turn = "Thanks for calling Trattoria Rustica. This call may be recorded. \
+                    How many guests, and for when?";
+        assert_eq!(contained_similarity(disclosure, turn), 1.0);
+        assert!(similarity(disclosure, turn) < VERBATIM_MIN_SIMILARITY);
+        // One recogniser slip in a long passage inside a longer turn passes.
+        let long = "You are speaking with an automated assistant and this call may be recorded for quality.";
+        let heard = "Hello! You are speaking with an automated assistant and this call may be recorded for quality. How can I help?";
+        assert!(contained_similarity(long, heard) >= VERBATIM_MIN_SIMILARITY);
+        let slipped = heard.replace("recorded", "recorder");
+        assert!(contained_similarity(long, &slipped) >= VERBATIM_MIN_SIMILARITY);
+        // A paraphrase still fails.
+        assert!(
+            contained_similarity(
+                disclosure,
+                "Hi! We might record this, just so you know. How can I help?"
+            ) < VERBATIM_MIN_SIMILARITY
+        );
+        // A turn shorter than the text compares as a whole.
+        assert_eq!(
+            contained_similarity(disclosure, "This call"),
+            similarity(disclosure, "This call")
+        );
+    }
 
     #[test]
     fn exact_and_near_exact_pass_a_paraphrase_does_not() {

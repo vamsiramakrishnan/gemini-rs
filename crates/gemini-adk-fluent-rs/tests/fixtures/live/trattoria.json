@@ -1,0 +1,407 @@
+{
+  "name": "trattoria-booking",
+  "description": "Phone bookings for Trattoria Rustica.",
+  "instruction": "You are the phone booking assistant for Trattoria Rustica. Keep every reply to one or two short spoken sentences. Never invent availability: use the tools.",
+  "greeting": "Greet the caller as Trattoria Rustica's booking assistant and ask how you can help.",
+  "modality": "audio",
+  "voice": "Kore",
+  "runtime": {
+    "steering": "context_update"
+  },
+  "tools": [
+    {
+      "name": "check_availability",
+      "description": "Find open tables for a party size and a requested date and time.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "party_size": {
+            "type": "integer"
+          },
+          "datetime": {
+            "type": "string",
+            "description": "Requested date and time, ISO 8601"
+          }
+        },
+        "required": [
+          "party_size",
+          "datetime"
+        ]
+      },
+      "response": {
+        "options": [
+          "2026-10-14T19:00",
+          "2026-10-14T19:30"
+        ]
+      },
+      "save_response_as": "availability"
+    },
+    {
+      "name": "book_table",
+      "description": "Book the table the caller confirmed. Call only after reading the details back and hearing a clear yes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "party_size": {
+            "type": "integer"
+          },
+          "slot": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "party_size",
+          "slot",
+          "name"
+        ]
+      },
+      "response": {
+        "reference": "TR-2044"
+      },
+      "save_response_as": "booking"
+    },
+    {
+      "name": "handoff_to_staff",
+      "description": "Transfer the caller to a member of staff."
+    }
+  ],
+  "extract": [
+    {
+      "name": "booking_details",
+      "instruction": "Extract the party size, the requested date and time, and the name for the booking, as the caller gave them.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "party_size": {
+            "type": "integer"
+          },
+          "slot": {
+            "type": "string"
+          },
+          "guest_name": {
+            "type": "string"
+          }
+        }
+      },
+      "promote": [
+        {
+          "field": "party_size",
+          "policy": "overwrite"
+        },
+        {
+          "field": "slot",
+          "policy": "overwrite"
+        },
+        {
+          "field": "guest_name"
+        }
+      ]
+    },
+    {
+      "name": "caller_signals",
+      "instruction": "Read the latest turns of the conversation. Set a field to true only when the caller clearly said so in their own words. Otherwise leave it out.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "book_table_confirmed": {
+            "type": "boolean",
+            "description": "The caller agreed to the booking after hearing the details read back."
+          },
+          "intent_human_agent": {
+            "type": "boolean",
+            "description": "The caller asked to speak to a person instead of the assistant."
+          }
+        }
+      },
+      "promote": [
+        {
+          "field": "book_table_confirmed",
+          "policy": "true_only"
+        },
+        {
+          "field": "intent_human_agent",
+          "to": "intent:human_agent",
+          "policy": "true_only"
+        }
+      ]
+    }
+  ],
+  "conversation": {
+    "name": "booking",
+    "stages": [
+      {
+        "id": "collect",
+        "say": "Find out how many guests, the date and time they want, and the name for the booking.",
+        "verbatim": "This call may be recorded.",
+        "collect": [
+          "party_size",
+          "slot",
+          "guest_name"
+        ],
+        "repair": {
+          "reprompt_after": 2,
+          "escalate_after": 4,
+          "escalate_to": "handoff"
+        },
+        "next": [
+          {
+            "to": "offer",
+            "when": {
+              "captured": [
+                "party_size",
+                "slot",
+                "guest_name"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "offer",
+        "say": "Check availability for the requested time and offer the open options.",
+        "allow": [
+          "check_availability"
+        ],
+        "timing": {
+          "filler_after_ms": 1200
+        },
+        "next": [
+          {
+            "to": "confirm",
+            "when": {
+              "called_ok": "check_availability"
+            }
+          }
+        ]
+      },
+      {
+        "id": "confirm",
+        "say": "Read back the party size, time and name, ask the caller to confirm, then book.",
+        "ground": "Party of {party_size} at {slot}, under {guest_name}.",
+        "allow": [
+          "book_table"
+        ],
+        "commit": {
+          "tool": "book_table",
+          "when": {
+            "is_true": "book_table_confirmed"
+          }
+        },
+        "next": [
+          {
+            "to": "done",
+            "when": {
+              "called_ok": "book_table"
+            }
+          }
+        ]
+      },
+      {
+        "id": "done",
+        "say": "Give the booking reference and say goodbye.",
+        "terminal": true
+      },
+      {
+        "id": "handoff",
+        "say": "Apologise and tell the caller a member of staff will call them back.",
+        "terminal": true
+      }
+    ],
+    "require": [
+      "done"
+    ],
+    "overlays": [
+      {
+        "name": "handoff",
+        "trigger": {
+          "is_true": "intent:human_agent"
+        },
+        "stages": [
+          {
+            "id": "transfer",
+            "say": "Tell the caller you are passing them to a member of staff, then call handoff_to_staff.",
+            "allow": [
+              "handoff_to_staff"
+            ],
+            "done": {
+              "called_ok": "handoff_to_staff"
+            }
+          }
+        ],
+        "resume": "terminate"
+      }
+    ]
+  },
+  "scenarios": [
+    {
+      "name": "books after confirmation",
+      "steps": [
+        {
+          "expect_active": [
+            "collect"
+          ]
+        },
+        {
+          "set": {
+            "key": "party_size",
+            "value": 4
+          }
+        },
+        {
+          "set": {
+            "key": "slot",
+            "value": "2026-10-14T19:00"
+          }
+        },
+        {
+          "set": {
+            "key": "guest_name",
+            "value": "Rossi"
+          }
+        },
+        {
+          "set": {
+            "key": "verbatim:collect",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "offer"
+          ]
+        },
+        {
+          "expect_allowed": "check_availability"
+        },
+        {
+          "tool_ok": "check_availability"
+        },
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "book_table"
+        },
+        {
+          "set": {
+            "key": "book_table_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "book_table"
+        },
+        {
+          "tool_ok": "book_table"
+        },
+        "expect_complete"
+      ]
+    },
+    {
+      "name": "never books without a yes",
+      "steps": [
+        {
+          "expect_denied": "book_table"
+        },
+        {
+          "set": {
+            "key": "party_size",
+            "value": 2
+          }
+        },
+        {
+          "set": {
+            "key": "slot",
+            "value": "2026-10-15T20:00"
+          }
+        },
+        {
+          "set": {
+            "key": "guest_name",
+            "value": "Chen"
+          }
+        },
+        {
+          "set": {
+            "key": "verbatim:collect",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "tool_ok": "check_availability"
+        },
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "book_table"
+        }
+      ]
+    },
+    {
+      "name": "asking for a person hands off and books nothing",
+      "steps": [
+        {
+          "set": {
+            "key": "intent:human_agent",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_denied": "book_table"
+        },
+        {
+          "expect_denied": "check_availability"
+        },
+        {
+          "expect_allowed": "handoff_to_staff"
+        },
+        {
+          "tool_ok": "handoff_to_staff"
+        },
+        "turn",
+        {
+          "expect_denied": "handoff_to_staff"
+        },
+        {
+          "expect_denied": "book_table"
+        }
+      ]
+    },
+    {
+      "name": "stalling escalates to handoff",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:collect",
+            "value": true
+          }
+        },
+        "turn",
+        "turn",
+        "turn",
+        "turn",
+        {
+          "expect_slot": {
+            "key": "repair:collect:escalate",
+            "value": true
+          }
+        },
+        {
+          "expect_denied": "book_table"
+        }
+      ]
+    }
+  ]
+}

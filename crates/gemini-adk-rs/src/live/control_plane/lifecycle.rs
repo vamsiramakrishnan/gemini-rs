@@ -56,14 +56,12 @@ pub(in crate::live) async fn handle_turn_complete(
     // 1. Reset turn-scoped state
     state.clear_prefix("turn:");
 
-    // 2. Finalize transcript (prefer server transcriptions when available)
-    if let Some(input_text) = state.session().get::<String>("last_input_transcription") {
-        transcript_buffer.set_input_transcription(&input_text);
-    }
-    if let Some(output_text) = state.session().get::<String>("last_output_transcription") {
-        transcript_buffer.set_output_transcription(&output_text);
-    }
-    transcript_buffer.end_turn();
+    // 2. Finalize the transcript. The buffer already holds every redacted
+    // transcription chunk of the turn; `session:last_*_transcription` hold
+    // only the latest raw chunk, so they must not replace it.
+    let previous = transcript_buffer.window(1).last().cloned();
+    let ended = transcript_buffer.end_turn();
+    let counts_for_repair = counts_for_repair(previous.as_ref(), ended.as_ref());
 
     // 3. Capture a journal cursor before extractor/computed/phase mutations.
     let pre_watcher_cursor = watchers.as_ref().map(|_| state.mutation_cursor());
@@ -186,7 +184,13 @@ pub(in crate::live) async fn handle_turn_complete(
     // 7g. Flow governance. (Extracted so the re-latch + status publish + posture
     // /grounding/unmet projection + on-enter firing is a named, harness-covered
     // unit — see `harness` below and docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
-    govern_flow(&control_plane.flow, state, &mut context_buffer).await;
+    govern_flow(
+        &control_plane.flow,
+        state,
+        counts_for_repair,
+        &mut context_buffer,
+    )
+    .await;
 
     // 7h. Under `ContextUpdate` steering, the tools the phase and flow admit
     // now, when they differ from those declared; sent with the instruction.
@@ -506,6 +510,48 @@ async fn evaluate_repair(
     should_prompt
 }
 
+/// The steering for the stages active before anything has happened: their
+/// postures, then their grounding lines, as [`govern_flow`] projects them at a
+/// turn boundary.
+///
+/// Sent once at connect, before any greeting. Without it the model's first
+/// turn has only the base instruction: a greeting asked to "say the
+/// disclosure line" has no line to say, and a verbatim stage then waits for
+/// text the model never had.
+pub(in crate::live) fn opening_steering(
+    flow: &Option<crate::flow::SharedFlowStack>,
+    state: &State,
+) -> Vec<String> {
+    let Some(flow) = flow else {
+        return Vec::new();
+    };
+    let mon = flow.lock();
+    let mut lines = mon.active_postures(state);
+    lines.extend(mon.active_grounds(state));
+    lines
+}
+
+/// Whether the turn that just ended counts toward a stage's repair
+/// thresholds.
+///
+/// A turn the caller spoke in counts, and so does a turn where the model
+/// spoke on its own after a quiet one, such as a silence reprompt. The
+/// greeting and the model speaking a tool's result do not: in live runs
+/// they made `escalate_after: 4` fire after two exchanges with the caller.
+/// A turn with no transcript at all (transcription off) counts, as before.
+fn counts_for_repair(
+    previous: Option<&crate::live::transcript::TranscriptTurn>,
+    ended: Option<&crate::live::transcript::TranscriptTurn>,
+) -> bool {
+    let Some(ended) = ended else {
+        return true;
+    };
+    if !ended.user.trim().is_empty() {
+        return true;
+    }
+    previous.is_some_and(|p| p.tool_calls.is_empty())
+}
+
 /// Re-latch the governed flow for a turn and project its status.
 ///
 /// Re-evaluates the marking, publishes `flow:done` / `flow:active`, pushes
@@ -521,12 +567,13 @@ async fn evaluate_repair(
 async fn govern_flow(
     flow: &Option<crate::flow::SharedFlowStack>,
     state: &State,
+    counts_for_repair: bool,
     context_buffer: &mut Vec<gemini_genai_rs::prelude::Content>,
 ) {
     if let Some(mon_arc) = flow {
         let enter_actions = {
             let mut mon = mon_arc.lock();
-            mon.on_turn(state);
+            mon.on_turn_counted(state, counts_for_repair);
             let done: Vec<String> = mon.marking().done.iter().cloned().collect();
             let _ = state.set("flow:done", done);
             let active: Vec<String> = mon
@@ -2061,6 +2108,71 @@ mod harness {
                 turn_complete: false
             }],
             "steering modifiers delivered as one batched context frame"
+        );
+    }
+
+    /// Server transcriptions arrive in chunks, and the session keeps only the
+    /// latest one. The turn's text is everything the lane accumulated, never
+    /// that last chunk, and a chunk from an earlier turn never reappears.
+    #[tokio::test]
+    async fn a_turn_keeps_its_whole_transcript() {
+        let mut h = Harness::new();
+        h.transcript = TranscriptBuffer::new();
+        for chunk in ["Table for four ", "tomorrow at seven."] {
+            h.transcript.push_input(chunk);
+            let _ = h.state.session().set("last_input_transcription", chunk);
+        }
+        for chunk in ["Four at seven. ", "Shall I book it?"] {
+            h.transcript.push_output(chunk);
+            let _ = h.state.session().set("last_output_transcription", chunk);
+        }
+        h.run_turn().await;
+        // The next turn: the caller says nothing new, the model speaks.
+        h.transcript.push_output("Booked.");
+        h.run_turn().await;
+
+        let turns = h.transcript.window(2).to_vec();
+        assert_eq!(turns[0].user, "Table for four tomorrow at seven.");
+        assert_eq!(turns[0].model, "Four at seven. Shall I book it?");
+        assert_eq!(turns[1].user, "", "no stale chunk from the turn before");
+        assert_eq!(turns[1].model, "Booked.");
+    }
+
+    fn turn(user: &str, model: &str, tools: usize) -> TranscriptTurn {
+        TranscriptTurn {
+            turn_number: 0,
+            user: user.into(),
+            model: model.into(),
+            tool_calls: (0..tools)
+                .map(|_| crate::live::transcript::ToolCallSummary {
+                    name: "check".into(),
+                    args_summary: "{}".into(),
+                    result_summary: "{}".into(),
+                })
+                .collect(),
+            timestamp: std::time::Instant::now(),
+        }
+    }
+
+    #[test]
+    fn only_turns_with_the_caller_count_toward_repair() {
+        use super::counts_for_repair as counts;
+        let greeting = turn("", "Hello, how can I help?", 0);
+        let asked = turn("Four at seven.", "", 1);
+        let result = turn("", "Seven is free.", 0);
+        assert!(!counts(None, Some(&greeting)), "the greeting");
+        assert!(counts(Some(&greeting), Some(&asked)), "the caller spoke");
+        assert!(
+            !counts(Some(&asked), Some(&result)),
+            "the model speaking a tool's result"
+        );
+        assert!(
+            counts(Some(&result), Some(&result)),
+            "the model again, unprompted: a reprompt"
+        );
+        assert!(
+            counts(Some(&result), None),
+            "no transcript: counted as before"
         );
     }
 }

@@ -10,6 +10,7 @@ mod task_transcript;
 mod tool_gate;
 mod tool_handler;
 
+pub(super) use lifecycle::opening_steering;
 pub(super) use main_loop::run_control_lane;
 
 /// Dispatch an async callback respecting its [`ExecutionMode`](super::ExecutionMode).

@@ -1002,6 +1002,25 @@ fn any_of(guards: Vec<Guard>) -> Option<Guard> {
 
 /// Lower a set of stages (the main flow or an overlay) into a [`CompiledFlow`],
 /// with conversation-level referential checks.
+/// The stages an overlay without an explicit `require` must finish: its
+/// terminal stages, else the stages no other stage follows.
+fn overlay_ends(stages: &[StageSpec]) -> Vec<String> {
+    let terminal: Vec<String> = stages
+        .iter()
+        .filter(|s| s.terminal)
+        .map(|s| s.id.clone())
+        .collect();
+    if !terminal.is_empty() {
+        return terminal;
+    }
+    let followed = |id: &str| stages.iter().any(|s| s.after.iter().any(|a| a == id));
+    stages
+        .iter()
+        .filter(|s| s.next.is_empty() && !followed(&s.id))
+        .map(|s| s.id.clone())
+        .collect()
+}
+
 fn lower_flow(stages: &[StageSpec], require: &[String]) -> Result<CompiledFlow, ConversationError> {
     if stages.is_empty() {
         return Err(ConversationError::Empty);
@@ -1275,16 +1294,15 @@ fn compile_spec(
     }
 
     // Overlays: each lowers to its own validated flow + extractors. An overlay
-    // with no explicit `require` is complete when its terminal stages are done —
-    // so completion is meaningful (without it, `is_complete()` is trivially true).
+    // with no explicit `require` is complete when its terminal stages are done,
+    // or, with none marked terminal, its last stages (those nothing follows) —
+    // so completion is meaningful (without it, `is_complete()` is trivially
+    // true, and a handoff digression closed on the next turn whether or not its
+    // transfer tool had run).
     let mut overlays = Vec::with_capacity(spec.overlays.len());
     for ov in &spec.overlays {
         let require = if ov.require.is_empty() {
-            ov.stages
-                .iter()
-                .filter(|s| s.terminal)
-                .map(|s| s.id.clone())
-                .collect()
+            overlay_ends(&ov.stages)
         } else {
             ov.require.clone()
         };
@@ -1981,6 +1999,55 @@ mod tests {
         let _ = state.set("a_done", true);
         stack.on_turn(&state);
         assert!(stack.current().marking().done.contains("a"));
+    }
+
+    /// A handoff digression whose one stage waits for the transfer tool, with
+    /// no `require` and no terminal stage (the shape `adk spec plan`'s
+    /// `escalation` answer writes). In a live run the model offered the
+    /// transfer instead of making it; the digression closed on the next turn
+    /// and, resuming with `terminate`, ended the call untransferred.
+    #[test]
+    fn a_handoff_digression_waits_for_its_transfer() {
+        let spec: ConversationSpec = serde_json::from_value(serde_json::json!({
+            "name": "dental",
+            "stages": [
+                { "id": "book", "allow": ["book_cleaning"], "next": [{ "to": "done", "when": { "called_ok": "book_cleaning" } }] },
+                { "id": "done", "terminal": true }
+            ],
+            "overlays": [{
+                "name": "handoff",
+                "trigger": { "is_true": "intent:urgent_care" },
+                "stages": [{
+                    "id": "transfer",
+                    "allow": ["transfer_to_staff"],
+                    "done": { "called_ok": "transfer_to_staff" }
+                }],
+                "resume": "terminate"
+            }]
+        }))
+        .unwrap();
+        let convo = Conversation::from_spec(spec).expect("compiles");
+        let mut stack = convo.stack(Enforcement::Enforce);
+        let state = State::new();
+
+        let _ = state.set("intent:urgent_care", true);
+        stack.on_turn(&state);
+        assert_eq!(stack.active_overlay(), Some("handoff"));
+        // The model talks instead of transferring, for two turns.
+        stack.on_turn(&state);
+        stack.on_turn(&state);
+        assert_eq!(stack.active_overlay(), Some("handoff"));
+        assert!(
+            !stack.is_terminated(),
+            "the call is still waiting on the transfer"
+        );
+        assert!(stack.admits_tool("transfer_to_staff", &state).is_ok());
+        assert!(stack.admits_tool("book_cleaning", &state).is_err());
+
+        stack.on_tool_ok("transfer_to_staff", &state);
+        stack.on_turn(&state);
+        stack.on_turn(&state);
+        assert!(stack.is_terminated(), "terminated once the transfer ran");
     }
 
     /// The artifact `converse()` installs on a live session is the same stack

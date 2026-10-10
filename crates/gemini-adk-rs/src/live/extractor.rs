@@ -9,7 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::llm::{BaseLlm, LlmError, LlmRequest};
+use crate::llm::{BaseLlm, LlmError, LlmRequest, LlmResponse};
 use crate::state::State;
 
 use super::phase::Phase;
@@ -271,6 +271,13 @@ pub fn promote_fields(
         };
         let reason = if value.is_null() {
             Some("extracted value was null")
+        } else if state
+            .get_raw(&rule.state_key)
+            .is_some_and(|known| crate::state::equivalent_values(&known, value))
+        {
+            // Re-stating a known value in other words is not news; writing it
+            // would only churn the journal and could read as a correction.
+            Some("an equivalent value is already known")
         } else if rule
             .accept
             .as_ref()
@@ -313,6 +320,52 @@ pub struct OnComplete {
     pub mode: crate::orchestration::AgentMode,
 }
 
+/// Appended to every extraction prompt: a field the transcript does not
+/// state is null, never a guess.
+const NULL_GUIDANCE: &str = "\n\nUse null for any field the transcript does not state. \
+     Never guess, and never use placeholders such as \"unknown\", empty strings or zero.";
+
+/// Appended when some fields are already in state: re-reading the window
+/// every turn, the model would otherwise re-state known values in new words,
+/// and each re-statement would read as a correction.
+const KNOWN_GUIDANCE: &str = "\n\nSome fields are already known (listed before the transcript). \
+     Return a known field only if the user's latest turn changes it; otherwise return null \
+     for it, even if the transcript mentions it again in other words.";
+
+/// The schema with every top-level property allowed to be null, so the
+/// model can say "not stated" instead of inventing a value of the right type.
+fn nullable_fields(schema: &Value) -> Value {
+    let mut schema = schema.clone();
+    let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) else {
+        return schema;
+    };
+    for property in properties.values_mut() {
+        let Some(object) = property.as_object_mut() else {
+            continue;
+        };
+        match object.get_mut("type") {
+            Some(Value::String(t)) if t != "null" => {
+                let t = t.clone();
+                object.insert("type".into(), serde_json::json!([t, "null"]));
+            }
+            Some(Value::Array(types)) => {
+                if !types.iter().any(|t| t == "null") {
+                    types.push(Value::String("null".into()));
+                }
+            }
+            Some(_) => {}
+            None => {
+                let inner = Value::Object(std::mem::take(object));
+                object.insert(
+                    "anyOf".into(),
+                    serde_json::json!([inner, { "type": "null" }]),
+                );
+            }
+        }
+    }
+    schema
+}
+
 /// LLM-backed turn extractor that sends transcript windows to an OOB LLM
 /// with a structured extraction prompt.
 pub struct LlmExtractor {
@@ -330,6 +383,11 @@ pub struct LlmExtractor {
     /// Field promotion rules. Empty means every top-level non-null field is
     /// auto-flattened into state under its own name.
     promotion_rules: Vec<FieldPromotion>,
+    /// Thinking budget sent with each request; `None` leaves the model's
+    /// default.
+    thinking_budget: Option<u32>,
+    /// Set once the model rejects `thinking_budget`, so it is not sent again.
+    budget_rejected: std::sync::atomic::AtomicBool,
 }
 
 impl LlmExtractor {
@@ -355,7 +413,23 @@ impl LlmExtractor {
             min_words: 0,
             trigger: ExtractionTrigger::EveryTurn,
             promotion_rules: Vec::new(),
+            thinking_budget: Some(0),
+            budget_rejected: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Set the thinking budget sent with each extraction request.
+    ///
+    /// The default is `Some(0)`: extraction reads a few turns, and the turn
+    /// pipeline waits for it, so thinking costs seconds of latency on every
+    /// turn. Measured on `gemini-flash-latest`, a budget of 0 cut a short
+    /// extraction from 7.7 s to 2.3 s with the same results. `None` leaves
+    /// the model's default. When a model rejects the budget (some only work
+    /// in thinking mode), the extractor retries without it and stops sending
+    /// it.
+    pub fn with_thinking_budget(mut self, budget: Option<u32>) -> Self {
+        self.thinking_budget = budget;
+        self
     }
 
     /// Set the minimum word count in the last user utterance to trigger extraction.
@@ -392,6 +466,107 @@ impl LlmExtractor {
         self
     }
 
+    /// The values already in state for this extractor's fields, keyed by
+    /// field name: the promotion targets when there are rules, otherwise the
+    /// schema's properties.
+    fn known_fields(&self, state: &State) -> serde_json::Map<String, Value> {
+        let pairs: Vec<(String, String)> = if self.promotion_rules.is_empty() {
+            self.schema
+                .as_ref()
+                .and_then(|s| s.get("properties"))
+                .and_then(Value::as_object)
+                .map(|p| p.keys().map(|k| (k.clone(), k.clone())).collect())
+                .unwrap_or_default()
+        } else {
+            self.promotion_rules
+                .iter()
+                .map(|r| (r.field.clone(), r.state_key.clone()))
+                .collect()
+        };
+        pairs
+            .into_iter()
+            .filter_map(|(field, key)| {
+                state
+                    .get_raw(&key)
+                    .filter(|v| !v.is_null())
+                    .map(|v| (field, v))
+            })
+            .collect()
+    }
+
+    async fn extract_knowing(
+        &self,
+        window: &[TranscriptTurn],
+        known: &serde_json::Map<String, Value>,
+    ) -> Result<Value, LlmError> {
+        let transcript = Self::format_transcript(window);
+        let (preamble, guidance) = if known.is_empty() {
+            (String::new(), "")
+        } else {
+            (
+                format!("Already known: {}\n\n", Value::Object(known.clone())),
+                KNOWN_GUIDANCE,
+            )
+        };
+        let mut request = LlmRequest::from_text(format!(
+            "{preamble}Transcript:\n{transcript}\nExtract the requested information."
+        ));
+        request.system_instruction = Some(format!("{}{NULL_GUIDANCE}{guidance}", self.prompt));
+
+        // Use native JSON mode when a schema is available — the API constrains
+        // the model to produce valid JSON matching the schema, eliminating
+        // markdown fences and malformed output. Every field may be null:
+        // constrained to a bare type, the model fills fields the transcript
+        // never mentions with placeholders ("unknown", "", 0).
+        if let Some(ref schema) = self.schema {
+            request.response_mime_type = Some("application/json".to_string());
+            request.response_json_schema = Some(nullable_fields(schema));
+        } else {
+            request.response_mime_type = Some("application/json".to_string());
+        }
+
+        let response = self.generate(request).await?;
+        let text = response.text();
+
+        // Fallback: strip markdown code fences if the model still wraps output
+        let cleaned = strip_code_fences(&text);
+
+        serde_json::from_str(cleaned).map_err(|e| {
+            LlmError::Other(format!(
+                "Failed to parse extraction result as JSON: {e}. Raw: {text}"
+            ))
+        })
+    }
+
+    /// Send `request` with the thinking budget, falling back without it if
+    /// the model rejects it, and retrying once on a transient error: a lost
+    /// extraction loses what the caller said in that turn.
+    async fn generate(&self, mut request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        use std::sync::atomic::Ordering;
+        let budget = self
+            .thinking_budget
+            .filter(|_| !self.budget_rejected.load(Ordering::Relaxed));
+        request.thinking_budget = budget;
+        match self.llm.generate(request.clone()).await {
+            Err(LlmError::Api { status: 400, .. }) if budget.is_some() => {
+                tracing::warn!(
+                    extractor = %self.name,
+                    "the extraction model rejected thinking budget {budget:?}; \
+                     sending requests without it"
+                );
+                self.budget_rejected.store(true, Ordering::Relaxed);
+                request.thinking_budget = None;
+                self.llm.generate(request).await
+            }
+            Err(e) if e.is_retryable() => {
+                tracing::warn!(extractor = %self.name, "extraction failed ({e}); retrying once");
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                self.llm.generate(request).await
+            }
+            other => other,
+        }
+    }
+
     /// Format transcript turns for the LLM prompt.
     fn format_transcript(window: &[TranscriptTurn]) -> String {
         let mut out = String::new();
@@ -423,6 +598,18 @@ impl TurnExtractor for LlmExtractor {
     }
 
     fn should_extract(&self, window: &[TranscriptTurn]) -> bool {
+        // A turn the caller said nothing in, such as the model speaking a
+        // tool's result, holds no new caller information, and the turn
+        // pipeline waits for every extraction: in live runs each one held up
+        // the next tool call by seconds. Only when the window shows the
+        // caller's words are transcribed at all, so a session without input
+        // transcription still extracts.
+        if self.trigger == ExtractionTrigger::EveryTurn
+            && window.last().is_some_and(|t| t.user.trim().is_empty())
+            && window.iter().any(|t| !t.user.trim().is_empty())
+        {
+            return false;
+        }
         if self.min_words == 0 {
             return true;
         }
@@ -443,34 +630,18 @@ impl TurnExtractor for LlmExtractor {
     }
 
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError> {
-        let transcript = Self::format_transcript(window);
+        self.extract_knowing(window, &serde_json::Map::new()).await
+    }
 
-        let mut request = LlmRequest::from_text(format!(
-            "Transcript:\n{transcript}\nExtract the requested information."
-        ));
-        request.system_instruction = Some(self.prompt.clone());
-
-        // Use native JSON mode when a schema is available — the API constrains
-        // the model to produce valid JSON matching the schema, eliminating
-        // markdown fences and malformed output.
-        if let Some(ref schema) = self.schema {
-            request.response_mime_type = Some("application/json".to_string());
-            request.response_json_schema = Some(schema.clone());
-        } else {
-            request.response_mime_type = Some("application/json".to_string());
-        }
-
-        let response = self.llm.generate(request).await?;
-        let text = response.text();
-
-        // Fallback: strip markdown code fences if the model still wraps output
-        let cleaned = strip_code_fences(&text);
-
-        serde_json::from_str(cleaned).map_err(|e| {
-            LlmError::Other(format!(
-                "Failed to parse extraction result as JSON: {e}. Raw: {text}"
-            ))
-        })
+    /// Extract, telling the model which fields are already known so it
+    /// returns only what the latest turn adds or changes.
+    async fn extract_with_state(
+        &self,
+        window: &[TranscriptTurn],
+        state: &State,
+    ) -> Result<Value, LlmError> {
+        self.extract_knowing(window, &self.known_fields(state))
+            .await
     }
 }
 
@@ -606,6 +777,178 @@ mod tests {
     }
 
     #[test]
+    fn every_field_of_the_extraction_schema_may_be_null() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "party_size": { "type": "integer" },
+                "slot": { "type": ["string"] },
+                "kind": { "enum": ["a", "b"] },
+                "note": { "type": ["string", "null"] }
+            }
+        });
+        let nullable = nullable_fields(&schema);
+        let props = &nullable["properties"];
+        assert_eq!(
+            props["party_size"]["type"],
+            serde_json::json!(["integer", "null"])
+        );
+        assert_eq!(props["slot"]["type"], serde_json::json!(["string", "null"]));
+        assert_eq!(
+            props["kind"]["anyOf"],
+            serde_json::json!([{ "enum": ["a", "b"] }, { "type": "null" }])
+        );
+        assert_eq!(props["note"]["type"], serde_json::json!(["string", "null"]));
+        // A schema without properties is left alone.
+        assert_eq!(
+            nullable_fields(&serde_json::json!({ "type": "object" })),
+            serde_json::json!({ "type": "object" })
+        );
+    }
+
+    #[tokio::test]
+    async fn the_extraction_request_allows_and_asks_for_null() {
+        struct Capture(parking_lot::Mutex<Option<LlmRequest>>);
+        #[async_trait]
+        impl BaseLlm for Capture {
+            fn model_id(&self) -> &str {
+                "capture"
+            }
+            async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+                *self.0.lock() = Some(request);
+                Ok(LlmResponse {
+                    content: Content {
+                        role: Some(Role::Model),
+                        parts: vec![Part::Text { text: "{}".into() }],
+                    },
+                    finish_reason: Some("STOP".into()),
+                    usage: None,
+                })
+            }
+        }
+        let llm = Arc::new(Capture(parking_lot::Mutex::new(None)));
+        let extractor = LlmExtractor::new("booking", llm.clone(), "Extract the booking.", 3)
+            .with_schema(serde_json::json!({
+                "type": "object",
+                "properties": { "party_size": { "type": "integer" } }
+            }));
+        extractor
+            .extract(&make_turns(&[("hi", "hello")]))
+            .await
+            .unwrap();
+        let request = llm.0.lock().take().unwrap();
+        assert_eq!(
+            request.response_json_schema.unwrap()["properties"]["party_size"]["type"],
+            serde_json::json!(["integer", "null"])
+        );
+        let system = request.system_instruction.unwrap();
+        assert!(system.starts_with("Extract the booking."));
+        assert!(system.contains("Use null for any field the transcript does not state"));
+    }
+
+    #[tokio::test]
+    async fn known_fields_are_sent_with_the_transcript() {
+        struct Capture(parking_lot::Mutex<Vec<LlmRequest>>);
+        #[async_trait]
+        impl BaseLlm for Capture {
+            fn model_id(&self) -> &str {
+                "capture"
+            }
+            async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+                self.0.lock().push(request);
+                Ok(LlmResponse {
+                    content: Content {
+                        role: Some(Role::Model),
+                        parts: vec![Part::Text { text: "{}".into() }],
+                    },
+                    finish_reason: Some("STOP".into()),
+                    usage: None,
+                })
+            }
+        }
+        let llm = Arc::new(Capture(parking_lot::Mutex::new(Vec::new())));
+        let extractor = LlmExtractor::new("booking", llm.clone(), "Extract the booking.", 3)
+            .with_promotions(vec![
+                FieldPromotion::overwrite("party_size"),
+                FieldPromotion::overwrite("slot").to("requested_slot"),
+            ]);
+        let state = State::new();
+        let window = make_turns(&[("seven is perfect", "great")]);
+
+        // Nothing known yet: no preamble and no known-field guidance.
+        extractor.extract_with_state(&window, &state).await.unwrap();
+        // Known values are listed by field name, read from their state keys.
+        let _ = state.set("party_size", 4);
+        let _ = state.set("requested_slot", "tomorrow at 7 pm");
+        extractor.extract_with_state(&window, &state).await.unwrap();
+
+        let requests = llm.0.lock();
+        let text = |r: &LlmRequest| {
+            r.contents[0]
+                .parts
+                .iter()
+                .filter_map(|p| match p {
+                    Part::Text { text } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect::<String>()
+        };
+        assert!(text(&requests[0]).starts_with("Transcript:"));
+        assert!(
+            !requests[0]
+                .system_instruction
+                .as_ref()
+                .unwrap()
+                .contains("already known")
+        );
+        let second = text(&requests[1]);
+        assert!(second.starts_with("Already known: "), "{second}");
+        assert!(
+            second.contains(r#""party_size":4"#) && second.contains(r#""slot":"tomorrow at 7 pm""#)
+        );
+        assert!(
+            requests[1]
+                .system_instruction
+                .as_ref()
+                .unwrap()
+                .contains("Some fields are already known")
+        );
+    }
+
+    #[test]
+    fn a_restated_value_is_not_promoted_again() {
+        let llm = Arc::new(MockLlm {
+            response: "{}".into(),
+        });
+        let extractor = LlmExtractor::new("booking", llm, "x", 3)
+            .with_promotions(vec![FieldPromotion::overwrite("slot")]);
+        let state = State::new();
+        let _ = state.set("slot", "tomorrow at 7 pm");
+        let before = state.get_raw("slot");
+        let events = promote_fields(
+            &extractor,
+            "booking",
+            &serde_json::json!({ "slot": "Tomorrow at 7 PM." }),
+            &state,
+        );
+        assert_eq!(state.get_raw("slot"), before, "the known wording is kept");
+        assert!(events.iter().any(|e| matches!(
+            e,
+            PromotionEvent::Decision { accepted: false, reason, .. }
+                if reason == "an equivalent value is already known"
+        )));
+
+        // A different value is still promoted.
+        promote_fields(
+            &extractor,
+            "booking",
+            &serde_json::json!({ "slot": "8 pm" }),
+            &state,
+        );
+        assert_eq!(state.get::<String>("slot").as_deref(), Some("8 pm"));
+    }
+
+    #[test]
     fn extractor_name_and_window_size() {
         let llm = Arc::new(MockLlm {
             response: "{}".to_string(),
@@ -632,5 +975,138 @@ mod tests {
         let ext = LlmExtractor::new("Test", llm, "test", 5)
             .with_trigger(ExtractionTrigger::AfterToolCall);
         assert_eq!(ext.trigger(), ExtractionTrigger::AfterToolCall);
+    }
+
+    /// Answers with each scripted result in turn and records every request.
+    struct Scripted {
+        replies: parking_lot::Mutex<Vec<Result<&'static str, LlmError>>>,
+        requests: parking_lot::Mutex<Vec<LlmRequest>>,
+    }
+
+    impl Scripted {
+        fn new(replies: Vec<Result<&'static str, LlmError>>) -> Arc<Self> {
+            Arc::new(Self {
+                replies: parking_lot::Mutex::new(replies),
+                requests: parking_lot::Mutex::new(Vec::new()),
+            })
+        }
+        fn budgets(&self) -> Vec<Option<u32>> {
+            self.requests
+                .lock()
+                .iter()
+                .map(|r| r.thinking_budget)
+                .collect()
+        }
+    }
+
+    #[async_trait]
+    impl BaseLlm for Scripted {
+        fn model_id(&self) -> &str {
+            "scripted"
+        }
+        async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+            self.requests.lock().push(request);
+            let text = self.replies.lock().remove(0)?;
+            Ok(LlmResponse {
+                content: Content {
+                    role: Some(Role::Model),
+                    parts: vec![Part::Text { text: text.into() }],
+                },
+                finish_reason: Some("STOP".into()),
+                usage: None,
+            })
+        }
+    }
+
+    fn bad_request() -> LlmError {
+        LlmError::Api {
+            status: 400,
+            message: "Budget 0 is invalid. This model only works in thinking mode.".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn extraction_does_not_think_by_default() {
+        let llm = Scripted::new(vec![Ok("{}")]);
+        let extractor = LlmExtractor::new("x", llm.clone(), "Extract.", 2);
+        extractor
+            .extract(&make_turns(&[("hi", "hello")]))
+            .await
+            .unwrap();
+        assert_eq!(llm.budgets(), [Some(0)]);
+
+        let llm = Scripted::new(vec![Ok("{}")]);
+        let extractor =
+            LlmExtractor::new("x", llm.clone(), "Extract.", 2).with_thinking_budget(None);
+        extractor
+            .extract(&make_turns(&[("hi", "hello")]))
+            .await
+            .unwrap();
+        assert_eq!(llm.budgets(), [None], "None leaves the model's default");
+    }
+
+    #[tokio::test]
+    async fn a_rejected_thinking_budget_is_dropped_for_good() {
+        let llm = Scripted::new(vec![Err(bad_request()), Ok(r#"{"a": 1}"#), Ok("{}")]);
+        let extractor = LlmExtractor::new("x", llm.clone(), "Extract.", 2);
+        let window = make_turns(&[("hi", "hello")]);
+        assert_eq!(extractor.extract(&window).await.unwrap()["a"], 1);
+        extractor.extract(&window).await.unwrap();
+        assert_eq!(llm.budgets(), [Some(0), None, None]);
+    }
+
+    #[tokio::test]
+    async fn a_bad_request_without_a_budget_is_not_retried() {
+        let llm = Scripted::new(vec![Err(bad_request())]);
+        let extractor =
+            LlmExtractor::new("x", llm.clone(), "Extract.", 2).with_thinking_budget(None);
+        assert!(
+            extractor
+                .extract(&make_turns(&[("hi", "hello")]))
+                .await
+                .is_err()
+        );
+        assert_eq!(llm.requests.lock().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_transient_failure_is_retried_once() {
+        let unavailable = || LlmError::Api {
+            status: 503,
+            message: "Service Unavailable".into(),
+        };
+        let llm = Scripted::new(vec![Err(unavailable()), Ok(r#"{"a": 1}"#)]);
+        let extractor = LlmExtractor::new("x", llm.clone(), "Extract.", 2);
+        let window = make_turns(&[("hi", "hello")]);
+        assert_eq!(extractor.extract(&window).await.unwrap()["a"], 1);
+
+        let llm = Scripted::new(vec![Err(unavailable()), Err(unavailable())]);
+        let extractor = LlmExtractor::new("x", llm.clone(), "Extract.", 2);
+        assert!(extractor.extract(&window).await.is_err());
+        assert_eq!(llm.requests.lock().len(), 2, "one retry, not more");
+    }
+
+    #[test]
+    fn a_turn_without_the_caller_is_not_extracted() {
+        let llm = Scripted::new(vec![]);
+        let extractor = LlmExtractor::new("x", llm, "Extract.", 3);
+        // The model speaks a tool's result: nothing new from the caller.
+        assert!(!extractor.should_extract(&make_turns(&[
+            ("Four at seven.", "Let me check."),
+            ("", "Seven is free."),
+        ])));
+        assert!(extractor.should_extract(&make_turns(&[
+            ("", "Seven is free."),
+            ("Book it.", "Done."),
+        ])));
+        // No caller words anywhere: transcription may be off, so extract.
+        assert!(extractor.should_extract(&make_turns(&[("", "Hello.")])));
+        // Extractors that read the model's own words still run.
+        let on_generation = LlmExtractor::new("y", Scripted::new(vec![]), "Extract.", 3)
+            .with_trigger(ExtractionTrigger::OnGenerationComplete);
+        assert!(on_generation.should_extract(&make_turns(&[
+            ("Four at seven.", "Let me check."),
+            ("", "Seven is free."),
+        ])));
     }
 }

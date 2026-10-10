@@ -179,12 +179,14 @@ as follows:
   A stage that sets its own `timing` uses that value as given, so add
   `.uninterruptible()` to it if the model should still hold the floor.
 
-At the end of each model turn, the control lane compares the turn's output
-transcript with the required text. Similarity is word level: one minus the
-word edit distance divided by the length of the longer text, after
-lowercasing and dropping punctuation. The turn passes at 0.9 or above
-(`VERBATIM_MIN_SIMILARITY`). One wrong word in a ten-word passage still
-passes; in a nine-word passage it does not. The verdict is written to
+At the end of each model turn, the control lane looks for the required text
+in the turn's output transcript. The text may share the turn with other
+words, such as a greeting before a disclosure: the check scores the run of
+consecutive words, about as long as the text, that matches it best.
+Similarity is word level: one minus the word edit distance divided by the
+length of the longer text, after lowercasing and dropping punctuation. The
+turn passes at 0.9 or above (`VERBATIM_MIN_SIMILARITY`). One wrong word in a
+ten-word passage still passes; in a nine-word passage it does not. The verdict is written to
 `verbatim:{step}`, and `LiveEvent::VerbatimChecked { step, similarity, passed }`
 is emitted. Once a turn passes, a later turn in the same stage does not reset
 the flag. A paraphrase keeps the conversation in the stage, where the posture
@@ -364,6 +366,12 @@ unknown target is a `ConversationError::Spec` at compile time. The test
 `repeated_barge_ins_escalate_to_the_handoff` in `conversation.rs` checks that
 two barge-ins in `collect` raise the escalate signal and the next turn
 completes through `handoff`.
+
+A turn counts toward `reprompt_after` and `escalate_after` when the caller
+spoke in it, or when the model spoke again with no caller words in between,
+such as after a silence reprompt. The greeting and the model's reply to a tool
+result are part of the exchange before them and do not count. Without
+transcription the runtime cannot tell, and every turn counts.
 
 Repair is tracked for main-flow stages only. Turn counts, barge-ins and tool
 failures are not counted while a digression drives. When a step leaves the

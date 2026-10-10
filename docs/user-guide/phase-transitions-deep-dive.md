@@ -17,7 +17,8 @@ Turn count is incremented LAST (step 17), so guards see the current
 turn number, not the next one.
 
 **Extraction triggers**: Step 4 filters extractors by their trigger mode.
-`EveryTurn` extractors always run. `Interval(n)` extractors only run every
+`EveryTurn` extractors always run, except that an `LlmExtractor` skips a
+turn the caller said nothing in. `Interval(n)` extractors only run every
 N turns. `AfterToolCall` and `OnPhaseChange` extractors are skipped here
 and fire at their respective points (after tool dispatch and step 7c).
 
