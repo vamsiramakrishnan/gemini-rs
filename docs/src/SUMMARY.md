@@ -44,6 +44,7 @@
 - [Skills and Task Activations](./user-guide/skills-and-tasks.md)
 - [The Studio](./flow-studio.md)
 - [From a Spec to a Project](./user-guide/spec-projects.md)
+- [Authoring a Spec from a Coding Harness](./user-guide/spec-authoring.md)
 - [Storing and Promoting Specs (Bundles)](./user-guide/bundles.md)
 - [Deploying the Runtime (Cloud Run, GKE)](./user-guide/deploy.md)
 - [Voice Behavior in the Conversation Graph](./user-guide/voice-behavior.md)

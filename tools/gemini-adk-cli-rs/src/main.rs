@@ -261,6 +261,59 @@ enum SpecAction {
     },
     /// Print the JSON Schema of a session spec.
     Schema,
+    /// Print the authoring vocabulary as JSON: voices, guards, policies,
+    /// tool bindings, question rules and diagnostic codes.
+    Catalog,
+    /// Check a spec. Each diagnostic has a JSON pointer and, when the repair
+    /// is mechanical, a fix as JSON-patch operations. Exits non-zero on
+    /// errors.
+    Check {
+        /// Path to the spec (agent.json).
+        spec: String,
+        /// Print the report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the decisions the spec leaves open, as questions whose options
+    /// carry the patch that records them.
+    Plan {
+        /// Path to the spec (agent.json).
+        spec: String,
+        /// Decisions file (question id to choice): questions already answered.
+        #[arg(long)]
+        decisions: Option<String>,
+        /// Print the plan as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Apply answers to plan questions and print the result as JSON.
+    Answer {
+        /// Path to the spec (agent.json).
+        spec: String,
+        /// Answers as a JSON array of {id, choice?, value?}: inline JSON, a
+        /// file path, or - for stdin.
+        answers: String,
+        /// Decisions file to read, and to update with --write.
+        #[arg(long)]
+        decisions: Option<String>,
+        /// Write the spec and decisions back instead of printing the spec.
+        /// Object keys are written in sorted order.
+        #[arg(long)]
+        write: bool,
+    },
+    /// Apply JSON-patch operations (add, replace, remove) to a spec and
+    /// print the result as JSON.
+    Patch {
+        /// Path to the spec (agent.json).
+        spec: String,
+        /// A JSON array of operations: inline JSON, a file path, or - for
+        /// stdin.
+        ops: String,
+        /// Write the spec back instead of printing it. Object keys are
+        /// written in sorted order.
+        #[arg(long)]
+        write: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -514,6 +567,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             SpecAction::Run { spec } => commands::spec::run(&spec).await?,
             SpecAction::Schema => commands::spec::schema()?,
+            SpecAction::Catalog => commands::spec::catalog()?,
+            SpecAction::Check { spec, json } => commands::spec::check(&spec, json)?,
+            SpecAction::Plan {
+                spec,
+                decisions,
+                json,
+            } => commands::spec::plan(&spec, decisions.as_deref(), json)?,
+            SpecAction::Answer {
+                spec,
+                answers,
+                decisions,
+                write,
+            } => commands::spec::answer(&spec, &answers, decisions.as_deref(), write)?,
+            SpecAction::Patch { spec, ops, write } => commands::spec::patch(&spec, &ops, write)?,
         },
 
         Command::Bundle { action, store } => {

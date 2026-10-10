@@ -20,6 +20,7 @@
 //!   callbacks) are added on the returned builder after `apply`, exactly as
 //!   before; the spec never pretends to serialize them.
 
+pub mod authoring;
 mod codegen;
 pub mod project;
 mod simulate;

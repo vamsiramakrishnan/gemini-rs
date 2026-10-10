@@ -1,20 +1,25 @@
 //! `adk spec` — work with a session spec (`agent.json`): generate a project
 //! around it, run its tests, call one of its tools, or run it live.
 //!
+//! `catalog`, `check`, `plan`, `answer` and `patch` are the authoring
+//! interface a coding harness drives: see `spec::authoring`.
+//!
 //! A spec is the whole agent as data: model, instruction, conversation, tool
 //! declarations and tests. These commands are how a spec authored in Flow
 //! Studio becomes a project, and how a Python or Go project's tools are
 //! exercised through the same bindings the runtime uses.
 
 use std::fs;
+use std::io::Read as _;
 use std::path::Path;
 use std::sync::Arc;
 
 use gemini_adk_fluent_rs::prelude::*;
+use gemini_adk_fluent_rs::spec::authoring::{self, Answer, CheckReport, Decisions, PatchOp};
 use gemini_adk_fluent_rs::spec::{
     ProjectLanguage, ProjectOptions, SdkSource, SessionSpec, SpecModality, SpecResources,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 
 type CliResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -228,5 +233,189 @@ pub fn schema() -> CliResult {
         "{}",
         serde_json::to_string_pretty(&SessionSpec::json_schema())?
     );
+    Ok(())
+}
+
+/// `adk spec catalog` — the authoring vocabulary as JSON.
+pub fn catalog() -> CliResult {
+    println!("{}", serde_json::to_string_pretty(&authoring::catalog())?);
+    Ok(())
+}
+
+/// `adk spec check <spec> [--json]` — diagnostics with pointers and fixes.
+/// Exits non-zero when the spec has errors.
+pub fn check(spec_path: &str, as_json: bool) -> CliResult {
+    let raw = fs::read_to_string(spec_path).map_err(|e| format!("{spec_path}: {e}"))?;
+    let report = authoring::check_str(&raw);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_report(&report);
+    }
+    if report.valid {
+        Ok(())
+    } else {
+        Err(format!("{spec_path} has errors").into())
+    }
+}
+
+fn print_report(report: &CheckReport) {
+    for d in &report.diagnostics {
+        let severity = serde_json::to_value(d.severity).unwrap_or_default();
+        println!(
+            "{:<8} {:<14} {}",
+            severity.as_str().unwrap_or_default(),
+            d.code,
+            d.path.as_deref().unwrap_or("")
+        );
+        println!("         {}", d.message);
+        if let Some(fix) = &d.fix {
+            println!("         fix: {}", fix.description);
+        }
+    }
+    let errors = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == authoring::Severity::Error)
+        .count();
+    let warnings = report.diagnostics.len() - errors;
+    if report.diagnostics.is_empty() {
+        println!("ok");
+    } else {
+        println!("\n{errors} error(s), {warnings} warning(s)");
+    }
+}
+
+/// `adk spec plan <spec> [--decisions f] [--json]` — the open questions.
+pub fn plan(spec_path: &str, decisions_path: Option<&str>, as_json: bool) -> CliResult {
+    let doc = read_doc(spec_path)?;
+    let decisions = read_decisions(decisions_path)?;
+    let plan = authoring::plan(&doc, &decisions);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+        return Ok(());
+    }
+    if plan.questions.is_empty() {
+        println!("No open questions.");
+    }
+    for q in &plan.questions {
+        let tag = if q.blocking { "blocking" } else { "optional" };
+        println!("[{tag}] {}\n  {}\n  why: {}", q.id, q.ask, q.why);
+        let options: Vec<String> = q
+            .options
+            .iter()
+            .map(|o| {
+                let mut v = o.value.clone();
+                if q.default.as_deref() == Some(o.value.as_str()) {
+                    v.push_str(" (default)");
+                }
+                if o.needs_value {
+                    v.push_str(" <value>");
+                }
+                v
+            })
+            .collect();
+        println!("  options: {}\n", options.join(", "));
+    }
+    if plan.ready {
+        println!("Ready to generate.");
+    } else {
+        println!(
+            "Not ready: {} blocking question(s){}.",
+            plan.blocking,
+            if authoring::check(&doc).valid {
+                ""
+            } else {
+                "; `adk spec check` reports errors"
+            }
+        );
+    }
+    Ok(())
+}
+
+/// `adk spec answer <spec> <answers> [--decisions f] [--write]` — apply
+/// answers. Prints the applied ids, decisions, check report and remaining
+/// plan, plus the spec unless it was written back.
+pub fn answer(
+    spec_path: &str,
+    answers: &str,
+    decisions_path: Option<&str>,
+    write: bool,
+) -> CliResult {
+    let doc = read_doc(spec_path)?;
+    let decisions = read_decisions(decisions_path)?;
+    let answers: Vec<Answer> = match json_arg(answers)? {
+        Value::Array(items) => serde_json::from_value(Value::Array(items))?,
+        one => vec![serde_json::from_value(one)?],
+    };
+    let answered = authoring::answer(&doc, &answers, &decisions).map_err(|e| e.to_string())?;
+    let mut out = json!({
+        "applied": answered.applied,
+        "decisions": answered.decisions,
+        "check": authoring::check(&answered.spec),
+        "plan": authoring::plan(&answered.spec, &answered.decisions),
+    });
+    if write {
+        write_json(spec_path, &answered.spec)?;
+        if let Some(path) = decisions_path {
+            write_json(path, &serde_json::to_value(&answered.decisions)?)?;
+        }
+    } else {
+        out["spec"] = answered.spec;
+    }
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
+/// `adk spec patch <spec> <ops> [--write]` — apply JSON-patch operations.
+/// Prints the check report, plus the spec unless it was written back.
+pub fn patch(spec_path: &str, ops: &str, write: bool) -> CliResult {
+    let doc = read_doc(spec_path)?;
+    let ops: Vec<PatchOp> = serde_json::from_value(json_arg(ops)?)?;
+    let patched = authoring::apply_patch(&doc, &ops).map_err(|e| e.to_string())?;
+    let mut out = json!({ "check": authoring::check(&patched) });
+    if write {
+        write_json(spec_path, &patched)?;
+    } else {
+        out["spec"] = patched;
+    }
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
+/// The spec file as JSON, without deserializing it as a spec.
+fn read_doc(path: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    let raw = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    Ok(serde_json::from_str(&raw).map_err(|e| format!("{path}: {e}"))?)
+}
+
+fn read_decisions(path: Option<&str>) -> Result<Decisions, Box<dyn std::error::Error>> {
+    match path {
+        Some(path) if Path::new(path).exists() => {
+            let raw = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+            Ok(serde_json::from_str(&raw).map_err(|e| format!("{path}: {e}"))?)
+        }
+        _ => Ok(Decisions::new()),
+    }
+}
+
+/// A JSON argument: inline JSON, `-` for stdin, or a file path.
+fn json_arg(arg: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    let text = if arg == "-" {
+        let mut text = String::new();
+        std::io::stdin().read_to_string(&mut text)?;
+        text
+    } else if arg.trim_start().starts_with(['[', '{']) {
+        arg.to_string()
+    } else {
+        fs::read_to_string(arg).map_err(|e| format!("{arg}: {e}"))?
+    };
+    Ok(serde_json::from_str(&text).map_err(|e| format!("{arg}: {e}"))?)
+}
+
+fn write_json(path: &str, value: &Value) -> CliResult {
+    let mut text = serde_json::to_string_pretty(value)?;
+    text.push('\n');
+    fs::write(path, text).map_err(|e| format!("{path}: {e}"))?;
     Ok(())
 }
