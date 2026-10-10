@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use base64::Engine;
 use tokio::sync::broadcast;
 
 use crate::protocol::messages::*;
@@ -44,17 +43,17 @@ pub(super) fn handle_server_msg(
                     state.start_turn();
                 }
 
-                for part in &model_turn.parts {
+                for part in model_turn.parts {
                     match part {
                         Part::Text { text } => {
-                            state.append_text(text);
-                            let _ = event_tx.send(SessionEvent::TextDelta(text.clone()));
+                            state.append_text(&text);
+                            let _ = event_tx.send(SessionEvent::TextDelta(text));
                         }
                         // Audio is the common case; anything else inline — Live
                         // Avatar video (`video/mp4`) — must not reach the speaker.
                         Part::InlineData { inline_data } => {
                             let Ok(decoded) =
-                                base64::engine::general_purpose::STANDARD.decode(&inline_data.data)
+                                base64_simd::STANDARD.decode_to_vec(&inline_data.data)
                             else {
                                 continue;
                             };
@@ -70,13 +69,13 @@ pub(super) fn handle_server_msg(
                                 let _ = event_tx.send(SessionEvent::AudioData(data));
                             } else {
                                 let _ = event_tx.send(SessionEvent::Media(InlineMedia {
-                                    mime_type: inline_data.mime_type.clone(),
+                                    mime_type: inline_data.mime_type,
                                     data,
                                 }));
                             }
                         }
                         Part::Thought { text, .. } => {
-                            let _ = event_tx.send(SessionEvent::Thought(text.clone()));
+                            let _ = event_tx.send(SessionEvent::Thought(text));
                         }
                         _ => {}
                     }

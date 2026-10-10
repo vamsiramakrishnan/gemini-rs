@@ -1,7 +1,5 @@
 //! Message codec — encode commands, decode server messages.
 
-use base64::Engine;
-
 use crate::protocol::messages::*;
 use crate::protocol::types::*;
 use crate::session::SessionCommand;
@@ -60,7 +58,7 @@ impl Codec for JsonCodec {
     ) -> Result<Vec<u8>, CodecError> {
         match cmd {
             SessionCommand::SendAudio(data) => {
-                let encoded = base64::engine::general_purpose::STANDARD.encode(data);
+                let encoded = base64_simd::STANDARD.encode_to_string(data);
                 let msg = RealtimeInputMessage {
                     realtime_input: RealtimeInputPayload {
                         media_chunks: Vec::new(),
@@ -156,7 +154,7 @@ impl Codec for JsonCodec {
                 serde_json::to_vec(&msg).map_err(|e| CodecError::Serialize(e.to_string()))
             }
             SessionCommand::SendVideo(data) => {
-                let encoded = base64::engine::general_purpose::STANDARD.encode(data);
+                let encoded = base64_simd::STANDARD.encode_to_string(data);
                 let msg = RealtimeInputMessage {
                     realtime_input: RealtimeInputPayload {
                         media_chunks: Vec::new(),
@@ -228,6 +226,37 @@ impl Codec for JsonCodec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Audio is encoded and decoded with `base64-simd` on the per-frame path.
+    /// It must agree with the `base64` crate's standard engine, which the rest
+    /// of the SDK and every recorded fixture use.
+    #[test]
+    fn simd_base64_matches_standard_engine() {
+        use base64::Engine as _;
+        let engine = &base64::engine::general_purpose::STANDARD;
+        for len in 0..300usize {
+            let bytes: Vec<u8> = (0..len).map(|i| (i * 131 + len) as u8).collect();
+            let encoded = base64_simd::STANDARD.encode_to_string(&bytes);
+            assert_eq!(encoded, engine.encode(&bytes), "encode, {len} bytes");
+            assert_eq!(
+                base64_simd::STANDARD.decode_to_vec(&encoded).unwrap(),
+                bytes,
+                "decode, {len} bytes"
+            );
+        }
+        // Inputs the standard engine refuses, and so must this.
+        for bad in [
+            "AAE", "AA=A", "AA E", "AA\nAA==", "-_8=", "AAE!", "====", "A===",
+            // Non-zero trailing bits: not the canonical encoding of any input.
+            "AB==", "AAB=",
+        ] {
+            assert!(engine.decode(bad).is_err(), "engine accepts {bad:?}");
+            assert!(
+                base64_simd::STANDARD.decode_to_vec(bad).is_err(),
+                "simd accepts {bad:?}"
+            );
+        }
+    }
 
     fn test_config() -> SessionConfig {
         SessionConfig::new("test-key")

@@ -70,13 +70,15 @@ otel = ["otel-otlp"]
 # Async runtime — targeted features only; tests get `full` via dev-dependencies.
 tokio = { version = "1", features = ["rt", "macros", "sync", "time", "net"] }
 # TLS backend is selected via the `tls-native`/`tls-rustls` crate features.
-tokio-tungstenite = { version = "0.24" }
+tokio-tungstenite = { version = "0.29" }
 futures-util = "0.3"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
+# SIMD base64 for audio on the per-frame path; detects the CPU at runtime.
+base64-simd = "0.8"
 
 # Async trait
 async-trait = "0.1"

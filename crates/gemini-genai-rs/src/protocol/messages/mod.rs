@@ -146,6 +146,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_usage_only_message() {
+        let json = r#"{"usageMetadata": {"promptTokenCount": 12, "totalTokenCount": 30}}"#;
+        let msg = ServerMessage::parse(json).unwrap();
+        match msg {
+            ServerMessage::ServerContent(sc) => {
+                let usage = sc.usage_metadata.expect("usage kept");
+                assert_eq!(usage.prompt_token_count, Some(12));
+                assert_eq!(usage.total_token_count, Some(30));
+                assert!(sc.server_content.model_turn.is_none());
+                assert!(sc.server_content.turn_complete.is_none());
+            }
+            other => panic!("Expected ServerContent, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_unknown_message() {
         let json = r#"{"newFeature": {"value": 42}}"#;
         let msg = ServerMessage::parse(json).unwrap();

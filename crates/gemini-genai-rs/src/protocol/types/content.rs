@@ -92,7 +92,12 @@ pub struct CodeExecutionResult {
 
 /// A single part of a `Content` message.
 /// Parts are polymorphic — discriminated by field presence, not a type tag.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Deserialization reads the part's fields once and picks the variant by the
+/// same precedence `#[serde(untagged)]` uses (thought, text, inline data,
+/// function call, function response, executable code, code execution result);
+/// see the `Deserialize` impl below.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Part {
     /// A thought/reasoning part from the model (when includeThoughts is enabled).
@@ -137,6 +142,72 @@ pub enum Part {
         #[serde(rename = "codeExecutionResult")]
         code_execution_result: CodeExecutionResult,
     },
+}
+
+impl<'de> Deserialize<'de> for Part {
+    /// One pass over the part's fields.
+    ///
+    /// `#[serde(untagged)]` buffered every part into an intermediate tree and
+    /// then tried each variant in turn, allocating an error for each miss; on
+    /// an audio part that meant copying the base64 payload twice and failing
+    /// twice before reaching `InlineData`. This reads the fields directly and
+    /// chooses the first variant whose fields are present, the same choice
+    /// `untagged` makes for any part the API sends. Unknown fields (such as
+    /// `thoughtSignature`) are ignored, as before.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Fields {
+            text: Option<String>,
+            // Kept loose: under `untagged`, a non-boolean `thought` made the
+            // part plain text rather than an error.
+            thought: Option<serde_json::Value>,
+            inline_data: Option<Blob>,
+            function_call: Option<FunctionCall>,
+            function_response: Option<FunctionResponse>,
+            executable_code: Option<ExecutableCode>,
+            code_execution_result: Option<CodeExecutionResult>,
+        }
+
+        let fields = Fields::deserialize(deserializer)?;
+        Ok(match fields {
+            Fields {
+                text: Some(text),
+                thought: Some(serde_json::Value::Bool(thought)),
+                ..
+            } => Part::Thought { text, thought },
+            Fields {
+                text: Some(text), ..
+            } => Part::Text { text },
+            Fields {
+                inline_data: Some(inline_data),
+                ..
+            } => Part::InlineData { inline_data },
+            Fields {
+                function_call: Some(function_call),
+                ..
+            } => Part::FunctionCall { function_call },
+            Fields {
+                function_response: Some(function_response),
+                ..
+            } => Part::FunctionResponse { function_response },
+            Fields {
+                executable_code: Some(executable_code),
+                ..
+            } => Part::ExecutableCode { executable_code },
+            Fields {
+                code_execution_result: Some(code_execution_result),
+                ..
+            } => Part::CodeExecutionResult {
+                code_execution_result,
+            },
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "data did not match any variant of untagged enum Part",
+                ));
+            }
+        })
+    }
 }
 
 impl Part {
@@ -286,6 +357,131 @@ impl Content {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The derive `Part` used before its `Deserialize` became hand-written,
+    /// kept as the reference the single-pass decoder must agree with.
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum UntaggedPart {
+        Thought {
+            text: String,
+            thought: bool,
+        },
+        Text {
+            text: String,
+        },
+        InlineData {
+            #[serde(rename = "inlineData")]
+            inline_data: Blob,
+        },
+        FunctionCall {
+            #[serde(rename = "functionCall")]
+            function_call: FunctionCall,
+        },
+        FunctionResponse {
+            #[serde(rename = "functionResponse")]
+            function_response: FunctionResponse,
+        },
+        ExecutableCode {
+            #[serde(rename = "executableCode")]
+            executable_code: ExecutableCode,
+        },
+        CodeExecutionResult {
+            #[serde(rename = "codeExecutionResult")]
+            code_execution_result: CodeExecutionResult,
+        },
+    }
+
+    impl From<UntaggedPart> for Part {
+        fn from(part: UntaggedPart) -> Self {
+            match part {
+                UntaggedPart::Thought { text, thought } => Part::Thought { text, thought },
+                UntaggedPart::Text { text } => Part::Text { text },
+                UntaggedPart::InlineData { inline_data } => Part::InlineData { inline_data },
+                UntaggedPart::FunctionCall { function_call } => {
+                    Part::FunctionCall { function_call }
+                }
+                UntaggedPart::FunctionResponse { function_response } => {
+                    Part::FunctionResponse { function_response }
+                }
+                UntaggedPart::ExecutableCode { executable_code } => {
+                    Part::ExecutableCode { executable_code }
+                }
+                UntaggedPart::CodeExecutionResult {
+                    code_execution_result,
+                } => Part::CodeExecutionResult {
+                    code_execution_result,
+                },
+            }
+        }
+    }
+
+    #[test]
+    fn part_decoding_matches_untagged() {
+        let blob = r#"{"mimeType":"audio/pcm;rate=24000","data":"AAEC/+8="}"#;
+        let corpus = [
+            r#"{"text":"hi"}"#.to_string(),
+            r#"{"text":"line\n \"quoted\" café 😀"}"#.to_string(),
+            r#"{"text":"hmm","thought":true}"#.to_string(),
+            r#"{"text":"hmm","thought":false}"#.to_string(),
+            r#"{"thought":true,"text":"order does not matter"}"#.to_string(),
+            r#"{"text":"hi","thoughtSignature":"c2ln"}"#.to_string(),
+            r#"{"text":"hi","thought":"yes"}"#.to_string(),
+            r#"{"text":"hi","thought":null}"#.to_string(),
+            format!(r#"{{"inlineData":{blob}}}"#),
+            format!(r#"{{"inlineData":{blob},"thoughtSignature":"c2ln"}}"#),
+            format!(r#"{{"text":"caption","inlineData":{blob}}}"#),
+            format!(r#"{{"text":null,"inlineData":{blob}}}"#),
+            r#"{"functionCall":{"name":"f","args":{"a":[1,2,{"b":null}]},"id":"c1"}}"#.to_string(),
+            r#"{"functionCall":{"name":"f","args":{}}}"#.to_string(),
+            r#"{"functionResponse":{"name":"f","response":{"ok":true},"id":"c1"}}"#.to_string(),
+            r#"{"functionResponse":{"name":"f","response":{},"scheduling":"SILENT"}}"#.to_string(),
+            r#"{"executableCode":{"language":"PYTHON","code":"print(1)"}}"#.to_string(),
+            r#"{"codeExecutionResult":{"outcome":"OUTCOME_OK","output":"1\n"}}"#.to_string(),
+            r#"{"codeExecutionResult":{"outcome":"OUTCOME_FAILED"}}"#.to_string(),
+            // No variant matches: both must refuse.
+            r#"{}"#.to_string(),
+            r#"{"videoMetadata":{"fps":1}}"#.to_string(),
+            r#"{"thought":true}"#.to_string(),
+            r#"{"text":null}"#.to_string(),
+            r#""just a string""#.to_string(),
+        ];
+        for json in &corpus {
+            let reference = serde_json::from_str::<UntaggedPart>(json).map(Part::from);
+            let decoded = serde_json::from_str::<Part>(json);
+            match (&reference, &decoded) {
+                (Ok(want), Ok(got)) => assert_eq!(got, want, "{json}"),
+                (Err(_), Err(_)) => {}
+                _ => panic!("{json}: untagged {reference:?}, single-pass {decoded:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn part_round_trips_through_its_own_serialization() {
+        let parts = [
+            Part::text("hi"),
+            Part::thought("hmm"),
+            Part::inline_data("audio/pcm", "AAEC"),
+            Part::FunctionCall {
+                function_call: FunctionCall {
+                    name: "f".into(),
+                    args: serde_json::json!({"a": 1}),
+                    id: Some("c1".into()),
+                },
+            },
+            Part::ExecutableCode {
+                executable_code: ExecutableCode {
+                    language: "PYTHON".into(),
+                    code: "print(1)".into(),
+                },
+            },
+        ];
+        for part in parts {
+            let json = serde_json::to_string(&part).unwrap();
+            assert_eq!(serde_json::from_str::<Part>(&json).unwrap(), part, "{json}");
+        }
+    }
 
     /// The API rejects a function response that is not an object, so a tool
     /// returning `42` must reach the wire as `{"output": 42}`; an object is

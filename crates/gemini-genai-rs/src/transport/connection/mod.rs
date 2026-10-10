@@ -598,6 +598,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn connect_with_mock_decodes_audio_and_standalone_usage() {
+        // 40 ms of 24 kHz PCM16 with every byte value, so a decoder that
+        // mangles any of the 64 base64 symbols shows up.
+        let pcm: Vec<u8> = (0..1920u32).map(|i| (i * 7 % 256) as u8).collect();
+        let b64 = {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD.encode(&pcm)
+        };
+        let mut transport = MockTransport::new();
+        transport.script_recv(br#"{"setupComplete":{}}"#.to_vec());
+        transport.script_recv(
+            format!(
+                r#"{{"serverContent":{{"modelTurn":{{"parts":[{{"inlineData":{{"mimeType":"audio/pcm;rate=24000","data":"{b64}"}}}}]}}}}}}"#
+            )
+            .into_bytes(),
+        );
+        // Usage with no content alongside it used to parse as an unknown
+        // message and be dropped.
+        transport.script_recv(
+            br#"{"usageMetadata":{"promptTokenCount":12,"totalTokenCount":30}}"#.to_vec(),
+        );
+        transport.script_recv(br#"{"serverContent":{"turnComplete":true}}"#.to_vec());
+
+        let config = SessionConfig::new("test-key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
+        let handle = connect_with(config, no_reconnect_config(), transport, JsonCodec)
+            .await
+            .unwrap();
+        let mut events = handle.subscribe();
+        handle.wait_for_phase(SessionPhase::Active).await;
+
+        let mut audio = None;
+        let mut usage = None;
+        for _ in 0..20 {
+            match tokio::time::timeout(Duration::from_millis(100), events.recv()).await {
+                Ok(Ok(SessionEvent::AudioData(data))) => audio = Some(data),
+                Ok(Ok(SessionEvent::Usage(u))) => usage = Some(u),
+                Ok(Ok(SessionEvent::TurnComplete)) => break,
+                Ok(Ok(_)) => continue,
+                Ok(Err(_)) | Err(_) => break,
+            }
+        }
+
+        assert_eq!(audio.as_deref(), Some(pcm.as_slice()));
+        let usage = usage.expect("standalone usage should reach the session");
+        assert_eq!(usage.prompt_token_count, Some(12));
+        assert_eq!(usage.total_token_count, Some(30));
+    }
+
+    #[tokio::test]
     async fn connect_with_mock_tool_call() {
         let mut transport = MockTransport::new();
         transport.script_recv(br#"{"setupComplete":{}}"#.to_vec());
