@@ -153,7 +153,7 @@ matters, and options:
 | `redact:<slot>` | A collected slot looks sensitive (`card`, `cvv`, `ssn`, `dob`, `passport` …) and no redact policy covers it | yes |
 | `voice` | An audio app has no voice | no |
 | `greeting` | An audio app has no greeting | no |
-| `escalation` | The conversation has no digression, safety handoff or repair escalation | no |
+| `escalation` | The conversation has no digression, safety handoff or repair escalation. The `handoff` answer adds a `handoff_to_staff` tool and a digression that admits only that tool until it runs | no |
 | `disclosure` | An audio conversation has no verbatim text | no |
 | `tool_binding:<tool>` | A tool has no HTTP or MCP binding and no canned response | no |
 

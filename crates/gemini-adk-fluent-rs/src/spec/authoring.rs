@@ -365,7 +365,9 @@ pub fn catalog() -> Catalog {
             entry(
                 "safety_handoff",
                 "End the conversation when any `intent:{name}` flag becomes true. \
-                 Something must write the flag, such as a signal extractor.",
+                 Something must write the flag, such as a signal extractor. Its \
+                 digression restricts no tools on the turn it is entered; a handoff \
+                 digression whose stage admits only a transfer tool does not have that gap.",
                 json!({ "kind": "safety_handoff", "intents": ["human_agent"] }),
             ),
             entry(
@@ -1627,12 +1629,37 @@ fn ask_escalation(doc: &Value, spec: &SessionSpec, out: &mut Vec<Question>) {
     if handoff || escalates || !conv.overlays.is_empty() {
         return;
     }
+    // A digression whose stage admits only the transfer tool and waits for
+    // it. A terminal digression stage, which `safety_handoff` lowers to,
+    // restricts no tools on the turn it is entered.
     let key = "intent:human_agent";
-    let mut patch = vec![append(
+    let transfer = "handoff_to_staff";
+    let mut patch = Vec::new();
+    if !spec.tools.iter().any(|t| t.name == transfer) {
+        patch.push(append(
+            doc,
+            "/tools",
+            json!({
+                "name": transfer,
+                "description": "Transfer the caller to a member of staff."
+            }),
+        ));
+    }
+    patch.push(append(
         doc,
-        "/conversation/policies",
-        json!({ "kind": "safety_handoff", "intents": ["human_agent"] }),
-    )];
+        "/conversation/overlays",
+        json!({
+            "name": "handoff",
+            "trigger": { "is_true": key },
+            "stages": [{
+                "id": "transfer",
+                "say": "Tell the caller you are passing them to a member of staff, then call handoff_to_staff.",
+                "allow": [transfer],
+                "done": { "called_ok": transfer }
+            }],
+            "resume": "terminate"
+        }),
+    ));
     if !spec.state_keys_written().contains(key) {
         patch.extend(signal_ops(
             doc,
@@ -1650,15 +1677,19 @@ fn ask_escalation(doc: &Value, spec: &SessionSpec, out: &mut Vec<Question>) {
         options: vec![
             option(
                 "handoff",
-                "End the conversation and hand off. `flow:terminated` becomes true; your app \
-                 transfers or closes the call",
+                "Hand off through a `handoff_to_staff` tool your app implements; the \
+                 conversation then ends and `flow:terminated` becomes true",
                 patch,
             ),
             option("none", "Keep the agent in the conversation", Vec::new()),
         ],
         default: Some("handoff".into()),
         blocking: false,
-        affects: vec!["/conversation/policies".into(), "/extract".into()],
+        affects: vec![
+            "/tools".into(),
+            "/conversation/overlays".into(),
+            "/extract".into(),
+        ],
     });
 }
 
@@ -2388,6 +2419,10 @@ mod tests {
                 value: Some(json!("python tools/server.py")),
             },
         ];
+        let mut answers = answers.to_vec();
+        // Answering `escalation` declares the transfer tool, which then has
+        // its own binding question.
+        answers.push(Answer::choose("tool_binding:handoff_to_staff", "stub"));
         let out = answer(&doc, &answers, &Decisions::new()).unwrap();
         assert_eq!(out.applied.len(), answers.len());
         assert_eq!(out.decisions["greeting"], "speak_first");
@@ -2399,11 +2434,10 @@ mod tests {
         );
         assert_eq!(
             spec["conversation"]["policies"],
-            json!([
-                { "kind": "redact", "keys": ["card_number"] },
-                { "kind": "safety_handoff", "intents": ["human_agent"] }
-            ])
+            json!([{ "kind": "redact", "keys": ["card_number"] }])
         );
+        assert_eq!(spec["conversation"]["overlays"][0]["name"], "handoff");
+        assert_eq!(spec["tools"][1]["name"], "handoff_to_staff");
         // Both signals share one extractor.
         assert_eq!(spec["extract"].as_array().unwrap().len(), 1);
         assert_eq!(spec["extract"][0]["promote"].as_array().unwrap().len(), 2);
@@ -2413,6 +2447,43 @@ mod tests {
         assert!(report.diagnostics.is_empty(), "{report:#?}");
         let plan = plan(spec, &out.decisions);
         assert!(plan.questions.is_empty() && plan.ready, "{plan:#?}");
+    }
+
+    #[tokio::test]
+    async fn the_generated_handoff_admits_only_the_transfer() {
+        // A terminal digression stage restricts nothing on the turn it is
+        // entered; the generated one admits only the transfer until it runs.
+        let doc = booking();
+        let mut doc = doc;
+        doc["conversation"]
+            .as_object_mut()
+            .unwrap()
+            .remove("policies");
+        doc.as_object_mut().unwrap().remove("extract");
+        let out = answer(
+            &doc,
+            &[Answer::choose("escalation", "handoff")],
+            &Decisions::new(),
+        )
+        .unwrap();
+        let mut spec = out.spec;
+        spec["scenarios"] = json!([{
+            "name": "asking for a person admits only the transfer",
+            "steps": [
+                { "set": { "key": "intent:human_agent", "value": true } },
+                "turn",
+                { "expect_denied": "book_table" },
+                { "expect_denied": "check_availability" },
+                { "expect_allowed": "handoff_to_staff" },
+                { "tool_ok": "handoff_to_staff" },
+                "turn",
+                { "expect_denied": "handoff_to_staff" },
+                { "expect_denied": "book_table" }
+            ]
+        }]);
+        assert!(check(&spec).valid, "{:#?}", check(&spec));
+        let reports = SessionSpec::from_value(spec).unwrap().run_scenarios().await;
+        assert!(reports.iter().all(|r| r.passed), "{reports:#?}");
     }
 
     #[test]
