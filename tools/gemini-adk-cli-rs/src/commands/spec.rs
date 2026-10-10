@@ -236,6 +236,20 @@ pub fn schema() -> CliResult {
     Ok(())
 }
 
+/// `adk spec graph <spec>` — the spec's flow as a Mermaid diagram.
+pub fn graph(spec_path: &str) -> CliResult {
+    let spec = load(spec_path)?;
+    let validation = spec.validate_for_replay();
+    if !validation.valid {
+        for error in &validation.errors {
+            eprintln!("error: {error}");
+        }
+        return Err(format!("{spec_path} is invalid; run `adk spec check`").into());
+    }
+    println!("{}", validation.mermaid);
+    Ok(())
+}
+
 /// `adk spec catalog` — the authoring vocabulary as JSON.
 pub fn catalog() -> CliResult {
     println!("{}", serde_json::to_string_pretty(&authoring::catalog())?);

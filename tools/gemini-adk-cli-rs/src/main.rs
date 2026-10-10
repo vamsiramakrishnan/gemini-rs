@@ -261,6 +261,12 @@ enum SpecAction {
     },
     /// Print the JSON Schema of a session spec.
     Schema,
+    /// Print the spec's flow as a Mermaid diagram (a conversation is shown
+    /// as the flow it compiles to).
+    Graph {
+        /// Path to the spec (agent.json).
+        spec: String,
+    },
     /// Print the authoring vocabulary as JSON: voices, guards, policies,
     /// tool bindings, question rules and diagnostic codes.
     Catalog,
@@ -567,6 +573,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             SpecAction::Run { spec } => commands::spec::run(&spec).await?,
             SpecAction::Schema => commands::spec::schema()?,
+            SpecAction::Graph { spec } => commands::spec::graph(&spec)?,
             SpecAction::Catalog => commands::spec::catalog()?,
             SpecAction::Check { spec, json } => commands::spec::check(&spec, json)?,
             SpecAction::Plan {
