@@ -112,7 +112,7 @@ The coding agent fills in `agent.json`. The conversation is a set of stages:
    handed off after four;
 3. find a slot with `search_slots`;
 4. read back the slot and the patient's first name;
-5. `book_appointment`, a commit tool behind the caller's confirmation;
+5. book with `book_appointment`;
 6. wrap up.
 
 There is also a "speak to a person" digression from any stage. Steering is
@@ -121,25 +121,39 @@ There is also a "speak to a person" digression from any stage. Steering is
 ```console
 $ gemini-voice check --json
 {
-  "ok": false,
-  "errors": [{
-    "kind": "unguarded_commit_tool",
-    "path": "conversation.stages[4].allow[0]",
-    "message": "book_appointment changes the outside world, but no stage commits it behind a condition.",
-    "hint": "In stage \"confirm\", add \"commit\": {\"tool\": \"book_appointment\", \"when\": {\"is_true\": \"time_confirmed\"}}."
-  }],
-  "warnings": [{
-    "kind": "unwritten_guard_key",
-    "path": "conversation.stages[1].next[0].when",
-    "message": "dob_verifed is never written. Did you mean dob_verified?"
-  }],
-  "summary": {"stages": 7, "tools": 4, "scenarios": 0}
+  "valid": true,
+  "diagnostics": [{
+    "severity": "warning",
+    "code": "unwritten_key",
+    "path": "/conversation/stages/1/next/0/when/is_true",
+    "message": "a guard reads state key 'dob_verifed' but nothing writes it, so it can never become true — did you mean 'dob_verified'?",
+    "fix": {
+      "description": "read 'dob_verified' instead",
+      "patch": [{ "op": "replace", "path": "/conversation/stages/1/next/0/when/is_true", "value": "dob_verified" }]
+    }
+  }]
 }
 ```
 
-Both findings come from checks the SDK already runs (`SessionSpec::validate`
-and the conversation compiler); `check` puts them in one report. The coding
-agent fixes them, runs `check` again, and shows the person the flow:
+The coding agent applies the fix and checks again. Then it asks for the
+decisions the draft leaves open:
+
+```console
+$ gemini-voice plan --json
+{
+  "ready": false,
+  "blocking": 2,
+  "questions": [
+    { "id": "commit_gate:book_appointment", "blocking": true, "default": "confirm",
+      "ask": "Should `book_appointment` run only after the caller confirms the details read back to them?", ... },
+    { "id": "redact:date_of_birth", "blocking": true, "default": "redact", ... },
+    { "id": "tool_binding:lookup_patient", "blocking": false, "default": "stub", ... }
+  ]
+}
+```
+
+It puts the blocking questions to the person, records the answers with
+`gemini-voice answer`, and shows the flow:
 
 ```console
 $ gemini-voice graph --open        # Mermaid; --open renders it in the browser
@@ -352,9 +366,68 @@ in the Flow Studio for anyone who prefers a canvas.
 | `mcp` | Serves every command above as MCP tools | new |
 
 **Output contract.** With `--json`, every command prints one object:
-`{"ok", "data", "errors": [{"kind", "path", "message", "hint"}], "warnings"}`.
-The exit code is 0 only when `ok` is true, and for `sim` and `eval` that means
-every test passed or every threshold was met.
+`{"ok", "data", "diagnostics"}`. Diagnostics have the shape `check` already
+uses (see [Agent interface](#agent-interface)): severity, code, JSON pointer,
+message and an optional fix. The exit code is 0 only when `ok` is true, and
+for `sim` and `eval` that means every test passed or every threshold was met.
+
+## Agent interface
+
+The coding agent never edits `agent.json` blind. Five operations give it the
+vocabulary, the problems and the open decisions as data. They live in one
+core, `gemini_adk_fluent_rs::spec::authoring`, and every front end calls that
+core: the CLI, the MCP server and the Python binding. Step 1 is built in
+[#96](https://github.com/vamsiramakrishnan/gemini-rs/pull/96) as
+`adk spec catalog | check | plan | answer | patch`. `gemini-voice` renames them.
+
+| Operation | Returns |
+|---|---|
+| `catalog` | Voices, guard atoms, policies, tool bindings, resume policies, question ids and diagnostic codes, each with a valid example |
+| `check` | Diagnostics with a JSON pointer and, where the repair is mechanical, a fix as JSON-patch operations. Covers fields serde would silently ignore, undeclared tools, and guard keys nothing writes, including digression triggers and handoff intents |
+| `plan` | Open decisions as questions. Each option carries the patch that records it; blocking questions come first; `ready` says whether to generate |
+| `answer` | Applies chosen options, planning again before each one. All or nothing |
+| `patch` | Applies JSON-patch operations atomically |
+
+A question:
+
+```json
+{
+  "id": "commit_gate:book_appointment",
+  "ask": "Should `book_appointment` run only after the caller confirms the details read back to them?",
+  "why": "A stage that allows a tool without a commit guard lets the model call it as soon as the stage is active.",
+  "kind": "choice",
+  "options": [
+    { "value": "confirm", "label": "Gate it on 'book_appointment_confirmed', which an extractor sets when the caller agrees",
+      "patch": [{ "op": "add", "path": "/conversation/stages/4/commit", "value": { "tool": "book_appointment", "when": { "is_true": "book_appointment_confirmed" } } }, "..."] },
+    { "value": "no_confirmation", "label": "It changes nothing the caller has to approve" }
+  ],
+  "default": "confirm",
+  "blocking": true,
+  "affects": ["/conversation/stages/4/commit", "/extract"]
+}
+```
+
+Phase 0 and `plan` divide the questions between them:
+
+- **Phase 0, the skill.** Questions about the business that no document
+  can raise: who calls, which systems exist, what a good call is.
+- **`plan`, the SDK.** Questions the draft spec raises:
+  - name, instruction and tool descriptions;
+  - commit gating and redaction (blocking);
+  - voice, greeting, escalation, disclosure and tool bindings.
+
+  The answers go in `decisions.json` next to `agent.json`, so no question is
+  asked twice.
+
+Confirmations and intents come from what the caller says. Fixes and answers
+that need one write it through a single `caller_signals` extractor.
+
+Still to build:
+- `apply_pattern`, which inserts a library pattern (verify identity, read
+  back, payment) as one patch;
+- the MCP server, with MCP elicitation where the client supports it, so the
+  harness can put a question to the person directly;
+- more question rules as evals show what drafts miss.
 
 ## The skills
 
@@ -397,7 +470,8 @@ number.
 1. **One toolchain over `agent.json`.** Today the `adk flow` commands and the
    Python binding read only conversation files. They must read the
    conversation inside `agent.json`.
-2. `new`, `check` and the JSON output contract on every command.
+2. `new`, and the JSON output contract on every command. `check`, `plan`
+   and `answer` exist as `adk spec` subcommands (#96).
 3. `talk` as a standalone command. The Studio already has the browser mic and
    the flow panel; the CLI serves them without a repository checkout.
 4. The recording round trip: calls journaled by default, and
