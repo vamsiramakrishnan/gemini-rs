@@ -351,32 +351,37 @@ cargo test -p gemini-adk-fluent-rs --test decision_eval -- --ignored --nocapture
 `SPEC_LIVE_SIGNALS=both` in the spec live-eval harness runs the 11
 scenarios on `gemini-3.8-live` with typed and with spoken (TTS) callers.
 The two arms differ only in who decides the caller signals: the fixtures'
-Gemini flash extractor latching flags, or Jev answering `decisions` that
-`decided` guards read (confirmation questions carry true/false criteria).
-Both arms keep the Gemini extractors that fill slots.
+extractor latching flags, or Jev answering `decisions` that `decided`
+guards read (confirmation questions carry true/false criteria). Both arms
+keep the extractors that fill slots, pinned to `gemini-3.5-flash-lite` at a
+thinking budget of 64 (see [extraction](extraction.md#choosing-the-extraction-model)).
 
-| Input | Signals | Checks | Scenarios passing | Signals landed after the turn, p50 / p90 | Commit-tool wait p50 | Every tool wait p50 / p90 |
+| Input | Signals | Checks | Scenarios passing | Signals landed after the turn, p50 / p90 | Commit-tool wait p50 | Every tool wait p50 / p90 / max |
 |---|---|---|---|---|---|---|
-| text | flash | 21/25 | 9/11 | 2,602 / 5,017 ms | 2,073 ms | 0 / 1,688 ms |
-| text | Jev | 22/25 | 10/11 | 272 / 607 ms | 271 ms | 1 / 271 ms |
-| voice | flash | 20/25 | 8/11 | 2,806 / 4,402 ms | 2,244 ms | 1 / 2,630 ms |
-| voice | Jev | 22/25 | 10/11 | 262 / 1,059 ms | 221 ms | 1 / 6,837 ms |
+| text | extractor | 22/25 | 10/11 | 727 / 1,183 ms | 634 ms | 1 / 745 / 1,370 ms |
+| text | Jev | 22/25 | 10/11 | 242 / 586 ms | 290 ms | 1 / 386 / 802 ms |
+| voice | extractor | 21/25 | 9/11 | 759 / 1,199 ms | 598 ms | 0 / 586 / 823 ms |
+| voice | Jev | 20/25 | 9/11 | 250 / 552 ms | 213 ms | 1 / 242 / 709 ms |
 
-- **Decisions land about ten times sooner.** A turn-end answer no longer
-  waits for the slot extractors: with Jev as a latching extractor, signals
-  landed 1.8 to 3.3 s after the turn.
+- **Decisions land about three times sooner than a fast extractor, and ten
+  times sooner than the old default.** With extraction on the rolling
+  `gemini-flash-latest`, the extractor arm's signals landed 2.6 to 2.8 s
+  after the turn and its commits waited about 2 s.
 - **Commit tools are decided at the gate.** The model calls `book_table` in
   the same breath as the caller's yes; the gate asks Jev about the turn in
   progress (about 250 ms) and admits it. Other tool calls ask nothing.
-- **The double handoff is gone.** In `trattoria-person` (voice) the flash
-  arm transferred twice: the intent landed seconds after the transfer and
-  opened the handoff digression, which then waited for a transfer of its
-  own. With Jev the gate opens the digression before it judges the
-  transfer, and that scenario passed in both runs.
-- **The long voice waits are the slot extractors.** The control lane
-  admits a call after it finishes the previous turn; in two pharmacy calls
-  the Gemini identity and prescription extractors took 49 and 58 s, and
-  `submit_refill` and `request_pharmacist_callback` waited behind them.
+- **The double handoff is gone.** In `trattoria-person` (voice) the
+  extractor arm transferred twice in this run and the one before: the
+  intent landed after the transfer and opened the handoff digression, which
+  then waited for a transfer of its own. With Jev the gate opens the
+  digression before it judges the transfer; that scenario passed in every
+  run.
+- **Fail closed, by design.** In `pharmacy-refill` (voice, Jev) the agent's
+  read-back came out garbled ("Which prescription would you like to I can
+  refill your Lisinopril. Please confirm…") and the caller's "Yes, that's
+  right. Please submit it." scored 0.84, under the 0.85 bar: unsure, so
+  `submit_refill` was refused three times and the call ended unsubmitted.
+  Lower `at_least` only where a wrong yes is cheap.
 - **An unspecified confirmation reads a pick as a yes.** Before the
   confirmation question had criteria, one run booked on "Seven o'clock is
   perfect", said before any read-back. With criteria it stays unsure, as in
@@ -387,9 +392,9 @@ Still failing or ambiguous in both arms, and not about who decides:
 - **dental-happy.** The caller's lines are fixed and drift from what the
   agent asks, so the booking is never confirmed.
 - **pharmacy-no-refills.** "Please have the pharmacist call me back" reads
-  as asking for a person in every run of both arms, so the handoff
-  digression opens after the callback is booked. The fixture's trigger
-  should exclude the callback the flow itself offers.
+  as asking for a person in most runs of both arms (11 of the last 12), so
+  the handoff digression opens after the callback is booked. The fixture's
+  trigger should exclude the callback the flow itself offers.
 
 Two harness faults hid earlier numbers. The spoken caller stopped sending
 audio after each line's trailing silence, so 38 of 78 spoken turns waited

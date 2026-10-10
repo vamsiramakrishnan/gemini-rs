@@ -444,8 +444,9 @@ Turn-end extraction runs on the control lane, and so do tool calls. A tool
 call that arrives while an extraction is running waits for it, so the
 extraction model's latency adds directly to the tool's response time. In a
 live run on `gemini-flash-latest`, two pharmacy tool calls waited 49 and
-58 s behind the previous turn's extraction. Pinned to a fast model, the
-slowest tool wait across the same 44 runs was 1.1 s (see
+58 s behind the previous turn's extraction. Pinned to
+`gemini-3.5-flash-lite` at a thinking budget of 64, the slowest tool wait
+across the same 44 runs was 1.4 s (see
 [Choosing the extraction model](#choosing-the-extraction-model)).
 
 A commit guard often reads a key an extractor writes, such as a caller's
