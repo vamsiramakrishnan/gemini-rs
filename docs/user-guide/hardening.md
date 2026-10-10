@@ -35,7 +35,10 @@ This is a per-event transformation, not a complete data-retention boundary:
  that only sees one event at a time.
 - Streaming `TextDelta` and thought events are forwarded without this scrub.
 - The telemetry receiver subscribes to session events separately from the
- router. Do not infer that its values were scrubbed by the router.
+ router. Do not infer that its values were scrubbed by the router. This
+ includes the `session:last_input_transcription` and
+ `session:last_output_transcription` state keys, which hold the latest raw
+ chunk and are journaled like any other key.
 - Wire recordings occur below this transformation and can retain original
  payloads. Audio also remains outside text-pattern scrubbing.
 

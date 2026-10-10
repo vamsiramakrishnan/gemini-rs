@@ -100,7 +100,7 @@ caller was verified, and a correction does not clear it.
 ```json
 {
   "id": "confirm",
-  "say": "Read back the party size, time and name, ask the caller to confirm, then book.",
+  "say": "Read back the party size, time and name, ask the caller to confirm, then book. Say the table is booked only after book_table has returned.",
   "ground": "Party of {party_size} at {slot}, under {guest_name}.",
   "allow": ["book_table"],
   "commit": { "tool": "book_table", "when": { "is_true": "book_table_confirmed" } },
@@ -114,12 +114,27 @@ extractor:
 ```json
 {
   "name": "caller_signals",
-  "instruction": "Read the latest turns of the conversation. Set a field to true only when the caller clearly said so in their own words. Otherwise leave it out.",
+  "instruction": "Judge only the caller's last turn; the turn before it is context. Set a field to true only when the caller clearly said so in their own words. Otherwise leave it null.",
+  "window": 2,
   "schema": { "type": "object", "properties": {
-    "book_table_confirmed": { "type": "boolean", "description": "The caller agreed to the booking after hearing the details read back." } } },
+    "book_table_confirmed": { "type": "boolean", "description": "The caller agreed to the booking after hearing the details read back. Choosing a time or giving a detail is not agreeing." } } },
   "promote": [{ "field": "book_table_confirmed", "policy": "true_only" }]
 }
 ```
+
+`"window": 2` is the agent's read-back and the caller's reply. With the
+default of 3, a "yes" from before a correction can still be in the window
+and set the confirmation again after the runtime cleared it.
+
+The caller often says yes and the model calls the commit tool in the same
+turn, before that turn is extracted. The runtime handles it: when a tool is
+refused only because its commit guard has not held yet, it extracts the turn
+in progress and decides again.
+
+Models do announce bookings that never happened, especially after a refused
+call. The `say` above asks for the booking to be reported only once the tool
+has returned, and the terminal stage should read its details from the tool's
+result (`save_response_as`), not restate the request.
 
 `ground` puts the collected values in front of the model so the read-back is
 accurate. If the caller corrects a slot collected earlier, the runtime clears
@@ -167,10 +182,17 @@ the main flow's commit guards do not apply. A digression whose stage is
 lowers to one) restricts nothing on the turn it is entered, so every tool,
 booking included, is callable for that turn. The stage above keeps the
 transfer tool as the only one admitted until it runs, then the conversation
-ends and every tool is denied. `adk spec plan`'s `escalation` answer writes
+ends and every tool is denied. A digression without `require` waits for its
+terminal stages, or with none marked terminal for its last stages, so the
+model offering the transfer before making it doesn't end the call. `adk spec plan`'s `escalation` answer writes
 this shape.
 
-**On stalls**, repair escalation to a terminal stage:
+**On stalls**, repair escalation to a terminal stage. A turn counts toward
+`reprompt_after` and `escalate_after` when the caller spoke in it (or the
+model reprompted a silent caller). The greeting and the model's reply to a
+tool result don't count. Leave room for the stage's normal work: a stage
+collecting three slots can take three answers before anything is wrong, so
+`escalate_after` of 5 or more.
 
 ```json
 "repair": { "reprompt_after": 2, "escalate_after": 4, "escalate_to": "handoff_collect" }
@@ -196,9 +218,12 @@ in `brief.md` what the app should do then.
 { "id": "greet", "verbatim": "This call may be recorded. You are speaking with an automated assistant.", ... }
 ```
 
-Put it on the first stage. A verbatim stage does not complete, and does not
-escalate, until its text has been said. Add `"timing": {"interruptible":
-false}` to the stage if the caller must not be able to talk over it.
+Put it on the first stage. The first stage's `say` and verbatim text reach
+the model before the greeting, so a `greeting` such as "Say the disclosure
+line, then ask how you can help" works. A verbatim stage does not complete,
+and does not escalate, until its text has been said within one turn; extra
+words around it are fine. Add `"timing": {"interruptible": false}` to the
+stage if the caller must not be able to talk over it.
 
 ## Slow tools
 

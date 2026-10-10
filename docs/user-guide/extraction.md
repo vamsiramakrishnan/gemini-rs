@@ -183,6 +183,35 @@ let extractor = LlmExtractor::new(
 .with_min_words(5);  // Skip "uh huh", "ok", "yes" turns
 ```
 
+Each request carries the transcript window, the extractor's instruction and
+its schema. The runtime also adds three things:
+
+- **Every field may be null.** Each top-level schema property also accepts
+  `null`, and the instruction asks for null when the transcript does not
+  state a field. Without this, the model fills fields nobody mentioned with
+  placeholders such as `"unknown"`, `""` or `0`.
+- **Known values.** When the extractor runs with access to state, the values
+  already promoted for its fields are listed as `Already known: {...}`.
+  The model returns a known field only when the caller's latest words change
+  it. A value equal to the known one apart from case, spacing or punctuation
+  (`"7 pm"` and `"7 PM"`) is not promoted again, so it is not taken for a
+  correction.
+- **No thinking.** Requests send a thinking budget of 0. The turn pipeline
+  waits for each extraction, so thinking costs seconds on every turn. On
+  `gemini-flash-latest` a short extraction took 2.3 s at the median with a
+  budget of 0, against 7.7 s at the model's default, with the same results.
+  `.with_thinking_budget(None)` restores the model's default. When a model
+  rejects the budget (some only work in thinking mode), the extractor sends
+  the request again without it and stops sending it.
+
+A transient failure (HTTP 5xx, 429 or a transport error) is retried once
+after 300 ms. A failed extraction loses what the caller said in that turn.
+
+`gemini-flash-lite-latest` answers in under a second. In testing it also
+marked "Seven o'clock is perfect", said when picking a time, as agreeing to
+book. Use it only for fields where that kind of mistake is harmless, not for
+confirmations or intents.
+
 ## Schema Definition
 
 The fluent API's `extract_turns` auto-generates the schema from a Rust struct:
@@ -242,6 +271,12 @@ Live::builder()
 | `Interval(n)` | Every N turns | Reduce LLM costs for slow-changing data |
 | `AfterToolCall` | After tool dispatch completes | Extract from tool results |
 | `OnPhaseChange` | When phase transitions fire | Re-extract on context shift |
+
+An `EveryTurn` `LlmExtractor` skips a turn the caller said nothing in, such
+as the model speaking a tool's result. Earlier turns were already extracted,
+and the turn pipeline would otherwise wait on a call that cannot find
+anything new. When no turn in the window has caller words (input
+transcription is off), it extracts as usual.
 
 The `TurnExtractor` trait also has a `trigger()` method with a default
 implementation returning `EveryTurn`, so custom extractors get the old
@@ -317,6 +352,23 @@ Live::builder()
     })
     .connect(config).await?;
 ```
+
+### Extraction and tool calls
+
+Turn-end extraction runs on the control lane, and so do tool calls. A tool
+call that arrives while an extraction is running waits for it, so the
+extraction model's latency adds directly to the tool's response time.
+
+A commit guard often reads a key an extractor writes, such as a caller's
+confirmation. The caller says "yes" and the model calls the commit tool in
+the same turn, before that turn has been extracted. When the governed flow
+refuses a tool only because such a guard has not held yet, the tool lane
+runs the `EveryTurn` extractors that may write the guard's keys on the turn
+in progress, then decides again. An extractor may write a key when a
+promotion rule targets it, or, without rules, when its schema has a field of
+that name. Extractors with another trigger keep their own moment. Each extractor reads its usual number of turns, ending
+with the turn in progress, so an older "yes" outside that window is not
+read again.
 
 ## Extraction to State to Watchers
 

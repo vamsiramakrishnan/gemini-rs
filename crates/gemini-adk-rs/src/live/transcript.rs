@@ -49,6 +49,12 @@ pub struct TranscriptBuffer {
     turns: VecDeque<TranscriptTurn>,
     current_user: String,
     current_model: String,
+    /// Caller words that arrived after the model began speaking this turn.
+    /// A late transcription tail if the turn ends normally; a barge-in that
+    /// starts the next turn if it ends in an interruption.
+    late_user: String,
+    /// The model's turn in progress was interrupted.
+    interrupted: bool,
     tool_calls_pending: Vec<ToolCallSummary>,
     turn_count: u32,
     max_turns: usize,
@@ -81,6 +87,8 @@ impl TranscriptBuffer {
             turns: VecDeque::with_capacity(max_turns.min(64)),
             current_user: String::new(),
             current_model: String::new(),
+            late_user: String::new(),
+            interrupted: false,
             tool_calls_pending: Vec::new(),
             turn_count: 0,
             max_turns,
@@ -88,8 +96,29 @@ impl TranscriptBuffer {
     }
 
     /// Append input (user speech) transcript text.
+    ///
+    /// Words that arrive once the model has started speaking are kept apart
+    /// until the turn ends: see [`mark_interrupted`](Self::mark_interrupted).
     pub fn push_input(&mut self, text: &str) {
-        self.current_user.push_str(text);
+        if self.current_model.is_empty() {
+            self.current_user.push_str(text);
+        } else {
+            self.late_user.push_str(text);
+        }
+    }
+
+    /// Record that the caller interrupted the model's turn in progress.
+    ///
+    /// The caller words that arrived after the model began speaking are the
+    /// barge-in: when the turn ends they open the next turn instead of being
+    /// filed, before the model's words, under the turn they interrupted.
+    pub fn mark_interrupted(&mut self) {
+        self.interrupted = true;
+    }
+
+    /// Everything the caller has said in the turn in progress.
+    fn pending_user(&self) -> String {
+        format!("{}{}", self.current_user, self.late_user)
     }
 
     /// Append output (model speech) transcript text.
@@ -120,16 +149,24 @@ impl TranscriptBuffer {
     /// Resets the current accumulators for the next turn.
     /// Only creates a turn if there is any transcript content.
     pub fn end_turn(&mut self) -> Option<TranscriptTurn> {
+        let barge_in = if std::mem::take(&mut self.interrupted) {
+            std::mem::take(&mut self.late_user)
+        } else {
+            let tail = std::mem::take(&mut self.late_user);
+            self.current_user.push_str(&tail);
+            String::new()
+        };
         if self.current_user.is_empty()
             && self.current_model.is_empty()
             && self.tool_calls_pending.is_empty()
         {
+            self.current_user = barge_in;
             return None;
         }
 
         let turn = TranscriptTurn {
             turn_number: self.turn_count,
-            user: std::mem::take(&mut self.current_user),
+            user: std::mem::replace(&mut self.current_user, barge_in),
             model: std::mem::take(&mut self.current_model),
             tool_calls: std::mem::take(&mut self.tool_calls_pending),
             timestamp: Instant::now(),
@@ -196,6 +233,7 @@ impl TranscriptBuffer {
     /// Overwrites client-accumulated input if server transcription is available.
     pub fn set_input_transcription(&mut self, text: &str) {
         self.current_user.clear();
+        self.late_user.clear();
         self.current_user.push_str(text);
     }
 
@@ -222,6 +260,7 @@ impl TranscriptBuffer {
     /// Whether there is any pending (un-finalized) transcript content.
     pub fn has_pending(&self) -> bool {
         !self.current_user.is_empty()
+            || !self.late_user.is_empty()
             || !self.current_model.is_empty()
             || !self.tool_calls_pending.is_empty()
     }
@@ -242,7 +281,7 @@ impl TranscriptBuffer {
         if self.has_pending() {
             turns.push(TranscriptTurn {
                 turn_number: self.turn_count,
-                user: self.current_user.clone(),
+                user: self.pending_user(),
                 model: self.current_model.clone(),
                 tool_calls: self.tool_calls_pending.clone(),
                 timestamp: std::time::Instant::now(),
@@ -638,5 +677,48 @@ mod tests {
 
         // Verify turn 1 still has its tool call
         assert_eq!(buf.all_turns()[0].tool_calls.len(), 1);
+    }
+
+    #[test]
+    fn a_barge_in_opens_the_next_turn() {
+        let mut buf = TranscriptBuffer::new();
+        buf.push_input("Four at seven, under Rossi.");
+        buf.push_output("Four at seven under Rossi. Shall I");
+        buf.push_input("Yes, book it.");
+        buf.mark_interrupted();
+        let interrupted = buf.end_turn().unwrap();
+        assert_eq!(interrupted.user, "Four at seven, under Rossi.");
+
+        // The caller's words are the turn in progress, ahead of the reply.
+        let pending = buf.snapshot_window_with_current(1);
+        assert_eq!(pending.turns().last().unwrap().user, "Yes, book it.");
+        buf.push_output("Booked.");
+        let next = buf.end_turn().unwrap();
+        assert_eq!(next.user, "Yes, book it.");
+        assert_eq!(next.model, "Booked.");
+    }
+
+    #[test]
+    fn a_late_transcription_tail_stays_in_its_turn() {
+        let mut buf = TranscriptBuffer::new();
+        buf.push_input("Table for four");
+        buf.push_output("Sure, ");
+        buf.push_input(" tomorrow.");
+        let turn = buf.end_turn().unwrap();
+        assert_eq!(turn.user, "Table for four tomorrow.");
+        assert!(!buf.has_pending());
+    }
+
+    #[test]
+    fn a_barge_in_over_an_unheard_reply_still_opens_the_next_turn() {
+        let mut buf = TranscriptBuffer::new();
+        buf.push_output("Let me");
+        buf.push_input("Actually, five people.");
+        buf.mark_interrupted();
+        buf.cut_current_model_turn(0);
+        assert!(buf.end_turn().is_none(), "nothing was heard or said before");
+        assert!(buf.has_pending());
+        buf.push_output("Five, got it.");
+        assert_eq!(buf.end_turn().unwrap().user, "Actually, five people.");
     }
 }

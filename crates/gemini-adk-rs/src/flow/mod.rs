@@ -1672,12 +1672,44 @@ impl FlowMonitor {
         }
     }
 
+    /// Whether `tool` would be admitted once every `never(tool).until(..)`
+    /// guard on it holds: the active steps allow it and it has not used up a
+    /// `once`. Under `ContextUpdate` steering the model is offered these
+    /// tools, so that it can call one in the turn its guard comes to hold;
+    /// the call itself is still decided by [`admits_tool`](Self::admits_tool).
+    pub fn offers_tool(&self, tool: &str, state: &State) -> bool {
+        self.admissibility_with(tool, state, false).is_ok()
+    }
+
+    /// The state keys read by the `never(tool).until(..)` guards that refuse
+    /// `tool` right now. Empty when no such guard is refusing it.
+    pub fn blocking_keys(&self, tool: &str, state: &State) -> BTreeSet<String> {
+        let ctx = self.ctx(state);
+        self.flow
+            .constraints
+            .iter()
+            .filter_map(|c| match c {
+                Constraint::NeverUntil { tool: t, until } if t == tool && !until.eval(&ctx) => {
+                    Some(until.state_keys())
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
     /// The admissibility decision, before it is put into words.
     ///
     /// Split from [`admits_tool`](Self::admits_tool) so that rendering a refusal
     /// can itself ask what *is* admissible without recursing: this function never
     /// renders, so `render_denial` may call it over the whole tool universe.
     fn admissibility(&self, tool: &str, state: &State) -> Result<(), Denial> {
+        self.admissibility_with(tool, state, true)
+    }
+
+    /// [`admissibility`](Self::admissibility), optionally ignoring
+    /// `never(tool).until(..)` guards.
+    fn admissibility_with(&self, tool: &str, state: &State, guards: bool) -> Result<(), Denial> {
         // 1. once(tool)
         for c in &self.flow.constraints {
             if let Constraint::Once(t) = c
@@ -1690,6 +1722,7 @@ impl FlowMonitor {
         // 2. never(tool).until(guard)
         for c in &self.flow.constraints {
             if let Constraint::NeverUntil { tool: t, until } = c
+                && guards
                 && t == tool
                 && !until.eval(&self.ctx(state))
             {
@@ -1763,7 +1796,10 @@ impl FlowMonitor {
             .filter(|t| self.admissibility(t, state).is_ok())
             .collect();
 
+        // In live runs the model told the caller "your table is booked" right
+        // after its booking call was refused. Say plainly that nothing happened.
         let mut out = head;
+        out.push_str(" It did not run, so do not tell the caller it is done.");
         if available.is_empty() {
             out.push_str(" No tool is available right now — continue the conversation instead.");
         } else {
@@ -2254,6 +2290,21 @@ mod tests {
         assert!(
             reason.contains("Verify the caller's identity."),
             "the active step's posture belongs in the refusal: {reason}"
+        );
+    }
+
+    /// In live runs the model announced a booking right after its booking call
+    /// was refused; the refusal says the tool did not run.
+    #[test]
+    fn a_refusal_says_nothing_was_done() {
+        let state = State::new();
+        let mon = FlowMonitor::new(debt_flow(), Enforcement::Enforce);
+        let reason = mon
+            .admits_tool("charge_card", &state)
+            .expect_err("charge_card is gated behind verification");
+        assert!(
+            reason.contains("It did not run, so do not tell the caller it is done."),
+            "{reason}"
         );
     }
 

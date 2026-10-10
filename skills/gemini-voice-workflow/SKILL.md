@@ -168,6 +168,18 @@ avoids it.
 - **Hand off through a digression that admits only the transfer tool.** A
   terminal handoff (including `safety_handoff`) admits every tool on the turn
   it starts.
+- **Models claim success they didn't get.** In live runs the model said
+  "your table is booked" right after its booking call was refused. Have the
+  commit stage say to report the result only after the tool returns.
+- **Every extractor is a model call the turn waits for.** A tool call that
+  arrives meanwhile waits too, and on a phone line seconds of silence sound
+  like a dead line. Keep extractors few (one for slots, one for signals).
+  The extraction model is `GEMINI_TEXT_MODEL` (default `gemini-flash-latest`);
+  `gemini-flash-lite-latest` is faster but marked picking a time as agreeing
+  to book, so don't use it when the spec has confirmations.
+- **A confirmation extractor should read two turns.** `"window": 2` sees the
+  read-back and the reply; a wider window can find a "yes" from before a
+  correction.
 
 ## Rules that protect the person
 

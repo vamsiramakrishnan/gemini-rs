@@ -27,15 +27,62 @@ pub(in crate::live) async fn run_extractors(
     callbacks: &EventCallbacks,
     event_tx: &broadcast::Sender<LiveEvent>,
 ) {
-    if extractors.is_empty() {
+    let jobs = extractors
+        .iter()
+        .map(|e| {
+            (
+                e.clone(),
+                transcript_buffer.window(e.window_size()).to_vec(),
+            )
+        })
+        .collect();
+    run_on_windows(jobs, state, callbacks, event_tx).await;
+}
+
+/// Run `extractors` now, over their last `window_size` turns counting the
+/// turn in progress.
+///
+/// The tool lane calls this when a tool is refused only because a guard
+/// reads keys these extractors write: the caller's latest words, such as the
+/// yes a commit waits for, are not extracted until the turn ends, by which
+/// time the model has already answered. The window keeps its size, so a
+/// signals extractor that reads one turn reads the caller's latest words and
+/// not an older answer.
+pub(in crate::live) async fn refresh_extractors(
+    extractors: &[Arc<dyn TurnExtractor>],
+    transcript_buffer: &mut TranscriptBuffer,
+    state: &State,
+    callbacks: &EventCallbacks,
+    event_tx: &broadcast::Sender<LiveEvent>,
+) {
+    let jobs = extractors
+        .iter()
+        .map(|e| {
+            let n = e.window_size();
+            let window = transcript_buffer.snapshot_window_with_current(n);
+            let turns = window.turns();
+            (e.clone(), turns[turns.len().saturating_sub(n)..].to_vec())
+        })
+        .collect();
+    run_on_windows(jobs, state, callbacks, event_tx).await;
+}
+
+async fn run_on_windows(
+    jobs: Vec<(
+        Arc<dyn TurnExtractor>,
+        Vec<crate::live::transcript::TranscriptTurn>,
+    )>,
+    state: &State,
+    callbacks: &EventCallbacks,
+    event_tx: &broadcast::Sender<LiveEvent>,
+) {
+    if jobs.is_empty() {
         return;
     }
 
-    let extraction_futures: Vec<_> = extractors
-        .iter()
-        .filter_map(|extractor| {
-            let window_size = extractor.window_size();
-            let window: Vec<_> = transcript_buffer.window(window_size).to_vec();
+    let extraction_futures: Vec<_> = jobs
+        .into_iter()
+        .filter_map(|(extractor, window)| {
             if window.is_empty() {
                 return None;
             }

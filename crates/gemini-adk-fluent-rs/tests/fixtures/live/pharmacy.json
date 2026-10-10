@@ -1,0 +1,2931 @@
+{
+  "conversation": {
+    "name": "refill",
+    "overlays": [
+      {
+        "name": "handoff",
+        "resume": "terminate",
+        "stages": [
+          {
+            "allow": [
+              "handoff_to_staff"
+            ],
+            "done": {
+              "called_ok": "handoff_to_staff"
+            },
+            "id": "transfer",
+            "say": "Tell the caller you are passing them to a member of the pharmacy team, then call handoff_to_staff."
+          }
+        ],
+        "trigger": {
+          "is_true": "intent:human_agent"
+        }
+      }
+    ],
+    "policies": [
+      {
+        "keys": [
+          "patient_name",
+          "date_of_birth",
+          "caller_identity",
+          "medication",
+          "prescription_choice",
+          "prescriptions",
+          "refill",
+          "callback"
+        ],
+        "kind": "redact"
+      }
+    ],
+    "require": [
+      "refill_done"
+    ],
+    "stages": [
+      {
+        "done": {
+          "is_true": "verbatim:disclosure"
+        },
+        "id": "disclosure",
+        "next": [
+          {
+            "to": "verify",
+            "when": "always"
+          }
+        ],
+        "say": "Say the notice word for word before anything else.",
+        "timing": {
+          "interruptible": false
+        },
+        "verbatim": "Thank you for calling Corner Pharmacy. This call is recorded. You are speaking with an automated assistant."
+      },
+      {
+        "allow": [
+          "verify_patient",
+          "list_prescriptions"
+        ],
+        "collect": [
+          "patient_name",
+          "date_of_birth"
+        ],
+        "commit": {
+          "tool": "list_prescriptions",
+          "when": {
+            "all": [
+              {
+                "eq": [
+                  "identity",
+                  {
+                    "verified": true
+                  }
+                ]
+              },
+              {
+                "not": {
+                  "is_true": "repair:verify:escalate"
+                }
+              },
+              {
+                "not": {
+                  "any": [
+                    {
+                      "done": "refill_done"
+                    },
+                    {
+                      "done": "callback_booked"
+                    },
+                    {
+                      "done": "declined"
+                    },
+                    {
+                      "done": "handoff_verify"
+                    },
+                    {
+                      "done": "handoff_choose"
+                    },
+                    {
+                      "done": "handoff_recheck"
+                    },
+                    {
+                      "done": "handoff_confirm"
+                    },
+                    {
+                      "done": "handoff_no_refills"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "done": {
+          "called_ok": "list_prescriptions"
+        },
+        "id": "verify",
+        "next": [
+          {
+            "to": "choose",
+            "when": {
+              "called_ok": "list_prescriptions"
+            }
+          }
+        ],
+        "repair": {
+          "escalate_after": 6,
+          "escalate_after_tool_failures": 2,
+          "escalate_to": "handoff_verify",
+          "reprompt_after": 3
+        },
+        "say": "Ask for the caller's full name and date of birth, then check them with verify_patient. Do not repeat the date of birth back. If they are not verified, say you could not confirm those details and ask them to try once more; never say whether a record exists. Once verified, call list_prescriptions.",
+        "timing": {
+          "filler_after_ms": 1200
+        }
+      },
+      {
+        "allow": [
+          "check_refills"
+        ],
+        "collect": [
+          "medication"
+        ],
+        "commit": {
+          "tool": "check_refills",
+          "when": {
+            "all": [
+              {
+                "called_ok": "list_prescriptions"
+              },
+              {
+                "not": {
+                  "any": [
+                    {
+                      "done": "refill_done"
+                    },
+                    {
+                      "done": "callback_booked"
+                    },
+                    {
+                      "done": "declined"
+                    },
+                    {
+                      "done": "handoff_verify"
+                    },
+                    {
+                      "done": "handoff_choose"
+                    },
+                    {
+                      "done": "handoff_recheck"
+                    },
+                    {
+                      "done": "handoff_confirm"
+                    },
+                    {
+                      "done": "handoff_no_refills"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "done": {
+          "any": [
+            {
+              "eq": [
+                "refill_status",
+                {
+                  "refillable": true
+                }
+              ]
+            },
+            {
+              "eq": [
+                "refill_status",
+                {
+                  "refillable": false
+                }
+              ]
+            }
+          ]
+        },
+        "id": "choose",
+        "next": [
+          {
+            "to": "confirm",
+            "when": {
+              "all": [
+                {
+                  "eq": [
+                    "refill_status",
+                    {
+                      "refillable": true
+                    }
+                  ]
+                },
+                {
+                  "not": {
+                    "is_true": "repair:choose:escalate"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "to": "no_refills",
+            "when": {
+              "all": [
+                {
+                  "eq": [
+                    "refill_status",
+                    {
+                      "refillable": false
+                    }
+                  ]
+                },
+                {
+                  "not": {
+                    "is_true": "repair:choose:escalate"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "to": "recheck",
+            "when": {
+              "all": [
+                {
+                  "not": {
+                    "is_set": "refill_status"
+                  }
+                },
+                {
+                  "not": {
+                    "is_true": "repair:choose:escalate"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "repair": {
+          "escalate_after": 6,
+          "escalate_after_tool_failures": 2,
+          "escalate_to": "handoff_choose",
+          "reprompt_after": 2
+        },
+        "say": "Read out only the medication names from the caller's prescriptions and ask which one they want refilled. Once they pick one, call check_refills for that prescription.",
+        "timing": {
+          "filler_after_ms": 1200
+        }
+      },
+      {
+        "allow": [
+          "recheck_refills"
+        ],
+        "commit": {
+          "tool": "recheck_refills",
+          "when": {
+            "all": [
+              {
+                "called_ok": "list_prescriptions"
+              },
+              {
+                "not": {
+                  "any": [
+                    {
+                      "done": "refill_done"
+                    },
+                    {
+                      "done": "callback_booked"
+                    },
+                    {
+                      "done": "declined"
+                    },
+                    {
+                      "done": "handoff_verify"
+                    },
+                    {
+                      "done": "handoff_choose"
+                    },
+                    {
+                      "done": "handoff_recheck"
+                    },
+                    {
+                      "done": "handoff_confirm"
+                    },
+                    {
+                      "done": "handoff_no_refills"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "done": {
+          "any": [
+            {
+              "called_ok": "submit_refill"
+            },
+            {
+              "called_ok": "request_pharmacist_callback"
+            }
+          ]
+        },
+        "id": "recheck",
+        "repair": {
+          "escalate_after": 4,
+          "escalate_after_tool_failures": 2,
+          "escalate_to": "handoff_recheck",
+          "reprompt_after": 2
+        },
+        "say": "The caller changed which medication they want. Make sure you know which one, then call recheck_refills for that prescription. If you have already used recheck_refills, tell the caller a member of the pharmacy team will help with this medication.",
+        "timing": {
+          "filler_after_ms": 1200
+        }
+      },
+      {
+        "allow": [
+          "submit_refill"
+        ],
+        "commit": {
+          "tool": "submit_refill",
+          "when": {
+            "all": [
+              {
+                "eq": [
+                  "refill_status",
+                  {
+                    "refillable": true
+                  }
+                ]
+              },
+              {
+                "is_true": "refill_confirmed"
+              },
+              {
+                "not": {
+                  "is_true": "refill_declined"
+                }
+              },
+              {
+                "not": {
+                  "any": [
+                    {
+                      "done": "refill_done"
+                    },
+                    {
+                      "done": "callback_booked"
+                    },
+                    {
+                      "done": "declined"
+                    },
+                    {
+                      "done": "handoff_verify"
+                    },
+                    {
+                      "done": "handoff_choose"
+                    },
+                    {
+                      "done": "handoff_recheck"
+                    },
+                    {
+                      "done": "handoff_confirm"
+                    },
+                    {
+                      "done": "handoff_no_refills"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "ground": "Refill requested for: {medication}.",
+        "id": "confirm",
+        "next": [
+          {
+            "to": "refill_done",
+            "when": {
+              "called_ok": "submit_refill"
+            }
+          },
+          {
+            "to": "declined",
+            "when": {
+              "is_true": "refill_declined"
+            }
+          }
+        ],
+        "repair": {
+          "escalate_after": 6,
+          "escalate_after_tool_failures": 2,
+          "escalate_to": "handoff_confirm",
+          "reprompt_after": 2
+        },
+        "say": "Read the medication back and ask the caller to confirm they want it refilled. Only after a clear yes, call submit_refill.",
+        "timing": {
+          "filler_after_ms": 1200
+        }
+      },
+      {
+        "allow": [
+          "request_pharmacist_callback"
+        ],
+        "commit": {
+          "tool": "request_pharmacist_callback",
+          "when": {
+            "all": [
+              {
+                "eq": [
+                  "refill_status",
+                  {
+                    "refillable": false
+                  }
+                ]
+              },
+              {
+                "not": {
+                  "any": [
+                    {
+                      "done": "refill_done"
+                    },
+                    {
+                      "done": "callback_booked"
+                    },
+                    {
+                      "done": "declined"
+                    },
+                    {
+                      "done": "handoff_verify"
+                    },
+                    {
+                      "done": "handoff_choose"
+                    },
+                    {
+                      "done": "handoff_recheck"
+                    },
+                    {
+                      "done": "handoff_confirm"
+                    },
+                    {
+                      "done": "handoff_no_refills"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "done": {
+          "called_ok": "request_pharmacist_callback"
+        },
+        "id": "no_refills",
+        "next": [
+          {
+            "to": "callback_booked",
+            "when": {
+              "called_ok": "request_pharmacist_callback"
+            }
+          }
+        ],
+        "repair": {
+          "escalate_after": 4,
+          "escalate_after_tool_failures": 2,
+          "escalate_to": "handoff_no_refills",
+          "reprompt_after": 2
+        },
+        "say": "Tell the caller this prescription has no refills left, so a pharmacist will call them back at the phone number on their pharmacy record. Call request_pharmacist_callback.",
+        "timing": {
+          "filler_after_ms": 1200
+        }
+      },
+      {
+        "id": "refill_done",
+        "say": "Tell the caller the refill has been submitted. Give the confirmation number and pickup time only if submit_refill returned them. Then say goodbye.",
+        "terminal": true
+      },
+      {
+        "id": "callback_booked",
+        "say": "Confirm that a pharmacist will call them back about this prescription, then say goodbye.",
+        "terminal": true
+      },
+      {
+        "id": "declined",
+        "say": "Tell the caller no refill was submitted, and say goodbye.",
+        "terminal": true
+      },
+      {
+        "id": "handoff_verify",
+        "say": "Apologise, say you were not able to complete this over the phone, and tell the caller a member of the pharmacy team will call them back.",
+        "terminal": true
+      },
+      {
+        "id": "handoff_choose",
+        "say": "Apologise and tell the caller a member of the pharmacy team will call them back to help with their refill.",
+        "terminal": true
+      },
+      {
+        "id": "handoff_recheck",
+        "say": "Apologise and tell the caller a member of the pharmacy team will call them back to help with this medication.",
+        "terminal": true
+      },
+      {
+        "id": "handoff_confirm",
+        "say": "Apologise, tell the caller you could not complete the refill on this call, and that a member of the pharmacy team will call them back.",
+        "terminal": true
+      },
+      {
+        "id": "handoff_no_refills",
+        "say": "Apologise and tell the caller a member of the pharmacy team will call them back about this prescription.",
+        "terminal": true
+      }
+    ]
+  },
+  "description": "Prescription refill line for Corner Pharmacy: verify the caller, pick a medication, confirm, submit the refill or arrange a pharmacist callback.",
+  "extract": [
+    {
+      "instruction": "Extract the caller's full name and date of birth as they gave them. If they corrected either one, use the corrected value. Give the date of birth as YYYY-MM-DD.",
+      "name": "caller_identity",
+      "promote": [
+        {
+          "field": "patient_name",
+          "policy": "overwrite"
+        },
+        {
+          "field": "date_of_birth",
+          "policy": "overwrite"
+        }
+      ],
+      "schema": {
+        "properties": {
+          "date_of_birth": {
+            "description": "YYYY-MM-DD",
+            "type": "string"
+          },
+          "patient_name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "instruction": "Extract the medication the caller wants refilled, as they named it. If they changed their mind, use the latest choice. Leave it out until they have picked one.",
+      "name": "prescription_choice",
+      "promote": [
+        {
+          "field": "medication",
+          "policy": "overwrite"
+        }
+      ],
+      "schema": {
+        "properties": {
+          "medication": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "instruction": "Read the latest turns of the conversation. Set a field to true only when the caller clearly said so in their own words. Otherwise leave it out.",
+      "name": "caller_signals",
+      "promote": [
+        {
+          "field": "refill_confirmed",
+          "policy": "true_only"
+        },
+        {
+          "field": "refill_declined",
+          "policy": "true_only"
+        },
+        {
+          "field": "intent_human_agent",
+          "policy": "true_only",
+          "to": "intent:human_agent"
+        }
+      ],
+      "schema": {
+        "properties": {
+          "intent_human_agent": {
+            "description": "The caller asked to speak to a person or a pharmacist, or accepted an offer to be transferred to the pharmacy team.",
+            "type": "boolean"
+          },
+          "refill_confirmed": {
+            "description": "The caller said yes to refilling the medication after hearing it read back.",
+            "type": "boolean"
+          },
+          "refill_declined": {
+            "description": "The caller said they do not want any refill today. A change to which medication they want is not a decline.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
+    }
+  ],
+  "greeting": "Open the call by saying the required notice for the current stage word for word, then ask for the caller's full name and date of birth.",
+  "instruction": "You are the automated prescription refill assistant for Corner Pharmacy. Keep every reply to one or two short spoken sentences. You only handle refills of existing prescriptions. Never repeat the caller's date of birth back to them. Never say whether a name or date of birth matches a patient record unless verify_patient verified the caller. Never invent prescriptions, refill counts, pickup times or confirmation numbers: use the tools. Never give medical advice: if the caller asks a medical question, say a pharmacist needs to answer it and offer to transfer them to the pharmacy team. If the caller describes a medical emergency, tell them to hang up and call emergency services. Handle one refill per call.",
+  "modality": "audio",
+  "name": "corner-pharmacy-refills",
+  "runtime": {
+    "steering": "context_update"
+  },
+  "scenarios": [
+    {
+      "name": "refills a medication after verification and a spoken yes",
+      "steps": [
+        {
+          "expect_active": [
+            "disclosure"
+          ]
+        },
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication A"
+          }
+        },
+        {
+          "expect_allowed": "check_refills"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "submit_refill"
+        },
+        {
+          "tool_ok": "submit_refill"
+        },
+        "turn",
+        "expect_complete",
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "expect_denied": "request_pharmacist_callback"
+        }
+      ]
+    },
+    {
+      "name": "nothing happens before the recording notice is said",
+      "steps": [
+        {
+          "expect_active": [
+            "disclosure"
+          ]
+        },
+        "turn",
+        "turn",
+        "turn",
+        {
+          "expect_active": [
+            "disclosure"
+          ]
+        },
+        {
+          "expect_denied": "list_prescriptions"
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "never reveals prescriptions before the caller is verified",
+      "steps": [
+        {
+          "expect_denied": "list_prescriptions"
+        },
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "expect_denied": "list_prescriptions"
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "expect_denied": "list_prescriptions"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": false
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "expect_denied": "list_prescriptions"
+        },
+        {
+          "expect_denied": "check_refills"
+        },
+        {
+          "expect_denied": "recheck_refills"
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "expect_denied": "request_pharmacist_callback"
+        }
+      ]
+    },
+    {
+      "name": "a caller who cannot be verified is handed off with nothing unlocked",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": false
+            }
+          }
+        },
+        "turn",
+        "turn",
+        "turn",
+        "turn",
+        "turn",
+        "turn",
+        {
+          "expect_slot": {
+            "key": "repair:verify:escalate",
+            "value": true
+          }
+        },
+        {
+          "expect_denied": "list_prescriptions"
+        },
+        {
+          "expect_denied": "check_refills"
+        },
+        {
+          "expect_denied": "recheck_refills"
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "expect_denied": "request_pharmacist_callback"
+        }
+      ]
+    },
+    {
+      "name": "verification errors hand off with nothing unlocked",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "tool_failed": "verify_patient"
+        },
+        {
+          "tool_failed": "verify_patient"
+        },
+        "turn",
+        {
+          "expect_slot": {
+            "key": "repair:verify:escalate",
+            "value": true
+          }
+        },
+        {
+          "expect_denied": "list_prescriptions"
+        },
+        {
+          "expect_denied": "check_refills"
+        },
+        {
+          "expect_denied": "recheck_refills"
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "expect_denied": "request_pharmacist_callback"
+        }
+      ]
+    },
+    {
+      "name": "the prescription lookup failing hands off and stays closed",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_failed": "list_prescriptions"
+        },
+        {
+          "tool_failed": "list_prescriptions"
+        },
+        "turn",
+        {
+          "expect_slot": {
+            "key": "repair:verify:escalate",
+            "value": true
+          }
+        },
+        {
+          "expect_denied": "list_prescriptions"
+        },
+        {
+          "expect_denied": "check_refills"
+        },
+        {
+          "expect_denied": "recheck_refills"
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "expect_denied": "request_pharmacist_callback"
+        }
+      ]
+    },
+    {
+      "name": "never submits a refill without a spoken yes",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication A"
+          }
+        },
+        {
+          "expect_allowed": "check_refills"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        "turn",
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        }
+      ]
+    },
+    {
+      "name": "no refills left arranges a pharmacist callback and never a refill",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication B"
+          }
+        },
+        {
+          "expect_allowed": "check_refills"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": false
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "no_refills"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "expect_allowed": "request_pharmacist_callback"
+        },
+        {
+          "tool_ok": "request_pharmacist_callback"
+        },
+        "turn",
+        {
+          "expect_denied": "request_pharmacist_callback"
+        },
+        {
+          "expect_denied": "submit_refill"
+        }
+      ]
+    },
+    {
+      "name": "changing the medication after the read-back needs a new check and a new yes",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication A"
+          }
+        },
+        {
+          "expect_allowed": "check_refills"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication C"
+          }
+        },
+        "turn",
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "expect_active": [
+            "recheck"
+          ]
+        },
+        {
+          "expect_denied": "check_refills"
+        },
+        {
+          "expect_allowed": "recheck_refills"
+        },
+        {
+          "tool_ok": "recheck_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "submit_refill"
+        },
+        {
+          "tool_ok": "submit_refill"
+        },
+        "turn",
+        "expect_complete"
+      ]
+    },
+    {
+      "name": "changing to a medication with no refills arranges the callback instead",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication A"
+          }
+        },
+        {
+          "expect_allowed": "check_refills"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication B"
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "recheck"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "tool_ok": "recheck_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": false
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "no_refills"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "expect_allowed": "request_pharmacist_callback"
+        }
+      ]
+    },
+    {
+      "name": "a second change of medication hands off without a refill",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication A"
+          }
+        },
+        {
+          "expect_allowed": "check_refills"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication C"
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "recheck"
+          ]
+        },
+        {
+          "tool_ok": "recheck_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication D"
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "recheck"
+          ]
+        },
+        {
+          "expect_denied": "recheck_refills"
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        "turn",
+        "turn",
+        "turn",
+        "turn",
+        {
+          "expect_slot": {
+            "key": "repair:recheck:escalate",
+            "value": true
+          }
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "expect_denied": "recheck_refills"
+        }
+      ]
+    },
+    {
+      "name": "declining submits nothing",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication A"
+          }
+        },
+        {
+          "expect_allowed": "check_refills"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_declined",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_denied": "submit_refill"
+        },
+        "turn",
+        {
+          "expect_denied": "submit_refill"
+        }
+      ]
+    },
+    {
+      "name": "a failed refill submission hands off and is not retried",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication A"
+          }
+        },
+        {
+          "expect_allowed": "check_refills"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "submit_refill"
+        },
+        {
+          "tool_failed": "submit_refill"
+        },
+        {
+          "tool_failed": "submit_refill"
+        },
+        "turn",
+        {
+          "expect_slot": {
+            "key": "repair:confirm:escalate",
+            "value": true
+          }
+        },
+        {
+          "expect_denied": "submit_refill"
+        }
+      ]
+    },
+    {
+      "name": "a stalled medication choice hands off and the refill stays closed",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        "turn",
+        "turn",
+        "turn",
+        "turn",
+        "turn",
+        "turn",
+        {
+          "expect_slot": {
+            "key": "repair:choose:escalate",
+            "value": true
+          }
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "expect_denied": "request_pharmacist_callback"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_denied": "submit_refill"
+        }
+      ]
+    },
+    {
+      "name": "a failing pharmacist callback request hands off and is not retried",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication B"
+          }
+        },
+        {
+          "expect_allowed": "check_refills"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": false
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "no_refills"
+          ]
+        },
+        {
+          "tool_failed": "request_pharmacist_callback"
+        },
+        {
+          "tool_failed": "request_pharmacist_callback"
+        },
+        "turn",
+        {
+          "expect_slot": {
+            "key": "repair:no_refills:escalate",
+            "value": true
+          }
+        },
+        {
+          "expect_denied": "request_pharmacist_callback"
+        },
+        {
+          "expect_denied": "submit_refill"
+        }
+      ]
+    },
+    {
+      "name": "asking for a person mid-refill transfers and does nothing else",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication A"
+          }
+        },
+        {
+          "expect_allowed": "check_refills"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "intent:human_agent",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "handoff_to_staff"
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "expect_denied": "list_prescriptions"
+        },
+        {
+          "expect_denied": "request_pharmacist_callback"
+        },
+        {
+          "tool_ok": "handoff_to_staff"
+        },
+        "turn",
+        {
+          "expect_denied": "handoff_to_staff"
+        },
+        {
+          "expect_denied": "submit_refill"
+        }
+      ]
+    },
+    {
+      "name": "asking for a person before verification transfers and reveals nothing",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "intent:human_agent",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "handoff_to_staff"
+        },
+        {
+          "expect_denied": "verify_patient"
+        },
+        {
+          "expect_denied": "list_prescriptions"
+        },
+        {
+          "tool_ok": "handoff_to_staff"
+        },
+        "turn",
+        {
+          "expect_denied": "handoff_to_staff"
+        },
+        {
+          "expect_denied": "list_prescriptions"
+        },
+        {
+          "expect_denied": "submit_refill"
+        }
+      ]
+    },
+    {
+      "name": "after a handoff, a different medication still needs a new check and a new yes",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication A"
+          }
+        },
+        {
+          "expect_allowed": "check_refills"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "submit_refill"
+        },
+        {
+          "tool_failed": "submit_refill"
+        },
+        {
+          "tool_failed": "submit_refill"
+        },
+        "turn",
+        {
+          "expect_slot": {
+            "key": "repair:confirm:escalate",
+            "value": true
+          }
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication C"
+          }
+        },
+        "turn",
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "expect_denied": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_denied": "submit_refill"
+        }
+      ]
+    },
+    {
+      "name": "after declining, a different medication still needs a new check and a new yes",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication A"
+          }
+        },
+        {
+          "expect_allowed": "check_refills"
+        },
+        {
+          "tool_ok": "check_refills"
+        },
+        {
+          "set": {
+            "key": "refill_status",
+            "value": {
+              "refillable": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "confirm"
+          ]
+        },
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_declined",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_denied": "submit_refill"
+        },
+        "turn",
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "medication",
+            "value": "Test Medication C"
+          }
+        },
+        "turn",
+        {
+          "expect_denied": "submit_refill"
+        },
+        {
+          "set": {
+            "key": "refill_confirmed",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_denied": "submit_refill"
+        }
+      ]
+    },
+    {
+      "name": "a corrected date of birth can still be verified",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-02"
+          }
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": false
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_denied": "list_prescriptions"
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a name correction after the lookup does not strand the call",
+      "steps": [
+        {
+          "set": {
+            "key": "verbatim:disclosure",
+            "value": true
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "verify"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller"
+          }
+        },
+        {
+          "set": {
+            "key": "date_of_birth",
+            "value": "1970-01-01"
+          }
+        },
+        {
+          "expect_allowed": "verify_patient"
+        },
+        {
+          "tool_ok": "verify_patient"
+        },
+        {
+          "set": {
+            "key": "identity",
+            "value": {
+              "verified": true
+            }
+          }
+        },
+        "turn",
+        {
+          "expect_allowed": "list_prescriptions"
+        },
+        {
+          "tool_ok": "list_prescriptions"
+        },
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "set": {
+            "key": "patient_name",
+            "value": "Test Caller Jr"
+          }
+        },
+        "turn",
+        {
+          "expect_active": [
+            "choose"
+          ]
+        },
+        {
+          "expect_allowed": "check_refills"
+        }
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "name": "the unimplemented verifier stub verifies nobody",
+      "script": [
+        {
+          "set": {
+            "verbatim:disclosure": true
+          }
+        },
+        {
+          "user": "(caller is on the line)"
+        },
+        {
+          "set": {
+            "date_of_birth": "1970-01-01",
+            "patient_name": "Test Caller"
+          }
+        },
+        {
+          "tool": "verify_patient"
+        },
+        {
+          "user": "(caller waits)"
+        },
+        {
+          "tool": "list_prescriptions"
+        },
+        {
+          "expect": {
+            "active": [
+              "verify"
+            ],
+            "blocked": [
+              "list_prescriptions",
+              "check_refills",
+              "submit_refill"
+            ],
+            "complete": false
+          }
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "description": "Check the caller's full name and date of birth against the pharmacy's patient records. Returns {\"verified\": true} only on an exact match, otherwise {\"verified\": false}. Call it once you have both the name and the date of birth.",
+      "name": "verify_patient",
+      "parameters": {
+        "properties": {
+          "date_of_birth": {
+            "description": "Date of birth, YYYY-MM-DD.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The caller's full name as they gave it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "date_of_birth"
+        ],
+        "type": "object"
+      },
+      "response": {
+        "verified": false
+      },
+      "save_response_as": "identity"
+    },
+    {
+      "description": "List the verified caller's prescriptions: medication name, prescription id and refills remaining. Call it right after verify_patient returns verified, with the same name and date of birth.",
+      "name": "list_prescriptions",
+      "parameters": {
+        "properties": {
+          "date_of_birth": {
+            "description": "Date of birth, YYYY-MM-DD.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "date_of_birth"
+        ],
+        "type": "object"
+      },
+      "response": {
+        "prescriptions": [
+          {
+            "medication": "Test Medication A",
+            "prescription_id": "RX-TEST-001",
+            "refills_remaining": 2
+          },
+          {
+            "medication": "Test Medication B",
+            "prescription_id": "RX-TEST-002",
+            "refills_remaining": 0
+          }
+        ]
+      },
+      "save_response_as": "prescriptions"
+    },
+    {
+      "description": "Check whether the prescription the caller chose has refills left. Returns {\"refillable\": true} or {\"refillable\": false}. Call it as soon as the caller has picked a medication.",
+      "name": "check_refills",
+      "parameters": {
+        "properties": {
+          "date_of_birth": {
+            "description": "Date of birth, YYYY-MM-DD, as verified.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The caller's full name, as verified.",
+            "type": "string"
+          },
+          "prescription_id": {
+            "description": "The id of the chosen prescription, from list_prescriptions.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "date_of_birth",
+          "prescription_id"
+        ],
+        "type": "object"
+      },
+      "response": {
+        "refillable": false
+      },
+      "save_response_as": "refill_status"
+    },
+    {
+      "description": "Check whether the newly chosen prescription has refills left, after the caller changed which medication they want. Returns {\"refillable\": true} or {\"refillable\": false}.",
+      "name": "recheck_refills",
+      "parameters": {
+        "properties": {
+          "date_of_birth": {
+            "description": "Date of birth, YYYY-MM-DD, as verified.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The caller's full name, as verified.",
+            "type": "string"
+          },
+          "prescription_id": {
+            "description": "The id of the chosen prescription, from list_prescriptions.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "date_of_birth",
+          "prescription_id"
+        ],
+        "type": "object"
+      },
+      "response": {
+        "refillable": false
+      },
+      "save_response_as": "refill_status"
+    },
+    {
+      "description": "Submit a refill of the prescription the caller chose. Call only after reading the medication back and hearing a clear yes.",
+      "name": "submit_refill",
+      "parameters": {
+        "properties": {
+          "date_of_birth": {
+            "description": "Date of birth, YYYY-MM-DD, as verified.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The caller's full name, as verified.",
+            "type": "string"
+          },
+          "prescription_id": {
+            "description": "The id of the chosen prescription, from list_prescriptions.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "date_of_birth",
+          "prescription_id"
+        ],
+        "type": "object"
+      },
+      "response": {
+        "refill_id": "MOCK-0000",
+        "status": "mock"
+      },
+      "save_response_as": "refill"
+    },
+    {
+      "description": "Ask a pharmacist to call the caller back about a prescription, at the phone number on their pharmacy record. Call it when the chosen prescription has no refills left.",
+      "name": "request_pharmacist_callback",
+      "parameters": {
+        "properties": {
+          "date_of_birth": {
+            "description": "Date of birth, YYYY-MM-DD, as verified.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The caller's full name, as verified.",
+            "type": "string"
+          },
+          "prescription_id": {
+            "description": "The id of the chosen prescription, from list_prescriptions.",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "no_refills_left"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "date_of_birth",
+          "prescription_id",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "response": {
+        "status": "mock"
+      },
+      "save_response_as": "callback"
+    },
+    {
+      "description": "Transfer the caller to a member of the pharmacy team.",
+      "name": "handoff_to_staff"
+    }
+  ],
+  "voice": "Puck"
+}

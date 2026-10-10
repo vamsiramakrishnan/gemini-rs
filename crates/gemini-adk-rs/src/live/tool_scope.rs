@@ -2,10 +2,13 @@
 //!
 //! Under [`SteeringMode::ContextUpdate`](super::SteeringMode::ContextUpdate) the
 //! session keeps every tool declaration here and, at each phase transition or
-//! flow-step change, replaces what the model has declared with the tools that
-//! are admitted right now, through a `contextUpdate` message. Elsewhere a
-//! phase's or step's tool list is only enforced: the model sees every tool and
-//! has the calls it may not make refused.
+//! flow-step change, replaces what the model has declared with the tools the
+//! current phase and step offer, through a `contextUpdate` message. A tool the
+//! step allows but whose `never(tool).until(..)` guard has not held yet, such
+//! as a commit waiting for the caller's yes, is offered: the model can call
+//! it in the turn the guard comes to hold, and a call before that is refused
+//! with the reason. Elsewhere a phase's or step's tool list is only enforced:
+//! the model sees every tool and has the calls it may not make refused.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -48,15 +51,15 @@ impl ToolScope {
         }
     }
 
-    /// The function names admitted right now: in the phase's tool list (when
-    /// it has one) and admitted by an enforcing flow.
+    /// The function names offered right now: in the phase's tool list (when
+    /// it has one) and offered by an enforcing flow.
     pub(crate) fn admitted(
         &self,
         phase_tools: Option<&[String]>,
         flow: Option<&FlowStack>,
         state: &State,
     ) -> BTreeSet<String> {
-        admitted_names(&self.catalog, phase_tools, flow, state)
+        offered_names(&self.catalog, phase_tools, flow, state)
     }
 
     /// The declarations to send for `names`: their function declarations, and
@@ -134,7 +137,7 @@ pub(crate) fn compose_instruction(base: Option<&str>, phase: &str) -> String {
 }
 
 /// See [`ToolScope::admitted`].
-pub(crate) fn admitted_names(
+pub(crate) fn offered_names(
     catalog: &[Tool],
     phase_tools: Option<&[String]>,
     flow: Option<&FlowStack>,
@@ -149,7 +152,7 @@ pub(crate) fn admitted_names(
         .flatten()
         .map(|decl| decl.name.as_str())
         .filter(|name| phase_tools.is_none_or(|allowed| allowed.iter().any(|t| t == name)))
-        .filter(|name| flow.is_none_or(|f| f.admits_tool(name, state).is_ok()))
+        .filter(|name| flow.is_none_or(|f| f.offers_tool(name, state)))
         .map(str::to_string)
         .collect()
 }
@@ -226,7 +229,7 @@ mod tests {
 
     #[test]
     fn without_a_phase_or_flow_every_function_is_admitted() {
-        let admitted = admitted_names(&catalog(), None, None, &State::new());
+        let admitted = offered_names(&catalog(), None, None, &State::new());
         assert_eq!(
             admitted,
             names(&["get_balance", "transfer", "verify_identity"])
@@ -236,7 +239,7 @@ mod tests {
     #[test]
     fn a_phase_tool_list_narrows_the_functions() {
         let phase = vec!["verify_identity".to_string(), "not_a_tool".to_string()];
-        let admitted = admitted_names(&catalog(), Some(&phase), None, &State::new());
+        let admitted = offered_names(&catalog(), Some(&phase), None, &State::new());
         assert_eq!(admitted, names(&["verify_identity"]));
     }
 
@@ -261,19 +264,50 @@ mod tests {
     fn an_enforcing_flow_admits_the_active_steps_tools() {
         let state = State::new();
         let mut flow = banking_flow(Enforcement::Enforce);
-        let admitted = admitted_names(&catalog(), None, Some(&flow), &state);
+        let admitted = offered_names(&catalog(), None, Some(&flow), &state);
         assert_eq!(admitted, names(&["verify_identity"]));
 
         flow.observe_tool("verify_identity", true, &state);
         flow.on_turn(&state);
-        let admitted = admitted_names(&catalog(), None, Some(&flow), &state);
+        let admitted = offered_names(&catalog(), None, Some(&flow), &state);
         assert_eq!(admitted, names(&["get_balance"]));
+    }
+
+    #[test]
+    fn a_tool_waiting_on_its_guard_is_offered_but_refused() {
+        // A commit waiting for the caller's yes must be declared, or the
+        // model cannot call it in the turn the yes arrives.
+        let flow = Flow::new()
+            .step("confirm")
+            .allow(["charge"])
+            .done(Guard::called_ok("charge"))
+            .step("end")
+            .after("confirm")
+            .terminal()
+            .commit("charge", Guard::is_true("confirmed"))
+            .build()
+            .expect("valid flow");
+        let stack = FlowMonitor::new(flow, Enforcement::Enforce).into_stack();
+        let state = State::new();
+        let catalog = vec![Tool::functions(vec![decl("charge")])];
+        assert_eq!(
+            offered_names(&catalog, None, Some(&stack), &state),
+            names(&["charge"])
+        );
+        assert!(stack.admits_tool("charge", &state).is_err());
+        assert_eq!(
+            stack.blocking_keys("charge", &state),
+            ["confirmed".to_string()].into_iter().collect()
+        );
+        let _ = state.set("confirmed", true);
+        assert!(stack.admits_tool("charge", &state).is_ok());
+        assert!(stack.blocking_keys("charge", &state).is_empty());
     }
 
     #[test]
     fn an_observing_flow_does_not_narrow_the_declarations() {
         let flow = banking_flow(Enforcement::Observe);
-        let admitted = admitted_names(&catalog(), None, Some(&flow), &State::new());
+        let admitted = offered_names(&catalog(), None, Some(&flow), &State::new());
         assert_eq!(
             admitted,
             names(&["get_balance", "transfer", "verify_identity"])

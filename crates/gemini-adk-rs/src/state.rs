@@ -230,6 +230,60 @@ impl JournalSink for FileJournalSink {
     }
 }
 
+/// Whether two state values say the same thing.
+///
+/// Strings compare after lowercasing and dropping spaces and punctuation, so
+/// "tomorrow at 7 pm" and "Tomorrow at 7 PM." are equal. Punctuation between
+/// two digits is kept: it is part of a number, time, date or identifier, so
+/// "1.0 mg" and "10 mg", or "10:30" and "1030", differ. Numbers
+/// compare by value (`4` and `4.0`), and a number equals a string that spells
+/// it ("4"). Arrays and objects compare element by element.
+///
+/// An extractor re-reads the transcript every turn and re-states values it
+/// already found in slightly different words; those re-statements are not
+/// corrections.
+pub fn equivalent_values(a: &Value, b: &Value) -> bool {
+    fn text(s: &str) -> String {
+        let chars: Vec<char> = s.chars().collect();
+        let digit = |c: Option<&char>| c.is_some_and(char::is_ascii_digit);
+        let mut out = String::new();
+        for (i, c) in chars.iter().enumerate() {
+            if c.is_alphanumeric() {
+                out.extend(c.to_lowercase());
+            } else if !c.is_whitespace() {
+                let before = chars[..i].iter().rev().find(|c| !c.is_whitespace());
+                let after = chars[i + 1..].iter().find(|c| !c.is_whitespace());
+                if digit(before) && digit(after) {
+                    out.push(*c);
+                }
+            }
+        }
+        out
+    }
+    fn number(v: &Value) -> Option<f64> {
+        match v {
+            Value::Number(n) => n.as_f64(),
+            Value::String(s) => s.trim().parse().ok(),
+            _ => None,
+        }
+    }
+    match (a, b) {
+        (Value::String(x), Value::String(y)) => text(x) == text(y),
+        (Value::Number(_), _) | (_, Value::Number(_)) => {
+            matches!((number(a), number(b)), (Some(x), Some(y)) if x == y)
+        }
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| equivalent_values(p, q))
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .all(|(k, v)| y.get(k).is_some_and(|w| equivalent_values(v, w)))
+        }
+        _ => a == b,
+    }
+}
+
 /// Read a journal written by [`FileJournalSink`].
 pub fn read_journal(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<StateMutation>> {
     parse_journal(&std::fs::read_to_string(path)?)
@@ -1392,6 +1446,31 @@ impl<'a> ReadOnlyPrefixedState<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn equivalent_values_ignore_wording_noise() {
+        use serde_json::json;
+        assert!(equivalent_values(
+            &json!("tomorrow at 7 pm"),
+            &json!("Tomorrow at 7 PM.")
+        ));
+        assert!(equivalent_values(&json!(4), &json!(4.0)));
+        assert!(equivalent_values(&json!(4), &json!("4")));
+        assert!(equivalent_values(
+            &json!({ "verified": true, "name": "Rossi" }),
+            &json!({ "name": "rossi", "verified": true })
+        ));
+        assert!(!equivalent_values(&json!("7 pm"), &json!("8 pm")));
+        // Punctuation inside a number is part of it.
+        assert!(!equivalent_values(&json!("1.0 mg"), &json!("10 mg")));
+        assert!(!equivalent_values(&json!("10:30"), &json!("1030")));
+        assert!(!equivalent_values(&json!("2026-10-20"), &json!("20261020")));
+        assert!(equivalent_values(&json!("1.0 mg"), &json!("1.0 MG.")));
+        assert!(equivalent_values(&json!("Rossi!"), &json!("rossi")));
+        assert!(!equivalent_values(&json!(4), &json!(5)));
+        assert!(!equivalent_values(&json!(true), &json!(false)));
+        assert!(!equivalent_values(&json!("4"), &json!(true)));
+    }
 
     #[test]
     fn journal_sink_receives_every_mutation_in_ring_order() {

@@ -617,8 +617,10 @@ impl FlowStack {
 
     /// Raise the correction flag of every watched slot whose value changed
     /// from one captured value to another since the last turn, clearing the
-    /// keys its rule names. The main flow lowers the flags once it has
-    /// advanced past them.
+    /// keys its rule names. A re-statement in different case, spacing or
+    /// punctuation is not a change (see
+    /// [`equivalent_values`](crate::state::equivalent_values)). The main
+    /// flow lowers the flags once it has advanced past them.
     fn detect_corrections(&mut self, state: &State) {
         if self.corrections.is_empty() {
             return;
@@ -627,7 +629,7 @@ impl FlowStack {
             let current = state.get_raw(slot);
             let corrected = matches!(
                 (self.slot_values.get(slot), &current),
-                (Some(before), Some(now)) if before != now
+                (Some(before), Some(now)) if !crate::state::equivalent_values(before, now)
             );
             if corrected {
                 let _ = state.set(correction_flag(slot), true);
@@ -700,7 +702,7 @@ impl FlowStack {
     /// Bump per-step active-turn counters for the main flow and raise repair
     /// signals when thresholds are hit. Clears signals for steps that are no
     /// longer active.
-    fn apply_repair(&mut self, state: &State) {
+    fn apply_repair(&mut self, state: &State, counted: bool) {
         if self.repair.is_empty() {
             return;
         }
@@ -735,7 +737,9 @@ impl FlowStack {
         }
         for step in &active {
             let count = self.active_turns.entry(step.clone()).or_insert(0);
-            *count += 1;
+            if counted {
+                *count += 1;
+            }
             if let Some(rp) = self.repair.get(step) {
                 if *count >= rp.reprompt_after {
                     let _ = state.set(reprompt_flag(step), true);
@@ -787,7 +791,7 @@ impl FlowStack {
     /// Advance the main flow one turn: resets first (shedding the repair
     /// signals of any step they un-latch), then repair bookkeeping over the
     /// pre-turn active set, then the re-latch.
-    fn advance_main(&mut self, state: &State) {
+    fn advance_main(&mut self, state: &State, counted: bool) {
         for step in self.main.begin_turn(state) {
             self.clear_repair(&step, state);
         }
@@ -802,7 +806,7 @@ impl FlowStack {
         }
         // Repair bookkeeping is based on the pre-turn active set so an
         // escalation signal can take effect this turn.
-        self.apply_repair(state);
+        self.apply_repair(state, counted);
         self.main.relatch(state);
     }
 
@@ -815,11 +819,21 @@ impl FlowStack {
     /// the active digression, enter a triggered one (suspending the main
     /// flow), or advance the main flow.
     pub fn on_turn(&mut self, state: &State) {
-        self.advance_turn(state);
+        self.on_turn_counted(state, true);
+    }
+
+    /// Advance one turn, saying whether it counts toward repair thresholds.
+    ///
+    /// A turn the caller had no part in, such as the greeting or the model
+    /// speaking a tool's result, is not a stall: with `counted` false the
+    /// flow advances as usual but no step's `reprompt_after` /
+    /// `escalate_after` count moves.
+    pub fn on_turn_counted(&mut self, state: &State, counted: bool) {
+        self.advance_turn(state, counted);
         self.publish_timing(state);
     }
 
-    fn advance_turn(&mut self, state: &State) {
+    fn advance_turn(&mut self, state: &State, counted: bool) {
         if self.terminated.is_some() {
             return;
         }
@@ -841,7 +855,7 @@ impl FlowStack {
         }
         match self.active.last_mut() {
             Some(active) => active.monitor.on_turn(state),
-            None => self.advance_main(state),
+            None => self.advance_main(state, counted),
         }
     }
 
@@ -912,6 +926,22 @@ impl FlowStack {
             return Err(denial);
         }
         self.current().admits_tool(tool, state)
+    }
+
+    /// Whether the active layer would admit `tool` once its
+    /// `never(tool).until(..)` guards hold (see
+    /// [`FlowMonitor::offers_tool`]). Nothing is offered after termination.
+    pub fn offers_tool(&self, tool: &str, state: &State) -> bool {
+        self.termination_denial().is_none() && self.current().offers_tool(tool, state)
+    }
+
+    /// The state keys read by the guards that refuse `tool` in the active
+    /// layer right now (see [`FlowMonitor::blocking_keys`]).
+    pub fn blocking_keys(&self, tool: &str, state: &State) -> std::collections::BTreeSet<String> {
+        if self.termination_denial().is_some() {
+            return std::collections::BTreeSet::new();
+        }
+        self.current().blocking_keys(tool, state)
     }
 
     /// Explain the active layer's control-plane state. After termination:
@@ -1287,6 +1317,27 @@ mod tests {
             state.get::<bool>(&correction_flag("party_size")),
             Some(false)
         );
+    }
+
+    #[test]
+    fn a_restated_slot_is_not_a_correction() {
+        // An extractor re-reads the transcript each turn and may re-state a
+        // value in different case or spacing; that must not clear the yes.
+        let state = State::new();
+        let mut stack = FlowStack::new(main_flow(), Enforcement::Enforce)
+            .with_correction("slot", ["confirmed".to_string()]);
+        let _ = state.set("slot", "tomorrow at 7 pm");
+        stack.on_turn(&state);
+        let _ = state.set("confirmed", true);
+        let _ = state.set("slot", "Tomorrow at 7 PM.");
+        stack.detect_corrections(&state);
+        assert_eq!(state.get::<bool>(&correction_flag("slot")), None);
+        assert_eq!(state.get::<bool>("confirmed"), Some(true));
+
+        let _ = state.set("slot", "tomorrow at 8 pm");
+        stack.detect_corrections(&state);
+        assert_eq!(state.get::<bool>(&correction_flag("slot")), Some(true));
+        assert_eq!(state.get::<bool>("confirmed"), None);
     }
 
     #[test]

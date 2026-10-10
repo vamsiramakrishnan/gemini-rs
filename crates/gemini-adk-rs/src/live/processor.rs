@@ -488,7 +488,12 @@ pub(crate) fn spawn_event_processor(
         barge_in: parking_lot::Mutex::new(CancellationToken::new()),
         resume_handle: parking_lot::Mutex::new(None),
         last_instruction: parking_lot::Mutex::new(None),
-        last_context: parking_lot::Mutex::new(Vec::new()),
+        // The opening steering was sent at connect: the first turn boundary
+        // must not send it again.
+        last_context: parking_lot::Mutex::new(super::control_plane::opening_steering(
+            &control_plane.flow,
+            &state,
+        )),
         pending_context: control_plane.pending_context.clone(),
         delivery: control_plane.delivery,
         dropped: DroppedFrames::default(),
