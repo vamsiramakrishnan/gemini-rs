@@ -20,6 +20,7 @@
 //!   callbacks) are added on the returned builder after `apply`, exactly as
 //!   before; the spec never pretends to serialize them.
 
+pub mod authoring;
 mod codegen;
 pub mod project;
 mod simulate;
@@ -1795,8 +1796,21 @@ impl SessionSpec {
                      writes it (it can never latch){suffix}"
                 ));
             }
+            // Digressions are not part of the lowered main flow; the tools
+            // their stages admit or commit are referenced too.
+            let overlay_tools: std::collections::BTreeSet<&str> = self
+                .conversation
+                .iter()
+                .flat_map(|c| c.overlays.iter().flat_map(|o| o.stages.iter()))
+                .flat_map(|s| {
+                    s.allow
+                        .iter()
+                        .map(String::as_str)
+                        .chain(s.commit.iter().map(|c| c.tool.as_str()))
+                })
+                .collect();
             for t in &self.tools {
-                if !referenced.contains(&t.name) {
+                if !referenced.contains(&t.name) && !overlay_tools.contains(t.name.as_str()) {
                     warnings.push(format!(
                         "tool '{}' is declared but no step or constraint references it \
                          (it will be denied whenever a step with an `allow` list is active \
@@ -3539,6 +3553,28 @@ mod tests {
             ]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn tools_used_only_in_a_digression_are_referenced() {
+        let mut spec = booking_bundle();
+        spec.tools
+            .push(serde_json::from_value(json!({ "name": "transfer" })).unwrap());
+        let unreferenced = |spec: &SessionSpec| {
+            spec.validate()
+                .warnings
+                .iter()
+                .any(|w| w.contains("'transfer' is declared but no step"))
+        };
+        assert!(unreferenced(&spec));
+        spec.conversation.as_mut().unwrap().overlays = serde_json::from_value(json!([{
+            "name": "handoff",
+            "trigger": { "is_true": "intent:human_agent" },
+            "stages": [{ "id": "transfer", "allow": ["transfer"], "done": { "called_ok": "transfer" } }],
+            "resume": "terminate"
+        }]))
+        .unwrap();
+        assert!(!unreferenced(&spec));
     }
 
     #[test]

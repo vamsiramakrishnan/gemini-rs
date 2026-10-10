@@ -558,6 +558,24 @@ Live::builder()
 
 This triggers extraction from the evidence available when `GenerationComplete` is received. It cannot reconstruct output the provider did not send.
 
+## Authoring a SessionSpec
+
+To write `agent.json` for a user, do not guess field names or ask questions
+ad hoc. Drive the authoring interface (`spec::authoring`; see
+[authoring a spec](user-guide/spec-authoring.md)):
+
+```bash
+adk spec catalog                                   # voices, guards, policies, bindings, question ids
+adk spec check agent.json --json                   # diagnostics with pointers and JSON-patch fixes
+adk spec patch agent.json '<fix.patch>' --write    # apply one fix, then check again
+adk spec plan agent.json --decisions decisions.json --json
+adk spec answer agent.json '[{"id": "voice", "choice": "Kore"}]' --decisions decisions.json --write
+```
+
+Ask the user every blocking question. Take an optional question's
+`default` only when the user has no preference. Generate when
+`plan.ready` is true.
+
 ## S.C.T.P.M.A Operator Algebra
 
 Eight namespaces for composing agent configuration aspects (S/C/T/P/M/A plus

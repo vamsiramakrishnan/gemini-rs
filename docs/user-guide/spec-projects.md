@@ -10,6 +10,10 @@ tool the spec declares as a mock.
 adk spec codegen agent.json --lang python --out booking
 ```
 
+To draft or complete `agent.json` from a coding harness, use
+`adk spec check`, `plan` and `answer` first: see
+[authoring a spec](spec-authoring.md).
+
 Each generated function returns the spec's mock response until you replace
 its body, so a new project behaves exactly like the spec does offline.
 Whatever the language, the declaration in `agent.json` is what the model
