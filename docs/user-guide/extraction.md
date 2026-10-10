@@ -363,8 +363,10 @@ A commit guard often reads a key an extractor writes, such as a caller's
 confirmation. The caller says "yes" and the model calls the commit tool in
 the same turn, before that turn has been extracted. When the governed flow
 refuses a tool only because such a guard has not held yet, the tool lane
-runs the extractors that write the guard's keys on the turn in progress,
-then decides again. Each extractor reads its usual number of turns, ending
+runs the `EveryTurn` extractors that may write the guard's keys on the turn
+in progress, then decides again. An extractor may write a key when a
+promotion rule targets it, or, without rules, when its schema has a field of
+that name. Extractors with another trigger keep their own moment. Each extractor reads its usual number of turns, ending
 with the turn in progress, so an older "yes" outside that window is not
 read again.
 
