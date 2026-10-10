@@ -51,7 +51,9 @@ When the caller corrects a slot, the runtime clears every state key read by
 the commit guards of later stages (except keys that are themselves
 collected), so the read-back and the yes happen again. Keep other state
 checks out of those guards: see "Gates that survive corrections" in
-patterns.md.
+patterns.md. A correction also reopens the stages after the corrected slot,
+even once the call has reached a terminal stage; committed tools that already
+succeeded stay denied.
 
 ## Guards
 
