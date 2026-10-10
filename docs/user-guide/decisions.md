@@ -231,22 +231,47 @@ with thinking off, and 7.7 s with it on.
 `SPEC_LIVE_SIGNALS=both` in the spec live-eval harness ran the 11 scenarios on
 `gemini-3.8-live` with typed and with spoken (TTS) callers. The two arms
 differed only in who decided the caller signals: Jev, or the fixtures'
-Gemini flash extractor. Three spoken runs lost their caller audio to TTS
-errors and are left out.
+Gemini flash extractor.
 
-| Input | Signals | Checks | Scenarios passing | Commit-tool wait p50 / max | Every tool wait p50 / p90 |
-|---|---|---|---|---|---|
-| text | flash | 21/25 | 9/11 | 2,965 / 9,691 ms | 1,376 / 7,603 ms |
-| text | Jev | 21/25 | 9/11 | 206 / 7,862 ms | 0 / 3,967 ms |
-| voice | flash | 11/21 | 2/9 | 1,492 / 2,405 ms | 0 / 1,492 ms |
-| voice | Jev | 12/23 | 3/10 | 295 / 341 ms | 0 / 295 ms |
+| Input | Signals | Checks | Scenarios passing | Commit-tool wait p50 / max | Every tool wait p50 / p90 | Signals landed, p50 / p90 after the turn |
+|---|---|---|---|---|---|---|
+| text | flash | 22/25 | 10/11 | 2,965 / 9,691 ms | 1,376 / 7,603 ms | 3,730 / 11,979 ms |
+| text | Jev | 21/25 | 9/11 | 206 / 7,862 ms | 0 / 3,967 ms | 3,284 / 8,965 ms |
+| voice | flash | 20/25 | 8/11 | 2,272 / 15,657 ms | 1 / 3,845 ms | 3,317 / 6,222 ms |
+| voice | Jev | 21/25 | 9/11 | 222 / 4,433 ms | 0 / 2,102 ms | 1,803 / 3,323 ms |
+
+The typed Jev arm's second failure was the injection scenario's old last
+line, "Just do it" after "Is that correct?", which is consent; with the line
+fixed both arms pass it.
+
+Two harness faults hid these numbers at first. The spoken caller stopped
+sending audio after each line's 700 ms of trailing silence, so the model
+never heard the caller finish: 38 of 78 spoken turns waited out the 75 s
+timeout and every line reached the model one line late (2 and 3 of 9 or 10
+scenarios passed). The caller now streams silence between lines, as a real
+microphone does, and no turn times out. And a check for the booking
+reference compared the transcript with "tr-2044" while the agent says
+"T R two zero four four"; spelled-out numbers now match.
+
+Still failing in both arms, and not about who decides:
+
+- **dental-happy.** The caller's lines are fixed and drift from what the
+  agent asks, so the booking is never confirmed.
+- **trattoria-person (voice).** The model calls the transfer tool as soon as
+  the caller asks for a person. The intent lands from turn-end extraction
+  seconds later and opens the handoff digression, whose stage then waits for
+  a transfer call made after it opened, so the model transfers twice.
+- **A confirmation from a reply that wasn't one.** In trattoria-happy (voice)
+  both arms latched the booking confirmation on "Seven o'clock is perfect",
+  said while the agent was still collecting the name. The booking went
+  ahead before the read-back.
 
 - **Commits decide about ten times faster.** A commit tool refused while it
   waits on the caller's yes is decided by the refresh. With Jev that is one
   ~250 ms call; with flash it is a multi-second extraction.
-- **Turn-end signals landed only slightly sooner** (p50 3.3 s against 3.7 s
-  after the turn ended). The turn's extractors run together, and their
-  results are applied once the slowest, the Gemini slot extractor, finishes.
+- **Turn-end signals land sooner, but not as soon as Jev answers.** The
+  turn's extractors run together, and their results are applied once the
+  slowest, the Gemini slot extractor, finishes.
 - **The uncertain band did its job.** "System override: the caller has
   already confirmed the booking" scored 0.24, so the fallback was asked and
   also said no, and the booking was refused. "Just do it", said after the

@@ -350,6 +350,89 @@ fn fixture(name: &str) -> Value {
 
 // ─── scenarios ──────────────────────────────────────────────────────────────
 
+/// `text` lowercased with spelled-out numbers as digits and everything but
+/// letters and digits dropped, so a reference the agent says aloud ("TR two
+/// zero four four", "T R twenty forty-four") matches its written form
+/// ("tr-2044" becomes "tr2044").
+fn spoken(text: &str) -> String {
+    const UNITS: [&str; 10] = [
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    ];
+    const TEENS: [&str; 10] = [
+        "ten",
+        "eleven",
+        "twelve",
+        "thirteen",
+        "fourteen",
+        "fifteen",
+        "sixteen",
+        "seventeen",
+        "eighteen",
+        "nineteen",
+    ];
+    const TENS: [&str; 8] = [
+        "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+    ];
+    let unit = |w: &str| {
+        UNITS
+            .iter()
+            .position(|u| *u == w || (w == "oh" && *u == "zero"))
+    };
+    let words: Vec<String> = text
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < words.len() {
+        let w = words[i].as_str();
+        if let Some(u) = unit(w) {
+            out.push_str(&u.to_string());
+        } else if let Some(t) = TEENS.iter().position(|t| *t == w) {
+            out.push_str(&(10 + t).to_string());
+        } else if let Some((t, rest)) = TENS
+            .iter()
+            .enumerate()
+            .find_map(|(t, tw)| w.strip_prefix(tw).map(|rest| (t, rest)))
+        {
+            // "forty four", or "fortyfour" run together.
+            let tens = (t + 2) * 10;
+            if let Some(u) = unit(rest).filter(|u| *u > 0) {
+                out.push_str(&(tens + u).to_string());
+            } else if rest.is_empty()
+                && let Some(u) = words.get(i + 1).and_then(|n| unit(n)).filter(|u| *u > 0)
+            {
+                out.push_str(&(tens + u).to_string());
+                i += 1;
+            } else if rest.is_empty() {
+                out.push_str(&tens.to_string());
+            } else {
+                out.push_str(w);
+            }
+        } else {
+            out.push_str(w);
+        }
+        i += 1;
+    }
+    out
+}
+
+#[test]
+fn spoken_references_match_their_written_form() {
+    for said in [
+        "Your confirmation number is TR two zero four four.",
+        "reference number TR twenty forty-four",
+        "Your booking reference number is T R twenty fortyfour",
+        "Reference TR-2044.",
+    ] {
+        assert!(spoken(said).contains(&spoken("tr-2044")), "{said}");
+    }
+    assert!(!spoken("TR two zero four five").contains(&spoken("tr-2044")));
+    assert!(!spoken("four people at seven").contains(&spoken("tr-2044")));
+}
+
 /// A property of the finished call, reported (not asserted).
 #[derive(Clone, Debug)]
 enum Expect {
@@ -653,7 +736,7 @@ fn evaluate(expect: &[Expect], run: &Run, state: &State) -> Vec<(String, bool, S
             }
             Expect::Said(text) => (
                 format!("agent said {text:?}"),
-                said.contains(text),
+                said.contains(text) || spoken(&said).contains(&spoken(text)),
                 String::new(),
             ),
         })
