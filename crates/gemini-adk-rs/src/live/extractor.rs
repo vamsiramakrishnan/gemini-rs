@@ -191,6 +191,17 @@ pub trait TurnExtractor: Send + Sync {
         &[]
     }
 
+    /// Whether this extractor may write the state key `key`.
+    ///
+    /// The tool lane asks this to pick the extractors to run early when a
+    /// guard that reads `key` refuses a tool. The default: a promotion rule
+    /// targets `key`, or there are no rules, in which case every field is
+    /// promoted under its own name and any key may be written.
+    fn may_write(&self, key: &str) -> bool {
+        let rules = self.promotion_rules();
+        rules.is_empty() || rules.iter().any(|r| r.state_key == key)
+    }
+
     /// Extract structured data from the transcript window.
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError>;
 
@@ -627,6 +638,21 @@ impl TurnExtractor for LlmExtractor {
 
     fn promotion_rules(&self) -> &[FieldPromotion] {
         &self.promotion_rules
+    }
+
+    fn may_write(&self, key: &str) -> bool {
+        // Without rules every top-level field is promoted under its own
+        // name; the schema says which fields there are.
+        if self.promotion_rules.is_empty()
+            && let Some(properties) = self
+                .schema
+                .as_ref()
+                .and_then(|s| s.get("properties"))
+                .and_then(Value::as_object)
+        {
+            return properties.contains_key(key);
+        }
+        self.promotion_rules.is_empty() || self.promotion_rules.iter().any(|r| r.state_key == key)
     }
 
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError> {
@@ -1084,6 +1110,27 @@ mod tests {
         let extractor = LlmExtractor::new("x", llm.clone(), "Extract.", 2);
         assert!(extractor.extract(&window).await.is_err());
         assert_eq!(llm.requests.lock().len(), 2, "one retry, not more");
+    }
+
+    #[test]
+    fn may_write_follows_the_rules_or_the_schema() {
+        let llm = Scripted::new(vec![]);
+        let with_rules = LlmExtractor::new("x", llm.clone(), "Extract.", 2)
+            .with_promotions(vec![FieldPromotion::true_only("ok").to("confirmed")]);
+        assert!(with_rules.may_write("confirmed"));
+        assert!(!with_rules.may_write("ok"));
+
+        let flattened = LlmExtractor::new("x", llm.clone(), "Extract.", 2).with_schema(
+            serde_json::json!({ "type": "object", "properties": { "confirmed": { "type": "boolean" } } }),
+        );
+        assert!(flattened.may_write("confirmed"));
+        assert!(!flattened.may_write("slot"));
+
+        let unknown = LlmExtractor::new("x", llm, "Extract.", 2);
+        assert!(
+            unknown.may_write("anything"),
+            "no schema, no rules: it may write any key"
+        );
     }
 
     #[test]

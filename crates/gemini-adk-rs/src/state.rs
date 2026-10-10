@@ -232,8 +232,10 @@ impl JournalSink for FileJournalSink {
 
 /// Whether two state values say the same thing.
 ///
-/// Strings compare after lowercasing and dropping everything but letters and
-/// digits, so "tomorrow at 7 pm" and "Tomorrow at 7 PM." are equal. Numbers
+/// Strings compare after lowercasing and dropping spaces and punctuation, so
+/// "tomorrow at 7 pm" and "Tomorrow at 7 PM." are equal. Punctuation between
+/// two digits is kept: it is part of a number, time, date or identifier, so
+/// "1.0 mg" and "10 mg", or "10:30" and "1030", differ. Numbers
 /// compare by value (`4` and `4.0`), and a number equals a string that spells
 /// it ("4"). Arrays and objects compare element by element.
 ///
@@ -242,10 +244,21 @@ impl JournalSink for FileJournalSink {
 /// corrections.
 pub fn equivalent_values(a: &Value, b: &Value) -> bool {
     fn text(s: &str) -> String {
-        s.chars()
-            .filter(|c| c.is_alphanumeric())
-            .flat_map(char::to_lowercase)
-            .collect()
+        let chars: Vec<char> = s.chars().collect();
+        let digit = |c: Option<&char>| c.is_some_and(char::is_ascii_digit);
+        let mut out = String::new();
+        for (i, c) in chars.iter().enumerate() {
+            if c.is_alphanumeric() {
+                out.extend(c.to_lowercase());
+            } else if !c.is_whitespace() {
+                let before = chars[..i].iter().rev().find(|c| !c.is_whitespace());
+                let after = chars[i + 1..].iter().find(|c| !c.is_whitespace());
+                if digit(before) && digit(after) {
+                    out.push(*c);
+                }
+            }
+        }
+        out
     }
     fn number(v: &Value) -> Option<f64> {
         match v {
@@ -1448,6 +1461,12 @@ mod tests {
             &json!({ "name": "rossi", "verified": true })
         ));
         assert!(!equivalent_values(&json!("7 pm"), &json!("8 pm")));
+        // Punctuation inside a number is part of it.
+        assert!(!equivalent_values(&json!("1.0 mg"), &json!("10 mg")));
+        assert!(!equivalent_values(&json!("10:30"), &json!("1030")));
+        assert!(!equivalent_values(&json!("2026-10-20"), &json!("20261020")));
+        assert!(equivalent_values(&json!("1.0 mg"), &json!("1.0 MG.")));
+        assert!(equivalent_values(&json!("Rossi!"), &json!("rossi")));
         assert!(!equivalent_values(&json!(4), &json!(5)));
         assert!(!equivalent_values(&json!(true), &json!(false)));
         assert!(!equivalent_values(&json!("4"), &json!(true)));

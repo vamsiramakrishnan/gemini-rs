@@ -155,13 +155,16 @@ pub(in crate::live) async fn handle_tool_calls(
                                     std::collections::BTreeSet::new()
                                 }
                             };
+                            // Only extractors that run on every turn: one
+                            // configured for another moment (after tools, on a
+                            // phase change, at generation complete) keeps it.
                             let writers: Vec<Arc<dyn TurnExtractor>> = extractors
                                 .iter()
                                 .filter(|e| {
-                                    e.promotion_rules()
-                                        .iter()
-                                        .any(|r| blocking.contains(&r.state_key))
+                                    e.trigger()
+                                        == crate::live::extractor::ExtractionTrigger::EveryTurn
                                 })
+                                .filter(|e| blocking.iter().any(|k| e.may_write(k)))
                                 .cloned()
                                 .collect();
                             if !writers.is_empty() {
@@ -1107,6 +1110,7 @@ mod tests {
     struct YesReader {
         rules: Vec<crate::live::extractor::FieldPromotion>,
         seen: std::sync::Mutex<Vec<String>>,
+        trigger: crate::live::extractor::ExtractionTrigger,
     }
 
     #[async_trait]
@@ -1119,6 +1123,9 @@ mod tests {
         }
         fn promotion_rules(&self) -> &[crate::live::extractor::FieldPromotion] {
             &self.rules
+        }
+        fn trigger(&self) -> crate::live::extractor::ExtractionTrigger {
+            self.trigger.clone()
         }
         async fn extract(
             &self,
@@ -1200,6 +1207,7 @@ mod tests {
                 "confirmed",
             )],
             seen: Default::default(),
+            trigger: crate::live::extractor::ExtractionTrigger::EveryTurn,
         });
         let extractors: Vec<Arc<dyn TurnExtractor>> = vec![reader.clone()];
         let state = State::new();
@@ -1223,12 +1231,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_extractor_without_rules_is_refreshed_too() {
+        // No promotion rules: every field is promoted under its own name, so
+        // `confirmed` may be written.
+        let reader = Arc::new(YesReader {
+            rules: Vec::new(),
+            seen: Default::default(),
+            trigger: crate::live::extractor::ExtractionTrigger::EveryTurn,
+        });
+        let extractors: Vec<Arc<dyn TurnExtractor>> = vec![reader.clone()];
+        let state = State::new();
+        let flow = Some(charge_flow());
+        let mut transcript = TranscriptBuffer::new();
+        transcript.push_input("yes please");
+
+        let runs = Arc::new(AtomicUsize::new(0));
+        call_charge(&mut transcript, &state, &extractors, &flow, runs.clone()).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "the commit ran");
+    }
+
+    #[tokio::test]
+    async fn an_extractor_for_another_moment_is_not_run_early() {
+        let reader = Arc::new(YesReader {
+            rules: vec![crate::live::extractor::FieldPromotion::true_only(
+                "confirmed",
+            )],
+            seen: Default::default(),
+            trigger: crate::live::extractor::ExtractionTrigger::AfterToolCall,
+        });
+        let extractors: Vec<Arc<dyn TurnExtractor>> = vec![reader.clone()];
+        let state = State::new();
+        let flow = Some(charge_flow());
+        let mut transcript = TranscriptBuffer::new();
+        transcript.push_input("yes please");
+
+        let runs = Arc::new(AtomicUsize::new(0));
+        call_charge(&mut transcript, &state, &extractors, &flow, runs.clone()).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 0, "refused");
+        assert!(
+            reader.seen.lock().unwrap().is_empty(),
+            "an AfterToolCall extractor keeps its own moment"
+        );
+    }
+
+    #[tokio::test]
     async fn without_a_yes_the_commit_is_still_refused() {
         let reader = Arc::new(YesReader {
             rules: vec![crate::live::extractor::FieldPromotion::true_only(
                 "confirmed",
             )],
             seen: Default::default(),
+            trigger: crate::live::extractor::ExtractionTrigger::EveryTurn,
         });
         let extractors: Vec<Arc<dyn TurnExtractor>> = vec![reader.clone()];
         let state = State::new();
@@ -1258,6 +1311,7 @@ mod tests {
                 "confirmed",
             )],
             seen: Default::default(),
+            trigger: crate::live::extractor::ExtractionTrigger::EveryTurn,
         });
         let extractors: Vec<Arc<dyn TurnExtractor>> = vec![reader.clone()];
         let state = State::new();
