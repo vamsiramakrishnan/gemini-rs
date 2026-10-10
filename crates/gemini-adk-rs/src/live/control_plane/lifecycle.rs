@@ -83,7 +83,14 @@ pub(in crate::live) async fn handle_turn_complete(
     let flow = &control_plane.flow;
     let decide = async {
         if let Some((decisions, turns)) = &decision_input {
-            super::decisions::decision_round(decisions, flow, turns, state).await;
+            super::decisions::decision_round(
+                decisions,
+                flow,
+                super::decisions::DecisionPoint::TurnEnd,
+                turns,
+                state,
+            )
+            .await;
         }
     };
     tokio::join!(

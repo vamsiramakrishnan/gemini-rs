@@ -147,13 +147,13 @@ There are two decision points:
 
 1. **The caller's turn ends.** Asked alongside the turn's extractors, so it
    adds no wait to the turn pipeline.
-2. **The model calls a tool.** Asked before the tool is admitted, about the
+2. **The model calls a tool.** Asked before the call is admitted, about the
    turn still in progress. When the model calls the commit tool in the same
    breath as the caller's "yes, go ahead", the gate reads that yes; a
    digression the answers trigger (a request for a person) opens before the
    call is judged.
 
-At each point the runtime asks the questions the flow can act on:
+At the turn's end the runtime asks the questions the flow can act on:
 
 - those named by the guards of the flow that is driving (its stages, edges
   and constraints), so a stage entered during the turn already has its
@@ -162,7 +162,12 @@ At each point the runtime asks the questions the flow can act on:
   the stage that collects it;
 - those named by phase transitions and patterns, asked at every caller turn.
 
-They go out in one request, and latency barely moves with the number of
+At a tool call it asks only what decides whether that call is admitted: the
+commit (`never…until`) guards on the called tools, and the triggers of
+digressions that would admit them. A call no decision governs asks nothing
+and does not wait.
+
+Each round is one request, and latency barely moves with the number of
 questions. A question already answered for this caller turn is not asked
 again. Questions only a digression's own stages name wait until it opens,
 and while a digression drives, the main flow's questions wait for it to

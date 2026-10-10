@@ -136,11 +136,12 @@ Declare each question once, then guard on it with `decided`:
   `true_only`, nothing to clear when the caller changes a detail. Unsure
   (between the thresholds, or the model too slow) satisfies nothing, so a
   commit fails closed.
-- The runtime asks the questions the driving flow's guards and the
-  digressions' triggers name, plus any that `writes` a key an active
-  stage reads, in one request at the caller's turn end and before a tool
-  is admitted. Phase transitions and patterns are asked every turn. Ask
-  about "their last turn" for confirmations and intents.
+- At the caller's turn end the runtime asks, in one request, the
+  questions the driving flow's guards and the digressions' triggers name,
+  plus any that `writes` a key an active stage reads; phase transitions
+  and patterns are asked every turn. Before a tool call is admitted it asks
+  only what governs that call (its commit guard, a digression that would
+  admit it). Ask about "their last turn" for confirmations and intents.
 - A `choice` with `options_from` picks among options in state; give it
   `none`, since a choice always picks something. `writes` puts the pick
   into the slot the stage collects. Slots with free values (names, dates)

@@ -823,15 +823,22 @@ fn jev_arm(fixture: &str, mut doc: Value) -> Value {
                 let instructions = schema["description"]
                     .as_str()
                     .map_or_else(|| field.replace('_', " "), str::to_string);
-                decisions.insert(
-                    field.clone(),
-                    json!({
-                        "type": "boolean",
-                        "instructions": format!("Judging the caller's last turn: {instructions}"),
-                        // Kept in state too, for the `Before` expectations.
-                        "writes": to,
-                    }),
-                );
+                let mut question = json!({
+                    "type": "boolean",
+                    "instructions": format!("Judging the caller's last turn: {instructions}"),
+                    // Kept in state too, for the `Before` expectations.
+                    "writes": to,
+                });
+                // A confirmation carries the criteria the decisions guide
+                // tells authors to write; without them a pick ("Seven
+                // o'clock is perfect") reads as agreement.
+                if field.ends_with("_confirmed") {
+                    question["criteria"] = json!({
+                        "true": "the caller said yes to the details the agent read back, in their own words",
+                        "false": "nothing was read back yet, or they hesitated, changed a detail, asked something, or only picked an option",
+                    });
+                }
+                decisions.insert(field.clone(), question);
                 signals.insert(to, field.clone());
             }
         } else if fixture == "dental" && e["name"] == "booking_choice" {

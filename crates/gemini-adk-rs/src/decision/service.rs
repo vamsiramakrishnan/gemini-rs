@@ -328,14 +328,27 @@ impl Decisions {
         self.model.model_id()
     }
 
-    /// The questions worth asking for `scope`: the declared ones it names,
-    /// the standing ones, and those that write a key it reads.
+    /// The questions worth asking at a turn's end for `scope`: the declared
+    /// ones it names, the standing ones, and those that write a key it reads.
     pub fn select(&self, scope: &DecisionScope) -> BTreeSet<String> {
+        let mut ids = self.governing(scope);
+        ids.extend(
+            self.standing
+                .iter()
+                .filter(|id| self.bank.contains_key(*id))
+                .cloned(),
+        );
+        ids
+    }
+
+    /// The questions `scope` itself depends on: the declared ones it names
+    /// and those that write a key it reads, without the standing ones. What
+    /// a tool call waits for before it is admitted.
+    pub fn governing(&self, scope: &DecisionScope) -> BTreeSet<String> {
         self.bank
             .iter()
             .filter(|(id, d)| {
                 scope.questions.contains(*id)
-                    || self.standing.contains(*id)
                     || d.writes.as_ref().is_some_and(|k| scope.reads.contains(k))
             })
             .map(|(id, _)| id.clone())

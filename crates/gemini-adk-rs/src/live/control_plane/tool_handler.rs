@@ -65,18 +65,27 @@ pub(in crate::live) async fn handle_tool_calls(
     barge_in: &CancellationToken,
     event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
 ) {
-    // Decision point: answer the flow's questions about the caller's latest
-    // words, including the turn in progress, before any call is admitted. A
-    // commit guarded on the caller's yes then sees this turn's yes, and a
-    // digression the answers trigger opens first, so a transfer the model
-    // makes in the same breath counts inside it.
+    // Decision point: answer the questions that decide whether these calls
+    // are admitted, about the caller's latest words including the turn in
+    // progress. A commit guarded on the caller's yes then sees this turn's
+    // yes, and a digression the answers trigger opens first, so a transfer
+    // the model makes in the same breath counts inside it. A call no
+    // decision governs asks nothing and does not wait.
     if let (Some(decisions), Some(stack)) = (decisions, flow) {
         let turns = transcript_buffer
             .snapshot_window_with_current(decisions.history_len())
             .turns()
             .to_vec();
+        let tools: Vec<String> = calls.iter().map(|c| c.name.clone()).collect();
         let turn_before = state.get_raw(crate::flow::DECISION_TURN_KEY);
-        let round = super::decisions::decision_round(decisions, flow, &turns, state).await;
+        let round = super::decisions::decision_round(
+            decisions,
+            flow,
+            super::decisions::DecisionPoint::ToolGate(&tools),
+            &turns,
+            state,
+        )
+        .await;
         // New answers, or a new caller turn that retired the old ones.
         if round.is_some() || state.get_raw(crate::flow::DECISION_TURN_KEY) != turn_before {
             let mut stack = stack.lock();
@@ -1507,6 +1516,59 @@ mod tests {
             1,
             "the yes in this turn admits it"
         );
+    }
+
+    #[tokio::test]
+    async fn a_call_no_decision_governs_does_not_wait_for_one() {
+        use crate::decision::{Answer, Decision, Decisions, MockDecisionModel, Question};
+        let flow_def = Flow::new()
+            .step("confirm")
+            .commit("charge", Guard::decided("confirmed"))
+            .done(Guard::called_ok("charge"))
+            .build()
+            .expect("valid");
+        let flow = Some(
+            FlowMonitor::new(flow_def, Enforcement::Enforce)
+                .into_stack()
+                .into_shared(),
+        );
+        let model = Arc::new(MockDecisionModel::new(|_| {
+            Ok([("confirmed".to_string(), Answer::boolean(0.97))].into())
+        }));
+        let decisions = Arc::new(
+            Decisions::new(model.clone())
+                .question("confirmed", Decision::new(Question::boolean("Agreed?"))),
+        );
+        let state = State::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let mut transcript = TranscriptBuffer::new();
+        transcript.push_input("Yes, go ahead.");
+        call_with_decisions(
+            "lookup",
+            &mut transcript,
+            &state,
+            &flow,
+            &decisions,
+            runs.clone(),
+        )
+        .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert!(
+            model.requests().is_empty(),
+            "lookup asked the decision model"
+        );
+
+        call_with_decisions(
+            "charge",
+            &mut transcript,
+            &state,
+            &flow,
+            &decisions,
+            runs.clone(),
+        )
+        .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 2);
+        assert_eq!(model.requests().len(), 1, "charge waits for its yes");
     }
 
     #[tokio::test]

@@ -1010,6 +1010,35 @@ impl FlowStack {
         DecisionScope { questions, reads }
     }
 
+    /// What decides whether `tools` are admitted now: the questions in the
+    /// driving layer's `never(tool).until(..)` guards on them (a stage's
+    /// commit), and in the triggers of the digressions that would admit one
+    /// of them, with the state keys those guards read. A call no decision
+    /// governs gets an empty scope, so it is not held up by a decision round.
+    pub fn gate_scope(&self, tools: &[String]) -> DecisionScope {
+        if self.is_terminated() {
+            return DecisionScope::default();
+        }
+        let mut scope = DecisionScope::default();
+        for c in &self.current().flow().constraints {
+            if let crate::flow::Constraint::NeverUntil { tool, until } = c
+                && tools.contains(tool)
+            {
+                scope.questions.extend(until.decisions());
+                scope.reads.extend(until.state_keys());
+            }
+        }
+        for ov in &self.overlays {
+            if !self.active.iter().any(|a| a.name == ov.name)
+                && tools.iter().any(|t| ov.flow.tool_universe().contains(t))
+            {
+                scope.questions.extend(ov.trigger.decisions());
+                scope.reads.extend(ov.trigger.state_keys());
+            }
+        }
+        scope
+    }
+
     /// Apply fresh decisions mid-turn: enter a digression whose trigger now
     /// holds, or re-evaluate the driving layer. Counts no turn and advances
     /// no repair policy, so it can run before a tool call is admitted: a
@@ -1998,6 +2027,25 @@ mod tests {
         assert!(
             scope.reads.contains("slot"),
             "collect reads the slot: {scope:?}"
+        );
+    }
+
+    #[test]
+    fn the_gate_scope_names_only_what_decides_these_calls() {
+        let mut stack = booking_with_handoff();
+        let state = State::new();
+        let _ = state.set("slot", "19:00");
+        stack.on_turn(&state);
+        let scope = |tools: &[&str]| {
+            stack
+                .gate_scope(&tools.iter().map(ToString::to_string).collect::<Vec<_>>())
+                .questions
+        };
+        assert_eq!(scope(&["book"]), ["confirmed".to_string()].into());
+        assert_eq!(scope(&["transfer"]), ["wants_person".to_string()].into());
+        assert!(
+            scope(&["check_availability"]).is_empty(),
+            "a call no decision governs waits for none"
         );
     }
 
