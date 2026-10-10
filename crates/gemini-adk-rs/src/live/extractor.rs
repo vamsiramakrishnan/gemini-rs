@@ -405,9 +405,17 @@ pub struct LlmExtractor {
     /// Thinking budget sent with each request; `None` leaves the model's
     /// default.
     thinking_budget: Option<u32>,
-    /// Set once the model rejects `thinking_budget`, so it is not sent again.
-    budget_rejected: std::sync::atomic::AtomicBool,
+    /// How far down [`FALLBACK_THINKING_BUDGET`] the model has pushed the
+    /// budget: 0 sends `thinking_budget`, 1 the fallback, 2 none. Kept so a
+    /// rejected budget is not sent again.
+    budget_step: std::sync::atomic::AtomicU8,
 }
+
+/// The budget sent when a model rejects a thinking budget of 0, such as
+/// `gemini-3.5-flash-lite` ("Request contains an invalid argument"). That
+/// model accepts budgets from 1, and below about 1024 it does not think at
+/// all, so this keeps thinking off at the smallest budget it accepts.
+pub const FALLBACK_THINKING_BUDGET: u32 = 64;
 
 impl LlmExtractor {
     /// Create a new LLM-backed extractor.
@@ -433,7 +441,7 @@ impl LlmExtractor {
             trigger: ExtractionTrigger::EveryTurn,
             promotion_rules: Vec::new(),
             thinking_budget: Some(0),
-            budget_rejected: std::sync::atomic::AtomicBool::new(false),
+            budget_step: std::sync::atomic::AtomicU8::new(0),
         }
     }
 
@@ -443,9 +451,10 @@ impl LlmExtractor {
     /// pipeline waits for it, so thinking costs seconds of latency on every
     /// turn. Measured on `gemini-flash-latest`, a budget of 0 cut a short
     /// extraction from 7.7 s to 2.3 s with the same results. `None` leaves
-    /// the model's default. When a model rejects the budget (some only work
-    /// in thinking mode), the extractor retries without it and stops sending
-    /// it.
+    /// the model's default. When a model rejects a budget of 0 (some only
+    /// work in thinking mode, and `gemini-3.5-flash-lite` needs at least 1),
+    /// the extractor retries with [`FALLBACK_THINKING_BUDGET`], then without
+    /// a budget, and keeps sending the first one the model accepted.
     pub fn with_thinking_budget(mut self, budget: Option<u32>) -> Self {
         self.thinking_budget = budget;
         self
@@ -562,27 +571,36 @@ impl LlmExtractor {
     /// extraction loses what the caller said in that turn.
     async fn generate(&self, mut request: LlmRequest) -> Result<LlmResponse, LlmError> {
         use std::sync::atomic::Ordering;
-        let budget = self
-            .thinking_budget
-            .filter(|_| !self.budget_rejected.load(Ordering::Relaxed));
-        request.thinking_budget = budget;
-        match self.llm.generate(request.clone()).await {
-            Err(LlmError::Api { status: 400, .. }) if budget.is_some() => {
-                tracing::warn!(
-                    extractor = %self.name,
-                    "the extraction model rejected thinking budget {budget:?}; \
-                     sending requests without it"
-                );
-                self.budget_rejected.store(true, Ordering::Relaxed);
-                request.thinking_budget = None;
-                self.llm.generate(request).await
+        loop {
+            let step = self.budget_step.load(Ordering::Relaxed);
+            let budget = match step {
+                0 => self.thinking_budget,
+                1 => Some(FALLBACK_THINKING_BUDGET),
+                _ => None,
+            };
+            request.thinking_budget = budget;
+            match self.llm.generate(request.clone()).await {
+                Err(LlmError::Api { status: 400, .. }) if budget.is_some() => {
+                    let next = if step == 0 && budget != Some(FALLBACK_THINKING_BUDGET) {
+                        1
+                    } else {
+                        2
+                    };
+                    tracing::warn!(
+                        extractor = %self.name,
+                        "the extraction model rejected thinking budget {budget:?}; \
+                         trying {:?}",
+                        if next == 1 { Some(FALLBACK_THINKING_BUDGET) } else { None }
+                    );
+                    self.budget_step.fetch_max(next, Ordering::Relaxed);
+                }
+                Err(e) if e.is_retryable() => {
+                    tracing::warn!(extractor = %self.name, "extraction failed ({e}); retrying once");
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    return self.llm.generate(request).await;
+                }
+                other => return other,
             }
-            Err(e) if e.is_retryable() => {
-                tracing::warn!(extractor = %self.name, "extraction failed ({e}); retrying once");
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                self.llm.generate(request).await
-            }
-            other => other,
         }
     }
 
@@ -1077,13 +1095,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_rejected_thinking_budget_is_dropped_for_good() {
+    async fn a_rejected_budget_of_zero_falls_back_to_the_smallest_accepted() {
         let llm = Scripted::new(vec![Err(bad_request()), Ok(r#"{"a": 1}"#), Ok("{}")]);
         let extractor = LlmExtractor::new("x", llm.clone(), "Extract.", 2);
         let window = make_turns(&[("hi", "hello")]);
         assert_eq!(extractor.extract(&window).await.unwrap()["a"], 1);
         extractor.extract(&window).await.unwrap();
-        assert_eq!(llm.budgets(), [Some(0), None, None]);
+        assert_eq!(
+            llm.budgets(),
+            [
+                Some(0),
+                Some(FALLBACK_THINKING_BUDGET),
+                Some(FALLBACK_THINKING_BUDGET)
+            ],
+            "the accepted fallback is kept"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_model_that_rejects_every_budget_gets_none() {
+        let llm = Scripted::new(vec![
+            Err(bad_request()),
+            Err(bad_request()),
+            Ok(r#"{"a": 1}"#),
+            Ok("{}"),
+        ]);
+        let extractor = LlmExtractor::new("x", llm.clone(), "Extract.", 2);
+        let window = make_turns(&[("hi", "hello")]);
+        assert_eq!(extractor.extract(&window).await.unwrap()["a"], 1);
+        extractor.extract(&window).await.unwrap();
+        assert_eq!(
+            llm.budgets(),
+            [Some(0), Some(FALLBACK_THINKING_BUDGET), None, None]
+        );
+
+        // A configured budget the model rejects goes straight to none when it
+        // is the fallback already.
+        let llm = Scripted::new(vec![Err(bad_request()), Ok("{}")]);
+        let extractor = LlmExtractor::new("x", llm.clone(), "Extract.", 2)
+            .with_thinking_budget(Some(FALLBACK_THINKING_BUDGET));
+        extractor.extract(&window).await.unwrap();
+        assert_eq!(llm.budgets(), [Some(FALLBACK_THINKING_BUDGET), None]);
     }
 
     #[tokio::test]

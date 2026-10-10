@@ -210,13 +210,14 @@ after 300 ms. A failed extraction loses what the caller said in that turn.
 ### Choosing the extraction model
 
 Name the model. In a spec, `models.extraction` sets it for every `extract`
-entry, and an entry's own `model` overrides it:
+entry, and an entry's own `model` overrides it; `models.extraction_thinking_budget`
+and an entry's `thinking_budget` set the budget the same way:
 
 ```json
-"models": { "extraction": "gemini-3.1-flash-lite" },
+"models": { "extraction": "gemini-3.5-flash-lite", "extraction_thinking_budget": 64 },
 "extract": [
   { "name": "caller_identity", "instruction": "...", "schema": { ... } },
-  { "name": "notes", "model": "gemini-3.5-flash", "instruction": "...", "schema": { ... } }
+  { "name": "notes", "model": "gemini-3.5-flash", "thinking_budget": 0, "instruction": "...", "schema": { ... } }
 ]
 ```
 
@@ -226,38 +227,64 @@ and takes precedence. An entry that names no model runs on
 `SpecResources::extraction_llm`; `adk spec run` creates it from
 `GEMINI_TEXT_MODEL`, else `gemini-flash-latest`. `adk spec check` warns
 (`unpinned_extraction_model`) when extraction names no model, and its fix
-pins `gemini-3.1-flash-lite`.
+pins `gemini-3.5-flash-lite` with a thinking budget of 64.
 
-`gemini-flash-latest` is a rolling alias: it served `gemini-3.8-flash` when
-this was measured, and its latency changes when the alias moves.
 `tests/extraction_latency.rs` replays the pharmacy fixture's three
 extractors over the turn "I need a refill of my Lisinopril", all three at
 once as the turn pipeline runs them, six turns at a time (18 concurrent
-requests), and checks the name, date of birth, medication and signals:
+requests), through `LlmExtractor`, and checks the name, date of birth,
+medication and signals:
 
 | Model | Turn p50 / p90 / p99 / max | Correct |
 |---|---|---|
-| `gemini-flash-latest` (`gemini-3.8-flash`) | 6.7 / 19.5 / 49.1 / 62.2 s | 60/60 |
+| `gemini-3.5-flash-lite`, budget 64 | 0.67 / 0.85 / 1.16 / 1.18 s | 60/60 |
+| `gemini-3.1-flash-lite`, budget 0 | 1.0 / 1.3 / 1.5 / 1.7 s | 60/60 |
 | `gemini-3.5-flash` | 1.1 / 1.9 / 3.3 / 5.7 s | 60/60 |
-| `gemini-3.1-flash-lite` | 1.0 / 1.4 / 1.5 / 1.7 s | 60/60 |
-| `gemini-3.5-flash-lite`, `gemini-flash-lite-latest` | 0.7 / 0.9 / 1.3 / 1.9 s | 15 and 16 of 60 |
-| `gemini-2.5-flash-lite` | 0.4 / 0.7 / 0.9 / 1.0 s | 0/60 |
+| `gemini-flash-latest` (`gemini-3.8-flash`) | 6.7 / 19.5 / 49.1 / 62.2 s | 60/60 |
+| `gemini-2.5-flash-lite` | 0.4 / 0.7 / 0.9 / 1.0 s | 0/60 (drops the date of birth) |
 
-With three turns at a time, `gemini-flash-latest` took 3.3 s at the median
-and 9 s at most; under load its tail reaches the 49 and 58 s turns seen in
-live runs. Every call succeeded on the first try: the time is the model's.
-`gemini-3.5-flash-lite` left the medication out in 45 of 60 turns (the agent
-had gone on to ask which one), and `gemini-2.5-flash-lite` dropped the date
-of birth. `gemini-3.5-flash-lite` also rejects a thinking budget of 0; the
-extractor then resends without it, once per extractor. In earlier testing
-`gemini-flash-lite-latest` marked "Seven o'clock is perfect", said when
-picking a time, as agreeing to book. Run the probe against your own
-extractors before switching:
+`gemini-flash-latest` is a rolling alias: it served `gemini-3.8-flash` when
+this was measured, and its latency changes when the alias moves. With three
+turns at a time it took 3.3 s at the median and 9 s at most; under load its
+tail reaches the 49 and 58 s turns seen in live runs. Every call succeeded
+on the first try: the time is the model's.
+
+Run the probe against your own extractors before switching:
 
 ```text
-EXTRACTION_MODELS=gemini-3.1-flash-lite,gemini-3.5-flash \
+EXTRACTION_MODELS=gemini-3.5-flash-lite EXTRACTION_THINKING_BUDGET=64 \
   cargo test -p gemini-adk-fluent-rs --test extraction_latency -- --ignored --nocapture
 ```
+
+### `gemini-3.5-flash-lite`
+
+- **Thinking.** It rejects `thinkingBudget: 0` ("Request contains an invalid
+  argument") and accepts budgets from 1. Below about 1024 it does not think
+  at all (0 thought tokens at 1, 64, 128, 512, 768 and 1000); from 1024 it
+  thinks about 550 tokens and takes about 2 s. `thinkingLevel` `minimal` and
+  `low` do not think either; `medium` thinks about 520 tokens (2 s) and
+  `high` about 1,400 (4.6 s). Send 64: it keeps thinking off at the smallest
+  budget the model accepts. Without a configured budget the extractor sends
+  0, and on the rejection resends at 64, then with none, once per
+  extractor.
+- **Instructions are read literally without thinking.** The pharmacy
+  fixture once said "Leave it out until they have picked one." The caller
+  said "I need a refill of my lisinopril", and the agent replied "I found
+  two prescriptions: Lisinopril and Atorvastatin. Which one would you like
+  to refill today?" Without thinking the model took the agent's question as
+  proof that nothing had been picked: lisinopril in 6 of 20 runs (0 of 20 at
+  budgets 64 to 1000). Without the agent's question, or with the agent
+  acknowledging the pick, it was right 20 of 20; with medium thinking, 20 of
+  20, and its thought summary weighed exactly that question. Saying what
+  counts fixed it at 64, 30 of 30: "A medication the caller named counts
+  even if the assistant then asks which one; use null only if the caller
+  has not named one." `gemini-3.1-flash-lite` was right 20 of 20 with either
+  wording, so it is the more forgiving choice when instructions are not
+  tested.
+- In earlier testing `gemini-flash-lite-latest` marked "Seven o'clock is
+  perfect", said when picking a time, as agreeing to book. Signals that gate
+  a commit belong to a [decision model](decisions.md) or need explicit
+  criteria.
 
 ## Schema Definition
 
@@ -406,7 +433,8 @@ Turn-end extraction runs on the control lane, and so do tool calls. A tool
 call that arrives while an extraction is running waits for it, so the
 extraction model's latency adds directly to the tool's response time. In a
 live run on `gemini-flash-latest`, two pharmacy tool calls waited 49 and
-58 s behind the previous turn's extraction; pin a fast model (see
+58 s behind the previous turn's extraction. Pinned to a fast model, the
+slowest tool wait across the same 44 runs was 1.1 s (see
 [Choosing the extraction model](#choosing-the-extraction-model)).
 
 A commit guard often reads a key an extractor writes, such as a caller's

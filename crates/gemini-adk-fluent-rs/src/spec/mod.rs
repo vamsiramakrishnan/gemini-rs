@@ -271,17 +271,28 @@ pub struct ExtractSpec {
     /// Field-promotion rules into bare state keys.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub promote: Vec<PromoteSpec>,
-    /// The text model this entry runs on, such as `gemini-3.1-flash-lite`.
+    /// The text model this entry runs on, such as `gemini-3.5-flash-lite`.
     /// Overrides `models.extraction`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The thinking budget this entry's requests send. Overrides
+    /// `models.extraction_thinking_budget`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
 }
 
-/// The extraction model `adk spec check` suggests pinning: correct on the
-/// labelled pharmacy turn in 60 of 60 rounds at about 1 s, where the rolling
-/// `gemini-flash-latest` default took 6.7 s at the median and up to 62 s
-/// (`tests/extraction_latency.rs`).
-pub const RECOMMENDED_EXTRACTION_MODEL: &str = "gemini-3.1-flash-lite";
+/// The extraction model `adk spec check` suggests pinning, with
+/// [`RECOMMENDED_EXTRACTION_THINKING_BUDGET`]. On the labelled pharmacy turn
+/// it was correct in 60 of 60 rounds at 0.67 s median and 1.2 s at most, where
+/// the rolling `gemini-flash-latest` default took 6.7 s at the median and up
+/// to 62 s (`tests/extraction_latency.rs`). Without thinking it follows an
+/// instruction literally: say what counts, not "leave it out until".
+pub const RECOMMENDED_EXTRACTION_MODEL: &str = "gemini-3.5-flash-lite";
+
+/// The thinking budget pinned with [`RECOMMENDED_EXTRACTION_MODEL`], which
+/// rejects 0 and does not think below about 1024.
+pub const RECOMMENDED_EXTRACTION_THINKING_BUDGET: u32 =
+    gemini_adk_rs::live::extractor::FALLBACK_THINKING_BUDGET;
 
 /// What validation says when extraction names no model.
 const UNPINNED_EXTRACTION_WARNING: &str = "extraction names no model, so it runs on the host \
@@ -292,11 +303,17 @@ const UNPINNED_EXTRACTION_WARNING: &str = "extraction names no model, so it runs
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ModelsSpec {
     /// The text model `extract` entries run on, such as
-    /// `gemini-3.1-flash-lite`, unless an entry names its own. Name one: the
+    /// `gemini-3.5-flash-lite`, unless an entry names its own. Name one: the
     /// host default is the rolling `gemini-flash-latest` alias, whose model
     /// (and latency) changes under you, and every turn waits for extraction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extraction: Option<String>,
+    /// The thinking budget extraction requests send. The default, 0, keeps
+    /// thinking off; a model that rejects 0 (`gemini-3.5-flash-lite` needs
+    /// at least 1) is retried at 64, then with no budget. Set 64 for such a
+    /// model to skip the rejected first request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extraction_thinking_budget: Option<u32>,
 }
 
 fn default_window() -> usize {
@@ -2274,7 +2291,7 @@ impl SessionSpec {
         for e in &self.extract {
             let llm =
                 extraction_llm_for(e, self.models.extraction.as_deref(), resources, &mut models)?;
-            live = live.extractor(Arc::new(compile_extractor(e, llm)));
+            live = live.extractor(Arc::new(compile_extractor(e, llm, &self.models)));
         }
         if let Some(model) = &resources.decision_model
             && !self.decisions.is_empty()
@@ -2382,12 +2399,16 @@ impl SessionSpec {
     }
 }
 
-/// Shared extractor lowering for session and task-owned services.
-fn compile_extractor(e: &ExtractSpec, llm: Arc<dyn BaseLlm>) -> LlmExtractor {
-    let extractor = LlmExtractor::new(e.name.clone(), llm, e.instruction.clone(), e.window)
+/// Shared extractor lowering for session and task-owned services. `models`
+/// is the session's, for the thinking budget an entry does not set.
+fn compile_extractor(e: &ExtractSpec, llm: Arc<dyn BaseLlm>, models: &ModelsSpec) -> LlmExtractor {
+    let mut extractor = LlmExtractor::new(e.name.clone(), llm, e.instruction.clone(), e.window)
         .with_schema(e.schema.clone())
         .with_min_words(3)
         .with_trigger(e.trigger.to_trigger());
+    if let Some(budget) = e.thinking_budget.or(models.extraction_thinking_budget) {
+        extractor = extractor.with_thinking_budget(Some(budget));
+    }
     if e.promote.is_empty() {
         extractor
     } else {
@@ -3975,6 +3996,43 @@ done
         // Named models need no extraction_llm.
         spec.apply(Live::builder(), &State::new(), &resources)
             .expect("applies on the named models");
+    }
+
+    #[tokio::test]
+    async fn an_entry_or_the_spec_sets_the_thinking_budget() {
+        use gemini_adk_rs::live::TurnExtractor;
+        use gemini_adk_rs::llm::{LlmResponse, MockLlm};
+        let budgets = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let seen = budgets.clone();
+        let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm::from_fn(move |req| {
+            seen.lock().push(req.thinking_budget);
+            Ok(LlmResponse::from_text("{}"))
+        }));
+        let window = [gemini_adk_rs::live::TranscriptTurn {
+            turn_number: 0,
+            user: "I need a refill of my lisinopril.".into(),
+            model: String::new(),
+            tool_calls: Vec::new(),
+            timestamp: std::time::Instant::now(),
+        }];
+        let entry = collections_spec().extract[0].clone();
+        let models = ModelsSpec {
+            extraction: None,
+            extraction_thinking_budget: Some(64),
+        };
+        let mut own = entry.clone();
+        own.thinking_budget = Some(8);
+        for (e, m) in [
+            (&entry, &models),
+            (&own, &models),
+            (&entry, &ModelsSpec::default()),
+        ] {
+            compile_extractor(e, llm.clone(), m)
+                .extract(&window)
+                .await
+                .unwrap();
+        }
+        assert_eq!(*budgets.lock(), [Some(64), Some(8), Some(0)]);
     }
 
     #[test]

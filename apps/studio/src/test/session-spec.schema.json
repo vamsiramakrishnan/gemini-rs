@@ -1118,7 +1118,7 @@
           "type": "string"
         },
         "model": {
-          "description": "The text model this entry runs on, such as `gemini-3.1-flash-lite`. Overrides `models.extraction`.",
+          "description": "The text model this entry runs on, such as `gemini-3.5-flash-lite`. Overrides `models.extraction`.",
           "type": [
             "string",
             "null"
@@ -1137,6 +1137,15 @@
         },
         "schema": {
           "description": "JSON Schema the extraction must satisfy."
+        },
+        "thinking_budget": {
+          "description": "The thinking budget this entry's requests send. Overrides `models.extraction_thinking_budget`.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "trigger": {
           "allOf": [
@@ -1302,9 +1311,18 @@
       "description": "The models a spec runs on, by role.",
       "properties": {
         "extraction": {
-          "description": "The text model `extract` entries run on, such as `gemini-3.1-flash-lite`, unless an entry names its own. Name one: the host default is the rolling `gemini-flash-latest` alias, whose model (and latency) changes under you, and every turn waits for extraction.",
+          "description": "The text model `extract` entries run on, such as `gemini-3.5-flash-lite`, unless an entry names its own. Name one: the host default is the rolling `gemini-flash-latest` alias, whose model (and latency) changes under you, and every turn waits for extraction.",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "extraction_thinking_budget": {
+          "description": "The thinking budget extraction requests send. The default, 0, keeps thinking off; a model that rejects 0 (`gemini-3.5-flash-lite` needs at least 1) is retried at 64, then with no budget. Set 64 for such a model to skip the rejected first request.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
             "null"
           ]
         }

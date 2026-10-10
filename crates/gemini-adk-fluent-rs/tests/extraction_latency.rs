@@ -18,6 +18,7 @@
 //! | `EXTRACTION_MODELS` | `gemini-flash-latest,gemini-3.5-flash-lite` | Comma-separated text models |
 //! | `EXTRACTION_ROUNDS` | `30` | Rounds per model |
 //! | `EXTRACTION_PARALLEL` | `3` | Rounds at a time |
+//! | `EXTRACTION_THINKING_BUDGET` | the extractor's (0, then 64 if rejected) | Thinking budget sent |
 //!
 //! Prints, per model, the round time's p50 / p90 / p99 / max, how many
 //! rounds took over 5 and 10 s, errors, and each underlying API call's
@@ -194,6 +195,9 @@ async fn turn_end_extraction_latency() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(3);
+    let budget: Option<u32> = std::env::var("EXTRACTION_THINKING_BUDGET")
+        .ok()
+        .and_then(|v| v.parse().ok());
     let turns = Arc::new(transcript());
     let specs = extract_specs();
 
@@ -218,7 +222,8 @@ async fn turn_end_extraction_latency() {
                             e.window,
                         )
                         .with_schema(e.schema.clone())
-                        .with_min_words(3),
+                        .with_min_words(3)
+                        .with_thinking_budget(budget.or(Some(0))),
                     )
                 })
                 .collect(),

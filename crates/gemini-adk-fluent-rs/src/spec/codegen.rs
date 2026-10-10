@@ -254,7 +254,7 @@ impl SessionSpec {
             out.push_str(&gen_runtime(runtime));
         }
         for extract in &self.extract {
-            out.push_str(&gen_extract(extract, self.models.extraction.as_deref()));
+            out.push_str(&gen_extract(extract, &self.models));
         }
         if !self.decisions.is_empty() {
             out.push_str(&gen_decisions(self));
@@ -533,7 +533,8 @@ fn gen_pred(pred: &Pred) -> String {
     }
 }
 
-fn gen_extract(extract: &super::ExtractSpec, default_model: Option<&str>) -> String {
+fn gen_extract(extract: &super::ExtractSpec, models: &super::ModelsSpec) -> String {
+    let default_model = models.extraction.as_deref();
     let mut out = String::new();
     out.push_str("        .extractor(Arc::new(\n");
     // The entry's model, else the spec's `models.extraction`, else the
@@ -559,6 +560,12 @@ fn gen_extract(extract: &super::ExtractSpec, default_model: Option<&str>) -> Str
         "            .with_schema(json!({}))",
         compact(&extract.schema)
     );
+    if let Some(budget) = extract
+        .thinking_budget
+        .or(models.extraction_thinking_budget)
+    {
+        let _ = writeln!(out, "            .with_thinking_budget(Some({budget}))");
+    }
     let trigger = match extract.trigger {
         TriggerSpec::EveryTurn => "EveryTurn",
         TriggerSpec::AfterToolCall => "AfterToolCall",
@@ -1276,12 +1283,14 @@ mod tests {
     #[test]
     fn extraction_is_generated_on_the_model_the_spec_names() {
         let mut named = spec();
-        named.models.extraction = Some("gemini-3.1-flash-lite".into());
+        named.models.extraction = Some("gemini-3.5-flash-lite".into());
+        named.models.extraction_thinking_budget = Some(64);
         let code = named.to_rust();
         assert!(
-            code.contains("model: Some(\"gemini-3.1-flash-lite\".into())"),
+            code.contains("model: Some(\"gemini-3.5-flash-lite\".into())"),
             "{code}"
         );
+        assert!(code.contains(".with_thinking_budget(Some(64))"), "{code}");
         assert!(
             !code.contains("GeminiLlm::new(Default::default())"),
             "{code}"

@@ -669,18 +669,7 @@ fn unpinned_extraction_model(
     if !spec.uses_default_extraction_model() {
         return;
     }
-    let model = Value::String(super::RECOMMENDED_EXTRACTION_MODEL.into());
-    let patch = if doc.get("models").is_some_and(Value::is_object) {
-        PatchOp::Add {
-            path: "/models/extraction".into(),
-            value: model,
-        }
-    } else {
-        PatchOp::Add {
-            path: "/models".into(),
-            value: serde_json::json!({ "extraction": model }),
-        }
-    };
+    let patch = pin_extraction_model(doc);
     out.push(diagnostic(
         Severity::Warning,
         "unpinned_extraction_model",
@@ -690,10 +679,31 @@ fn unpinned_extraction_model(
          set); every turn waits for it",
         Some(Fix {
             description: format!("Run extraction on {}", super::RECOMMENDED_EXTRACTION_MODEL),
-            patch: vec![patch],
+            patch,
         }),
     ));
     covered.push("extraction names no model".into());
+}
+
+/// Ops that pin the recommended extraction model and its thinking budget,
+/// keeping whatever `models` already sets.
+fn pin_extraction_model(doc: &Value) -> Vec<PatchOp> {
+    let model = json!(super::RECOMMENDED_EXTRACTION_MODEL);
+    let budget = json!(super::RECOMMENDED_EXTRACTION_THINKING_BUDGET);
+    if !doc.get("models").is_some_and(Value::is_object) {
+        return vec![add(
+            "/models",
+            json!({ "extraction": model, "extraction_thinking_budget": budget }),
+        )];
+    }
+    let mut ops = Vec::new();
+    if doc.pointer("/models/extraction").is_none() {
+        ops.push(add("/models/extraction", model));
+        if doc.pointer("/models/extraction_thinking_budget").is_none() {
+            ops.push(add("/models/extraction_thinking_budget", budget));
+        }
+    }
+    ops
 }
 
 /// [`check`] the text of a spec file. Text that is not JSON gets an
@@ -1227,14 +1237,7 @@ fn signal_ops(doc: &Value, key: &str, description: &str) -> Vec<PatchOp> {
                 }),
             )];
             // New extraction names its model.
-            if doc.pointer("/models/extraction").is_none() {
-                let model = json!(super::RECOMMENDED_EXTRACTION_MODEL);
-                ops.push(if doc.get("models").is_some_and(Value::is_object) {
-                    add("/models/extraction".to_string(), model)
-                } else {
-                    add("/models".to_string(), json!({ "extraction": model }))
-                });
-            }
+            ops.extend(pin_extraction_model(doc));
             ops
         }
     }
@@ -2102,7 +2105,7 @@ mod tests {
                 "require": ["done"],
                 "policies": [{ "kind": "safety_handoff", "intents": ["human_agent"] }]
             },
-            "models": { "extraction": "gemini-3.1-flash-lite" },
+            "models": { "extraction": "gemini-3.5-flash-lite", "extraction_thinking_budget": 64 },
             "extract": [{
                 "name": "caller_signals",
                 "instruction": "Signals.",
