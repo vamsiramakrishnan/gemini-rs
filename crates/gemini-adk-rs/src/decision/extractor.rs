@@ -546,6 +546,12 @@ impl TurnExtractor for DecisionExtractor {
         &self.rules
     }
 
+    fn may_write(&self, key: &str) -> bool {
+        // Only promoted answers reach state; without promotions it writes
+        // nothing but its own result.
+        self.rules.iter().any(|r| r.state_key == key)
+    }
+
     async fn extract(&self, window: &[TranscriptTurn]) -> Result<Value, LlmError> {
         self.extract_with_state(window, &State::new()).await
     }
@@ -1046,6 +1052,17 @@ mod tests {
             .map(|r| r.state_key.as_str())
             .collect();
         assert_eq!(keys, ["book_table_confirmed"]);
+        assert!(ex.may_write("book_table_confirmed"));
+        assert!(
+            !ex.may_write("unpromoted"),
+            "an unpromoted answer is not written"
+        );
+        let none = DecisionExtractor::new("x", answering(vec![]), 2)
+            .question(DecisionQuestion::new("a", Question::boolean("A?")));
+        assert!(
+            !none.may_write("a"),
+            "no promotions: nothing to refresh for"
+        );
     }
 
     #[test]

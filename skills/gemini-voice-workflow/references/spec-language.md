@@ -91,7 +91,7 @@ time; `adk spec run` creates one from the environment.
 
 When the person has an AI Gateway key with Jev access, confirmations,
 intents and picks among offered options can go to a decision model instead
-of `caller_signals`. It answers in well under a second with a probability,
+of `caller_signals`. It answers in about 250 ms (median through AI Gateway) with a probability,
 instead of a language model's seconds. Use it when they ask for Jev or for
 faster confirmations; it needs `AI_GATEWAY_API_KEY` at run time.
 
