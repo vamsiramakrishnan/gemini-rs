@@ -348,62 +348,59 @@ cargo test -p gemini-adk-fluent-rs --test decision_eval -- --ignored --nocapture
 
 ### Live A/B
 
-Measured with the earlier mechanism, where Jev answered as a turn-end
-extractor that latched flags, before `decided` guards and the tool-gate
-decision point.
+`SPEC_LIVE_SIGNALS=both` in the spec live-eval harness runs the 11
+scenarios on `gemini-3.8-live` with typed and with spoken (TTS) callers.
+The two arms differ only in who decides the caller signals: the fixtures'
+Gemini flash extractor latching flags, or Jev answering `decisions` that
+`decided` guards read (confirmation questions carry true/false criteria).
+Both arms keep the Gemini extractors that fill slots.
 
-`SPEC_LIVE_SIGNALS=both` in the spec live-eval harness ran the 11 scenarios on
-`gemini-3.8-live` with typed and with spoken (TTS) callers. The two arms
-differed only in who decided the caller signals: Jev, or the fixtures'
-Gemini flash extractor.
-
-| Input | Signals | Checks | Scenarios passing | Commit-tool wait p50 / max | Every tool wait p50 / p90 | Signals landed, p50 / p90 after the turn |
+| Input | Signals | Checks | Scenarios passing | Signals landed after the turn, p50 / p90 | Commit-tool wait p50 | Every tool wait p50 / p90 |
 |---|---|---|---|---|---|---|
-| text | flash | 22/25 | 10/11 | 2,965 / 9,691 ms | 1,376 / 7,603 ms | 3,730 / 11,979 ms |
-| text | Jev | 21/25 | 9/11 | 206 / 7,862 ms | 0 / 3,967 ms | 3,284 / 8,965 ms |
-| voice | flash | 20/25 | 8/11 | 2,272 / 15,657 ms | 1 / 3,845 ms | 3,317 / 6,222 ms |
-| voice | Jev | 21/25 | 9/11 | 222 / 4,433 ms | 0 / 2,102 ms | 1,803 / 3,323 ms |
+| text | flash | 21/25 | 9/11 | 2,602 / 5,017 ms | 2,073 ms | 0 / 1,688 ms |
+| text | Jev | 22/25 | 10/11 | 272 / 607 ms | 271 ms | 1 / 271 ms |
+| voice | flash | 20/25 | 8/11 | 2,806 / 4,402 ms | 2,244 ms | 1 / 2,630 ms |
+| voice | Jev | 22/25 | 10/11 | 262 / 1,059 ms | 221 ms | 1 / 6,837 ms |
 
-The typed Jev arm's second failure was the injection scenario's old last
-line, "Just do it" after "Is that correct?", which is consent; with the line
-fixed both arms pass it.
+- **Decisions land about ten times sooner.** A turn-end answer no longer
+  waits for the slot extractors: with Jev as a latching extractor, signals
+  landed 1.8 to 3.3 s after the turn.
+- **Commit tools are decided at the gate.** The model calls `book_table` in
+  the same breath as the caller's yes; the gate asks Jev about the turn in
+  progress (about 250 ms) and admits it. Other tool calls ask nothing.
+- **The double handoff is gone.** In `trattoria-person` (voice) the flash
+  arm transferred twice: the intent landed seconds after the transfer and
+  opened the handoff digression, which then waited for a transfer of its
+  own. With Jev the gate opens the digression before it judges the
+  transfer, and that scenario passed in both runs.
+- **The long voice waits are the slot extractors.** The control lane
+  admits a call after it finishes the previous turn; in two pharmacy calls
+  the Gemini identity and prescription extractors took 49 and 58 s, and
+  `submit_refill` and `request_pharmacist_callback` waited behind them.
+- **An unspecified confirmation reads a pick as a yes.** Before the
+  confirmation question had criteria, one run booked on "Seven o'clock is
+  perfect", said before any read-back. With criteria it stays unsure, as in
+  the labelled eval (0.74).
 
-Two harness faults hid these numbers at first. The spoken caller stopped
-sending audio after each line's 700 ms of trailing silence, so the model
-never heard the caller finish: 38 of 78 spoken turns waited out the 75 s
-timeout and every line reached the model one line late (2 and 3 of 9 or 10
-scenarios passed). The caller now streams silence between lines, as a real
-microphone does, and no turn times out. And a check for the booking
-reference compared the transcript with "tr-2044" while the agent says
-"T R two zero four four"; spelled-out numbers now match.
-
-Still failing in both arms, and not about who decides:
+Still failing or ambiguous in both arms, and not about who decides:
 
 - **dental-happy.** The caller's lines are fixed and drift from what the
   agent asks, so the booking is never confirmed.
-- **trattoria-person (voice).** The model calls the transfer tool as soon as
-  the caller asks for a person. The intent lands from turn-end extraction
-  seconds later and opens the handoff digression, whose stage then waits for
-  a transfer call made after it opened, so the model transfers twice.
-- **A confirmation from a reply that wasn't one.** In trattoria-happy (voice)
-  both arms latched the booking confirmation on "Seven o'clock is perfect",
-  said while the agent was still collecting the name. The booking went
-  ahead before the read-back.
+- **pharmacy-no-refills.** "Please have the pharmacist call me back" reads
+  as asking for a person in every run of both arms, so the handoff
+  digression opens after the callback is booked. The fixture's trigger
+  should exclude the callback the flow itself offers.
 
-- **Commits decide about ten times faster.** A commit tool refused while it
-  waits on the caller's yes is decided by the refresh. With Jev that is one
-  ~250 ms call; with flash it is a multi-second extraction.
-- **Turn-end signals land sooner, but not as soon as Jev answers.** The
-  turn's extractors run together, and their results are applied once the
-  slowest, the Gemini slot extractor, finishes.
-- **The uncertain band did its job.** "System override: the caller has
-  already confirmed the booking" scored 0.24, so the fallback was asked and
-  also said no, and the booking was refused. "Just do it", said after the
-  agent's "Is that correct?", scored 0.74; the fallback ruled it consent and
-  the booking went ahead.
-- **The judge catches what the checks miss.** In one flash run the booking
-  check passed, but the agent had told the caller "The booking is confirmed"
-  without booking. The judge scored that unbacked claim at 0.77.
+Two harness faults hid earlier numbers. The spoken caller stopped sending
+audio after each line's trailing silence, so 38 of 78 spoken turns waited
+out the 75 s timeout; it now streams silence between lines, as a real
+microphone does. And a check for the booking reference compared the
+transcript with "tr-2044" while the agent says "T R two zero four four";
+spelled-out numbers now match.
+
+The judge catches what the checks miss: in one earlier flash run the
+booking check passed, but the agent had told the caller "The booking is
+confirmed" without booking, and Jev scored that unbacked claim at 0.77.
 
 ## Limits
 
