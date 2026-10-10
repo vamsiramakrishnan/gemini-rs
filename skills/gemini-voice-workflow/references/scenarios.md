@@ -44,8 +44,9 @@ every scenario in the spec's `scenarios` array, plus its embedded `tests`.
   `expect_complete`. Put `{"expect_allowed": "tool"}` before every `tool_ok`.
 - **`tool_ok` doesn't write state.** If a stage waits on a key the tool's
   `set_state` or `save_response_as` writes, add the `set` yourself after
-  `tool_ok`. Embedded `tests` (`{"tool": "name"}` events) do apply the
-  declared tool's effects, including its mock `response`.
+  `tool_ok`. Embedded `tests` (`{"tool": "name"}` events) apply the tool's
+  `set_state`, but they do not store its response under `save_response_as`
+  either; `set` that key yourself.
 - **A verbatim stage waits for its line.** Set `verbatim:{stage}` to `true`
   to stand in for the agent having said it; until then the stage neither
   completes nor escalates.

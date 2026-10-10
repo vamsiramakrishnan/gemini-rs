@@ -38,7 +38,7 @@ usually that is only the first one. `next` edges move between stages;
 | `ground` | Facts given to the model while active; `{key}` is filled from state: `"Party of {party_size} at {slot}."` |
 | `collect` | Slots this stage gathers. The stage completes when all are set, unless `done` says otherwise |
 | `allow` | Tools admitted while this stage is active. A stage with no `allow` (or `[]`) restricts nothing, so list the tools wherever the model may call them |
-| `commit` | `{"tool", "when": guard}`: the tool is denied in every stage until the guard holds. Use it for every tool that changes something |
+| `commit` | `{"tool", "when": guard}`: the tool is denied in every stage until the guard holds. Use it for every tool that changes something. Once a committed tool has succeeded it is denied for the rest of the call; a failed call can be retried, so a tool that must allow a second try reports a mismatch as an error |
 | `next` | `[{"to": stage, "when": guard}]` transitions |
 | `done` | Explicit completion guard, when `collect` or `next` is not the right signal |
 | `terminal` | The call ends here (done, handoff, goodbye) |
