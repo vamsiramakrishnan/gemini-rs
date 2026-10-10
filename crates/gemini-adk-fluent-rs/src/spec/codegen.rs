@@ -69,10 +69,10 @@ impl SessionSpec {
                  ExtractionTrigger, FieldPromotion, LlmExtractor,\n};\n",
             );
         }
-        if !self.decide.is_empty() {
+        if !self.decisions.is_empty() {
             out.push_str(
                 "use gemini_adk_fluent_rs::gemini_adk_rs::decision::{\n    \
-                 DecisionExtractor, DecisionQuestion, GatewayDecisionModel, Promote, Question,\n};\n",
+                 Decision, Decisions, GatewayDecisionModel, Question,\n};\n",
             );
         }
         if !self.computed.is_empty() {
@@ -107,7 +107,7 @@ impl SessionSpec {
             out.push_str("use gemini_memory_rs::runtime::LiveMemoryExt;\n");
         }
         let needs_arc = !self.extract.is_empty()
-            || !self.decide.is_empty()
+            || !self.decisions.is_empty()
             || self.memory.is_some()
             || self
                 .runtime
@@ -256,8 +256,8 @@ impl SessionSpec {
         for extract in &self.extract {
             out.push_str(&gen_extract(extract));
         }
-        for decide in &self.decide {
-            out.push_str(&gen_decide(decide));
+        if !self.decisions.is_empty() {
+            out.push_str(&gen_decisions(self));
         }
         for phase in &self.phases {
             out.push_str(&gen_phase(phase));
@@ -319,6 +319,9 @@ impl SessionSpec {
                 .any(|skill| skill.tools.iter().any(|tool| tool.tool.http.is_some()))
         {
             feature_names.push("http-tools");
+        }
+        if !self.decisions.is_empty() {
+            feature_names.push("ai-gateway");
         }
         let features = format!(
             ", features = [{}]",
@@ -507,6 +510,17 @@ fn gen_pred(pred: &Pred) -> String {
         Pred::Captured(fields) => format!("Guard::captured({})", str_array(fields)),
         Pred::CalledOk(tool) => format!("Guard::called_ok({})", rust_str(tool)),
         Pred::Done(step) => format!("Guard::done({})", rust_str(step)),
+        Pred::Decided(d) => {
+            use gemini_adk_rs::flow::Expect;
+            let q = rust_str(&d.question);
+            match &d.expect {
+                Expect::Yes => format!("Guard::decided({q})"),
+                Expect::No => format!("Guard::decided_no({q})"),
+                Expect::Is(o) => format!("Guard::decided_is({q}, {})", rust_str(o)),
+                Expect::AtLeast(x) => format!("Guard::decided_at_least({q}, {x:?})"),
+                Expect::AtMost(x) => format!("Guard::decided_at_most({q}, {x:?})"),
+            }
+        }
         Pred::All(preds) => format!(
             "Guard::all([{}])",
             preds.iter().map(gen_pred).collect::<Vec<_>>().join(", ")
@@ -566,97 +580,53 @@ fn gen_extract(extract: &super::ExtractSpec) -> String {
     out
 }
 
-fn gen_decide(decide: &super::DecideSpec) -> String {
-    use super::{DecideFallback, DecideFallbackMode};
+fn gen_decisions(spec: &SessionSpec) -> String {
     let mut out = String::new();
-    out.push_str("        .extractor(Arc::new(\n");
-    let _ = writeln!(
-        out,
-        "            DecisionExtractor::new({}, Arc::new(GatewayDecisionModel::from_env()?), {})",
-        rust_str(&decide.name),
-        decide.window
+    out.push_str(
+        "        .decisions(\n            Decisions::new(Arc::new(GatewayDecisionModel::from_env()?))\n",
     );
-    if !decide.facts.is_empty() {
-        let facts: Vec<String> = decide.facts.iter().map(|f| rust_str(f)).collect();
-        let _ = writeln!(out, "            .facts([{}])", facts.join(", "));
-    }
-    if let Some(ms) = decide.timeout_ms {
-        let _ = writeln!(
-            out,
-            "            .with_timeout(std::time::Duration::from_millis({ms}))"
-        );
-    }
-    for (id, q) in &decide.questions {
-        let kind = serde_json::to_value(&q.kind).unwrap_or_default();
+    for (id, d) in &spec.decisions {
+        let kind = serde_json::to_value(&d.kind).unwrap_or_default();
         let _ = write!(
             out,
-            "            .question(\n                DecisionQuestion::new({}, serde_json::from_value::<Question>(json!({}))?)",
+            "                .question(\n                    {},\n                    Decision::new(serde_json::from_value::<Question>(json!({}))?)",
             rust_str(id),
             compact(&kind)
         );
-        if let Some(path) = &q.options_from {
+        if let Some(path) = &d.options_from {
             let _ = write!(
                 out,
-                "\n                    .options_from({})",
+                "\n                        .options_from({})",
                 rust_str(path)
             );
         }
-        if let Some(none) = &q.none {
-            let _ = write!(out, "\n                    .or_none({})", rust_str(none));
-        }
-        if !q.active_in.is_empty() {
-            let stages: Vec<String> = q.active_in.iter().map(|s| rust_str(s)).collect();
+        if let Some(none) = &d.none {
             let _ = write!(
                 out,
-                "\n                    .active_in([{}])",
-                stages.join(", ")
+                "\n                        .or_none({})",
+                rust_str(none)
             );
         }
-        if let Some(p) = &q.promote {
-            let mut promote = format!("Promote::to({})", rust_str(&p.to));
-            if let Some(t) = p.at_least {
-                let _ = write!(promote, ".at_least({t:?})");
-            }
-            if p.write_false {
-                promote.push_str(".write_false()");
-            }
-            if p.keep_known {
-                promote.push_str(".keep_known()");
-            }
-            let _ = write!(out, "\n                    .promote({promote})");
+        if let Some(t) = d.at_least {
+            let _ = write!(out, "\n                        .at_least({t:?})");
         }
-        out.push_str(",\n            )\n");
-    }
-    if decide.trigger != TriggerSpec::EveryTurn {
-        let trigger = match decide.trigger {
-            TriggerSpec::EveryTurn => "EveryTurn",
-            TriggerSpec::AfterToolCall => "AfterToolCall",
-            TriggerSpec::OnGenerationComplete => "OnGenerationComplete",
-            TriggerSpec::OnPhaseChange => "OnPhaseChange",
-        };
-        let _ = writeln!(
-            out,
-            "            .with_trigger(gemini_adk_fluent_rs::gemini_adk_rs::live::extractor::ExtractionTrigger::{trigger})"
-        );
-    }
-    match &decide.fallback {
-        DecideFallback::Mode(DecideFallbackMode::Llm) => out.push_str(
-            "            // Uncertain answers go to the extraction model.\n            \
-             .with_llm_fallback(Arc::new(GeminiLlm::new(Default::default())))\n",
-        ),
-        DecideFallback::Mode(DecideFallbackMode::None) => {}
-        DecideFallback::Gateway { gateway } => {
-            let options = serde_json::json!({
-                "gateway": { "models": [{ "model": gateway.model, "when": gateway.when }] }
-            });
-            let _ = writeln!(
-                out,
-                "            .with_provider_options(json!({}))",
-                compact(&options)
-            );
+        if let Some(key) = &d.writes {
+            let _ = write!(out, "\n                        .writes({})", rust_str(key));
         }
+        out.push_str(",\n                )\n");
     }
-    out.push_str("        ))\n");
+    let standing: Vec<String> = spec
+        .decided_atoms()
+        .into_iter()
+        .filter(|(_, _, standing)| *standing)
+        .map(|(_, d, _)| rust_str(&d.question))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if !standing.is_empty() {
+        let _ = writeln!(out, "                .standing([{}])", standing.join(", "));
+    }
+    out.push_str("        )\n");
     out
 }
 
@@ -1294,50 +1264,49 @@ mod tests {
     }
 
     #[test]
-    fn decide_entries_lower_to_decision_extractors() {
+    fn decisions_lower_to_a_bank_and_decided_guards() {
         let spec = SessionSpec::from_value(json!({
             "name": "booking",
             "instruction": "Book tables.",
-            "decide": [{
-                "name": "signals",
-                "facts": ["party_size"],
-                "questions": {
-                    "confirmed": {
-                        "type": "boolean", "instructions": "Agreed?",
-                        "active_in": [],
-                        "promote": { "to": "book_table_confirmed", "at_least": 0.9, "write_false": true }
-                    },
-                    "picked": {
-                        "type": "choice", "instructions": "Which time?",
-                        "options_from": "availability.options",
-                        "none": "not picked yet",
-                        "promote": { "to": "slot", "keep_known": true }
-                    }
-                }
-            }, {
-                "name": "routing",
-                "questions": { "next": { "type": "choice", "instructions": "Next?",
-                                         "criteria": { "book": "b", "stay": "s" } } },
-                "fallback": { "gateway": { "model": "google/gemini-3.8-flash",
-                                           "when": { "confidenceBelow": 0.6 } } }
-            }],
-            "phases": [{"name": "main"}],
+            "tools": [{ "name": "book" }],
+            "decisions": {
+                "confirmed": { "type": "boolean", "instructions": "Agreed?", "at_least": 0.9 },
+                "picked": { "type": "choice", "instructions": "Which time?",
+                            "options_from": "availability.options", "none": "not yet",
+                            "writes": "slot" },
+                "anger": { "type": "score", "instructions": "How angry?",
+                           "criteria": ["calm", "upset", "angry"] }
+            },
+            "flow": { "steps": [
+                { "id": "confirm", "allow": ["book"], "done": { "called_ok": "book" } },
+                { "id": "end", "after": [{ "step": "confirm", "when": { "decided": { "anger": { "at_most": 1 } } } }],
+                  "terminal": true }
+            ], "constraints": [{ "never_until": { "tool": "book", "until": { "decided": "confirmed" } } }] },
+            "phases": [{ "name": "main", "transitions": [{ "to": "calm", "when": { "decided": { "anger": { "at_least": 2 } } } }] },
+                       { "name": "calm" }],
             "initial_phase": "main"
         }))
         .expect("valid spec");
         let code = spec.to_rust();
         assert!(code.contains("use gemini_adk_fluent_rs::gemini_adk_rs::decision::{"));
-        assert!(code.contains(
-            "DecisionExtractor::new(\"signals\", Arc::new(GatewayDecisionModel::from_env()?), 2)"
-        ));
-        assert!(code.contains(".facts([\"party_size\"])"));
-        assert!(code.contains(
-            ".promote(Promote::to(\"book_table_confirmed\").at_least(0.9).write_false())"
-        ));
+        assert!(code.contains("Decisions::new(Arc::new(GatewayDecisionModel::from_env()?))"));
+        assert!(code.contains(".at_least(0.9)"), "{code}");
         assert!(code.contains(".options_from(\"availability.options\")"));
-        assert!(code.contains(".or_none(\"not picked yet\")"));
-        assert!(code.contains(".promote(Promote::to(\"slot\").keep_known())"));
-        assert!(code.contains(".with_llm_fallback(Arc::new(GeminiLlm::new(Default::default())))"));
-        assert!(code.contains("\"confidenceBelow\":0.6"), "{code}");
+        assert!(code.contains(".or_none(\"not yet\")"));
+        assert!(code.contains(".writes(\"slot\")"));
+        assert!(code.contains(".standing([\"anger\"])"), "{code}");
+        assert!(code.contains("Guard::decided(\"confirmed\")"), "{code}");
+        assert!(
+            code.contains("Guard::decided_at_most(\"anger\", 1.0)"),
+            "{code}"
+        );
+        assert!(
+            code.contains("Guard::decided_at_least(\"anger\", 2.0)"),
+            "{code}"
+        );
+        assert!(
+            spec.to_cargo_toml().contains("\"ai-gateway\""),
+            "the decision model needs the ai-gateway feature"
+        );
     }
 }

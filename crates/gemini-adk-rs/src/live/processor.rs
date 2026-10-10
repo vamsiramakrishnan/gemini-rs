@@ -379,6 +379,9 @@ pub(crate) struct ControlPlaneConfig {
     /// the control lane advances it. Lock briefly; never hold the guard across
     /// an `await`.
     pub flow: Option<crate::flow::SharedFlowStack>,
+    /// Questions a decision model answers about the conversation, asked at
+    /// the turn boundary and before tools are admitted.
+    pub decisions: Option<Arc<crate::decision::Decisions>>,
     /// Task runtime, exclusively advanced by the control lane.
     pub tasks: Option<crate::tasks::TaskRuntime>,
     /// Read-only observation cache shared with LiveHandle.
@@ -448,6 +451,7 @@ impl Default for ControlPlaneConfig {
             pending_context: None,
             middleware: Arc::new(crate::middleware::MiddlewareChain::new()),
             flow: None,
+            decisions: None,
             tasks: None,
             task_status: None,
             delivery: DeliveryConfig::default(),

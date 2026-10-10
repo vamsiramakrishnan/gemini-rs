@@ -29,11 +29,15 @@ use crate::orchestration::{AgentMode, call_agent};
 use crate::state::State;
 use crate::text::TextAgent;
 
+pub mod decided;
 pub mod stack;
 pub mod timing;
 pub mod verbatim;
+pub use decided::{
+    DECISION_PREFIX, DECISION_TURN_KEY, Decided, DecisionRecord, Expect, Outcome, decision_key,
+};
 pub use stack::{
-    FlowStack, OVERLAY_STATE_KEY, Overlay, RepairPolicy, Resume, SharedFlowStack,
+    DecisionScope, FlowStack, OVERLAY_STATE_KEY, Overlay, RepairPolicy, Resume, SharedFlowStack,
     TERMINATED_STATE_KEY, TOOL_CALL_KEY, TOOL_DENIED_KEY, TOOL_RESULT_KEY, correction_flag,
     escalate_flag, reprompt_flag,
 };
@@ -67,6 +71,9 @@ pub enum Pred {
     CalledOk(String),
     /// The named step is done.
     Done(String),
+    /// A decision model's answer to a declared question, about the caller's
+    /// current turn (see [`decided`]).
+    Decided(Decided),
     /// Conjunction.
     All(Vec<Pred>),
     /// Disjunction.
@@ -85,6 +92,7 @@ impl Pred {
             Pred::Captured(fields) => fields.iter().all(|f| ctx.state.contains(f)),
             Pred::CalledOk(t) => ctx.marking.tool_ok.contains_key(t),
             Pred::Done(s) => ctx.marking.done.contains(s),
+            Pred::Decided(d) => d.holds(ctx.state),
             Pred::All(ps) => ps.iter().all(|p| p.eval(ctx)),
             Pred::Any(ps) => ps.iter().any(|p| p.eval(ctx)),
             Pred::Not(p) => !p.eval(ctx),
@@ -106,6 +114,7 @@ impl Pred {
             }
             Pred::CalledOk(t) => format!("'{t}' must have run successfully"),
             Pred::Done(s) => format!("step '{s}' must be complete"),
+            Pred::Decided(d) => d.describe(),
             Pred::All(ps) => join(ps, " and "),
             Pred::Any(ps) => join(ps, " or "),
             Pred::Not(p) => format!("it must not be the case that {}", p.describe()),
@@ -128,6 +137,18 @@ impl Pred {
             Pred::CalledOk(t) => out.push(t.clone()),
             Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|p| p.referenced_tools(out)),
             Pred::Not(p) => p.referenced_tools(out),
+            _ => {}
+        }
+    }
+
+    /// Questions referenced by `decided` atoms.
+    fn referenced_decisions(&self, out: &mut BTreeSet<String>) {
+        match self {
+            Pred::Decided(d) => {
+                out.insert(d.question.clone());
+            }
+            Pred::All(ps) | Pred::Any(ps) => ps.iter().for_each(|p| p.referenced_decisions(out)),
+            Pred::Not(p) => p.referenced_decisions(out),
             _ => {}
         }
     }
@@ -291,6 +312,35 @@ impl Guard {
     pub fn done(step: impl Into<String>) -> Self {
         Guard::Spec(Pred::Done(step.into()))
     }
+    /// The caller's current turn settles the declared question `question`: a
+    /// boolean answered yes, a choice that picked an option, or a score. See
+    /// [`decided`].
+    pub fn decided(question: impl Into<String>) -> Self {
+        Self::decided_as(question, Expect::Yes)
+    }
+    /// The caller's current turn answers the boolean `question` no (or a
+    /// choice picks "none of these").
+    pub fn decided_no(question: impl Into<String>) -> Self {
+        Self::decided_as(question, Expect::No)
+    }
+    /// The caller's current turn picks `option` for the choice `question`.
+    pub fn decided_is(question: impl Into<String>, option: impl Into<String>) -> Self {
+        Self::decided_as(question, Expect::Is(option.into()))
+    }
+    /// The score `question` is at least `bound`.
+    pub fn decided_at_least(question: impl Into<String>, bound: f64) -> Self {
+        Self::decided_as(question, Expect::AtLeast(bound))
+    }
+    /// The score `question` is at most `bound`.
+    pub fn decided_at_most(question: impl Into<String>, bound: f64) -> Self {
+        Self::decided_as(question, Expect::AtMost(bound))
+    }
+    fn decided_as(question: impl Into<String>, expect: Expect) -> Self {
+        Guard::Spec(Pred::Decided(Decided {
+            question: question.into(),
+            expect,
+        }))
+    }
     /// True once an orchestrated agent named `name` has produced a result
     /// (its `{name}:result` state key is set). Pairs with the
     /// [`orchestration`](crate::orchestration) `call`/`dispatch`/`background`.
@@ -399,6 +449,15 @@ impl Guard {
         if let Guard::Spec(p) = self {
             p.referenced_state_keys(out);
         }
+    }
+
+    /// The questions this guard's `decided` atoms name.
+    pub fn decisions(&self) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        if let Guard::Spec(p) = self {
+            p.referenced_decisions(&mut out);
+        }
+        out
     }
 
     /// The state keys this guard reads (`is_true`/`is_set`/`eq`/`captured`
@@ -675,6 +734,28 @@ pub struct Flow {
 }
 
 impl Flow {
+    /// Every question a `decided` atom names in this flow: step gates and
+    /// `done` guards, edge guards, and constraints.
+    pub fn decisions(&self) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        let mut add = |g: &Guard| out.extend(g.decisions());
+        for step in &self.steps {
+            step.gate.iter().chain(step.done.iter()).for_each(&mut add);
+            step.after
+                .iter()
+                .filter_map(|e| e.when.as_ref())
+                .for_each(&mut add);
+        }
+        for c in &self.constraints {
+            match c {
+                Constraint::NeverUntil { until, .. } => add(until),
+                Constraint::Reset { when, .. } => add(when),
+                _ => {}
+            }
+        }
+        out
+    }
+
     /// Start building a flow.
     #[allow(
         clippy::new_ret_no_self,
@@ -1564,6 +1645,38 @@ impl FlowMonitor {
     pub fn begin_tool_ok(&mut self, tool: &str, state: &State) -> Vec<String> {
         *self.marking.tool_ok.entry(tool.to_string()).or_insert(0) += 1;
         self.apply_resets(state)
+    }
+
+    /// The state keys the flow could act on now: those read by the active
+    /// steps' gates and `done` guards, by the edges leaving them, and by the
+    /// constraints. A decision that `writes` one of these is worth asking.
+    pub fn reads_now(&self, state: &State) -> BTreeSet<String> {
+        let active: BTreeSet<&str> = self
+            .active_steps(state)
+            .into_iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        let mut out = BTreeSet::new();
+        for step in &self.flow.steps {
+            if active.contains(step.id.as_str()) {
+                for g in step.gate.iter().chain(step.done.iter()) {
+                    out.extend(g.state_keys());
+                }
+            }
+            for edge in &step.after {
+                if active.contains(edge.step.as_str())
+                    && let Some(when) = &edge.when
+                {
+                    out.extend(when.state_keys());
+                }
+            }
+        }
+        for c in &self.flow.constraints {
+            if let Constraint::NeverUntil { until: g, .. } | Constraint::Reset { when: g, .. } = c {
+                out.extend(g.state_keys());
+            }
+        }
+        out
     }
 
     /// Steps that are eligible but not yet done.

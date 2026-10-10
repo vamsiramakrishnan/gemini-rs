@@ -22,16 +22,13 @@
 
 pub mod authoring;
 mod codegen;
-mod decide;
+mod decisions;
 pub mod project;
 mod simulate;
 mod skills;
 pub mod store;
 
-pub use decide::{
-    BooleanCriteriaSpec, DecideFallback, DecideFallbackMode, DecidePromoteSpec, DecideQuestionKind,
-    DecideQuestionSpec, DecideSpec, GatewayFallbackSpec,
-};
+pub use decisions::{BooleanCriteriaSpec, DecisionKind, DecisionSpec};
 pub use project::{ProjectFile, ProjectLanguage, ProjectOptions, SdkSource};
 pub use store::{BundleRef, BundleStore, BundleVersion, StoreError, open_store};
 
@@ -819,11 +816,12 @@ pub struct SessionSpec {
     /// Out-of-band extraction pipelines.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extract: Vec<ExtractSpec>,
-    /// Decision-model pipelines: typed questions (boolean, choice, score)
-    /// about the latest turns, answered by a decision model such as Jev.
+    /// Questions a decision model (such as Jev) answers about the
+    /// conversation, by id. Guards name them with the `decided` atom, and the
+    /// runtime asks the ones the flow can act on at each decision point.
     /// Requires [`SpecResources::decision_model`].
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub decide: Vec<DecideSpec>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub decisions: BTreeMap<String, DecisionSpec>,
     /// Declared state keys — the session's data dictionary.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub state: BTreeMap<String, StateFieldSpec>,
@@ -1027,11 +1025,10 @@ pub const MEMORY_TOOL_NAMES: [&str; 2] = ["recall_context", "manage_memory"];
 #[derive(Default, Clone)]
 pub struct SpecResources {
     /// The OOB model backing `extract` entries. Required when any are present.
-    /// Also answers uncertain `decide` questions (their default fallback).
     pub extraction_llm: Option<Arc<dyn BaseLlm>>,
-    /// The decision model backing `decide` entries, such as
+    /// The decision model answering the spec's `decisions`, such as
     /// `GatewayDecisionModel` (Jev on Vercel AI Gateway). Required when any
-    /// are present.
+    /// are declared.
     pub decision_model: Option<Arc<dyn gemini_adk_rs::decision::DecisionModel>>,
     /// The memory engine honoring the spec's `memory` section. Required when
     /// that section is present.
@@ -1172,9 +1169,7 @@ impl SessionSpec {
                 keys.insert(p.target().to_string());
             }
         }
-        for d in &self.decide {
-            keys.extend(d.written_keys().map(str::to_string));
-        }
+        keys.extend(self.decisions.values().filter_map(|d| d.writes.clone()));
         for p in &self.phases {
             for eff in &p.on_enter {
                 if let EffectSpec::Set(map) = eff {
@@ -1288,11 +1283,17 @@ impl SessionSpec {
             Ok(compiled) => compiled,
             Err(e) => return failed(format!("conversation: {e}")),
         };
+        let bank: BTreeMap<String, gemini_adk_rs::decision::Decision> = self
+            .decisions
+            .iter()
+            .map(|(id, d)| (id.clone(), d.compile()))
+            .collect();
         let mut reports = Vec::with_capacity(self.scenarios.len());
         for scenario in &self.scenarios {
-            let result = scenario
-                .run(&compiled, gemini_adk_rs::flow::Enforcement::Enforce)
-                .await;
+            let sim =
+                crate::simulation::Sim::new(&compiled, gemini_adk_rs::flow::Enforcement::Enforce)
+                    .with_decisions(bank.clone());
+            let result = scenario.run_in(sim).await;
             reports.push(ScenarioReport {
                 name: scenario.name.clone(),
                 passed: result.is_ok(),
@@ -1404,7 +1405,7 @@ impl SessionSpec {
                 || !self.tools.is_empty()
                 || !self.mcp.is_empty()
                 || !self.extract.is_empty()
-                || !self.decide.is_empty()
+                || !self.decisions.is_empty()
                 || !self.computed.is_empty()
                 || !self.watch.is_empty()
                 || !self.patterns.is_empty()
@@ -1848,28 +1849,10 @@ impl SessionSpec {
             }
         }
 
-        // Decision pipelines.
-        let stage_ids: std::collections::BTreeSet<String> = self
-            .conversation
-            .iter()
-            .flat_map(|c| {
-                c.stages
-                    .iter()
-                    .chain(c.overlays.iter().flat_map(|o| &o.stages))
-            })
-            .map(|s| s.id.clone())
-            .collect();
-        let mut pipeline_names: std::collections::BTreeSet<&str> =
-            self.extract.iter().map(|e| e.name.as_str()).collect();
-        for d in &self.decide {
-            if !pipeline_names.insert(&d.name) {
-                errors.push(format!(
-                    "decide '{}' reuses the name of another extract or decide entry",
-                    d.name
-                ));
-            }
-            errors.extend(d.problems(&stage_ids));
-        }
+        // Decisions.
+        let (decision_errors, decision_warnings) = self.decision_problems();
+        errors.extend(decision_errors);
+        warnings.extend(decision_warnings);
 
         SpecValidation {
             valid: errors.is_empty(),
@@ -2035,9 +2018,9 @@ impl SessionSpec {
         if self.requires_memory() && resources.memory.is_none() {
             return Err("spec declares memory but SpecResources.memory is not set".into());
         }
-        if !self.decide.is_empty() && resources.decision_model.is_none() {
+        if !self.decisions.is_empty() && resources.decision_model.is_none() {
             return Err(
-                "spec declares decide entries but SpecResources.decision_model is not set \
+                "spec declares decisions but SpecResources.decision_model is not set \
                  (for Jev on Vercel AI Gateway: GatewayDecisionModel::from_env(), which reads \
                  AI_GATEWAY_API_KEY)"
                     .into(),
@@ -2156,12 +2139,10 @@ impl SessionSpec {
                 live = live.extractor(Arc::new(compile_extractor(e, llm.clone())));
             }
         }
-        if let Some(model) = &resources.decision_model {
-            for d in &self.decide {
-                live = live.extractor(Arc::new(
-                    d.compile(model.clone(), resources.extraction_llm.clone()),
-                ));
-            }
+        if let Some(model) = &resources.decision_model
+            && !self.decisions.is_empty()
+        {
+            live = live.decisions(self.compile_decisions(model.clone()));
         }
 
         // Phases.

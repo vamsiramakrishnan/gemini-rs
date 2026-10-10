@@ -30,10 +30,12 @@
 //! | `SPEC_LIVE_SIGNALS` | `flash` | Who decides confirmations and intents: `flash` (the fixtures' Gemini extractors), `jev` (TypeSafe's Jev through Vercel AI Gateway) or `both` (an A/B) |
 //!
 //! The `jev` arm turns each fixture's all-boolean extractor (its caller
-//! signals) into a `decide` entry asking the same questions, and the dental
-//! fixture's time pick into a choice over the offered slots. Everything else
-//! is unchanged. Each run records how long the signals took to land after the
-//! turn ended and how long each tool call waited for the gate. With
+//! signals) into `decisions` asking the same questions, each guard on a
+//! signal key into a `decided` guard on its question, and the dental
+//! fixture's time pick into a choice over the offered slots that writes
+//! `slot`. Everything else is unchanged. Each run records how long the
+//! signals took to land after the turn ended and how long each tool call
+//! waited for the gate. With
 //! `AI_GATEWAY_API_KEY` set (the environment, or `.env.local` at the
 //! repository root), Jev also judges every finished call.
 //!
@@ -421,6 +423,43 @@ fn spoken(text: &str) -> String {
 }
 
 #[test]
+fn the_jev_arm_decides_every_caller_signal() {
+    for name in ["trattoria", "dental", "pharmacy"] {
+        let original = fixture(name);
+        let signals: Vec<String> = original["extract"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|e| all_boolean(e))
+            .flat_map(|e| e["promote"].as_array().cloned().unwrap_or_default())
+            .map(|p| {
+                p.get("to")
+                    .unwrap_or(&p["field"])
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert!(!signals.is_empty(), "{name}");
+        let doc = jev_arm(name, original);
+        let flow = doc["conversation"].to_string();
+        for signal in &signals {
+            let guard = json!({ "is_true": signal }).to_string();
+            assert!(!flow.contains(&guard), "{name}: {guard} is still a guard");
+        }
+        assert!(flow.contains("\"decided\""), "{name}");
+        let spec = SessionSpec::from_value(doc).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let check = spec.validate();
+        assert!(check.valid, "{name}: {:?}", check.errors);
+        assert!(
+            check.warnings.iter().all(|w| !w.contains("decision")),
+            "{name}: {:?}",
+            check.warnings
+        );
+    }
+}
+
+#[test]
 fn spoken_references_match_their_written_form() {
     for said in [
         "Your confirmation number is TR two zero four four.",
@@ -767,59 +806,78 @@ fn signal_extractors(doc: &Value) -> Vec<String> {
 /// The fixture with its caller signals decided by Jev instead of Gemini.
 fn jev_arm(fixture: &str, mut doc: Value) -> Value {
     let extract = doc["extract"].as_array().cloned().unwrap_or_default();
-    // The slots the other extractors fill: context for the decisions.
-    let facts: Vec<Value> = extract
-        .iter()
-        .filter(|e| !all_boolean(e))
-        .flat_map(|e| e["promote"].as_array().cloned().unwrap_or_default())
-        .map(|p| p.get("to").cloned().unwrap_or_else(|| p["field"].clone()))
-        .collect();
     let mut keep = Vec::new();
-    let mut decide = Vec::new();
+    let mut decisions = serde_json::Map::new();
+    // Signal state key → the question that now decides it.
+    let mut signals = BTreeMap::new();
     for e in extract {
         if all_boolean(&e) {
             let promote = e["promote"].as_array().cloned().unwrap_or_default();
-            let mut questions = serde_json::Map::new();
             for (field, schema) in e["schema"]["properties"].as_object().unwrap() {
                 let to = promote
                     .iter()
                     .find(|p| p["field"] == field.as_str())
-                    .map(|p| p.get("to").cloned().unwrap_or_else(|| json!(field)))
-                    .unwrap_or_else(|| json!(field));
+                    .and_then(|p| p["to"].as_str())
+                    .unwrap_or(field)
+                    .to_string();
                 let instructions = schema["description"]
                     .as_str()
                     .map_or_else(|| field.replace('_', " "), str::to_string);
-                questions.insert(
+                decisions.insert(
                     field.clone(),
                     json!({
                         "type": "boolean",
                         "instructions": format!("Judging the caller's last turn: {instructions}"),
-                        "promote": { "to": to }
+                        // Kept in state too, for the `Before` expectations.
+                        "writes": to,
                     }),
                 );
+                signals.insert(to, field.clone());
             }
-            decide.push(json!({
-                "name": e["name"], "window": 2, "facts": facts, "questions": questions
-            }));
         } else if fixture == "dental" && e["name"] == "booking_choice" {
-            decide.push(json!({
-                "name": "booking_choice",
-                "window": 2,
-                "questions": { "slot": {
+            decisions.insert(
+                "picked_slot".into(),
+                json!({
                     "type": "choice",
                     "instructions": "Which of the open times the assistant offered did the caller choose?",
                     "options_from": "availability.slots",
                     "none": "the caller has not chosen one of the offered times",
-                    "promote": { "to": "slot" }
-                } }
-            }));
+                    "writes": "slot",
+                }),
+            );
         } else {
             keep.push(e);
         }
     }
     doc["extract"] = json!(keep);
-    doc["decide"] = json!(decide);
+    doc["decisions"] = Value::Object(decisions);
+    decide_signals(&mut doc["conversation"], &signals);
+    // The offline scenarios script the extractors' latched keys; the live
+    // run is what this arm measures.
+    if let Some(doc) = doc.as_object_mut() {
+        doc.remove("scenarios");
+    }
     doc
+}
+
+/// Each `{"is_true": signal}` guard becomes `{"decided": question}`.
+fn decide_signals(guard: &mut Value, signals: &BTreeMap<String, String>) {
+    match guard {
+        Value::Object(m) => {
+            if m.len() == 1
+                && let Some(question) = m
+                    .get("is_true")
+                    .and_then(Value::as_str)
+                    .and_then(|k| signals.get(k))
+            {
+                *guard = json!({ "decided": question });
+                return;
+            }
+            m.values_mut().for_each(|v| decide_signals(v, signals));
+        }
+        Value::Array(a) => a.iter_mut().for_each(|v| decide_signals(v, signals)),
+        _ => {}
+    }
 }
 
 /// Jev on AI Gateway, with the key from the environment or `.env.local`.
@@ -850,6 +908,31 @@ fn tool_waits(timeline: &[(u128, String)], mutations: &[Mutation]) -> Vec<(Strin
         }
     }
     out
+}
+
+/// When each decision round recorded its answers: the first answer after
+/// each turn's end (a round at the tool gate lands before it).
+fn decisions_at(timeline: &[(u128, String)], mutations: &[Mutation]) -> Vec<(u128, String)> {
+    let ends: Vec<u128> = timeline
+        .iter()
+        .filter(|(_, line)| line == "TurnComplete")
+        .map(|(t, _)| *t)
+        .collect();
+    ends.iter()
+        .enumerate()
+        .filter_map(|(i, end)| {
+            let next = ends.get(i + 1).copied().unwrap_or(u128::MAX);
+            mutations
+                .iter()
+                .find(|m| {
+                    m.key.starts_with("decision:")
+                        && m.key != "decision:turn"
+                        && m.ms >= *end
+                        && m.ms < next
+                })
+                .map(|m| (m.ms, "decisions".to_string()))
+        })
+        .collect()
 }
 
 /// Milliseconds from each turn's end to the caller signals landing.
@@ -1192,7 +1275,12 @@ async fn run_one(scenario: &Scenario, model: &str, voice_input: bool, jev: bool)
     run.mutations = rec.entries.lock().clone();
     run.timeline = seen.timeline.lock().clone();
     run.tool_waits = tool_waits(&run.timeline, &run.mutations);
-    run.signal_ms = signal_latencies(&run.timeline, &seen.extracted_at.lock(), &signal_names);
+    run.signal_ms = if jev {
+        let at = decisions_at(&run.timeline, &run.mutations);
+        signal_latencies(&run.timeline, &at, &["decisions".to_string()])
+    } else {
+        signal_latencies(&run.timeline, &seen.extracted_at.lock(), &signal_names)
+    };
     run.extraction_errors = seen.extraction_errors.lock().clone();
     run.errors = seen.errors.lock().clone();
     run.closed = seen.closed.lock().clone();

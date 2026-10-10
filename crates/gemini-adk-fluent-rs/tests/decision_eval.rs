@@ -7,11 +7,13 @@
 //! call. Cases include speech-recognition noise, other languages, long calls,
 //! prompt injection and replies to a different question.
 //!
-//! Every case goes through the same path a session uses: a `decide` spec entry
-//! compiled to a [`DecisionExtractor`](gemini_adk_rs::decision::DecisionExtractor)
-//! over [`GatewayDecisionModel`], with the language-model fallback off so the
-//! numbers are Jev's alone. Each case runs twice: with the last exchange
-//! (window 2) and with the whole call (every turn).
+//! Every case goes through the same path a session uses: the fixture's
+//! questions are `decisions` spec entries compiled into one
+//! [`Decisions`] bank over [`GatewayDecisionModel`], and each case is asked
+//! with [`Decisions::ask`] over the case's [`Conversation`], its facts as the
+//! active stages' grounding. The answers are read back from state as a
+//! `decided` guard reads them. Each case runs twice: with the last exchange
+//! (two turns) and with the whole call.
 //!
 //! ```text
 //! cargo test -p gemini-adk-fluent-rs --test decision_eval -- --ignored --nocapture
@@ -33,15 +35,15 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use common::env::env_or_local;
-use gemini_adk_fluent_rs::spec::DecideSpec;
+use gemini_adk_fluent_rs::spec::{DecisionKind, DecisionSpec};
 use gemini_adk_rs::State;
-use gemini_adk_rs::decision::GatewayDecisionModel;
-use gemini_adk_rs::live::extractor::TurnExtractor;
+use gemini_adk_rs::decision::{Conversation, Decisions, GatewayDecisionModel};
+use gemini_adk_rs::flow::{DecisionRecord, Outcome};
 use gemini_adk_rs::live::transcript::{ToolCallSummary, TranscriptTurn};
 
 #[derive(Deserialize)]
 struct Fixture {
-    questions: BTreeMap<String, Value>,
+    questions: BTreeMap<String, DecisionSpec>,
     cases: Vec<Case>,
 }
 
@@ -110,7 +112,7 @@ enum Verdict {
     Wrong,
 }
 
-struct Outcome {
+struct Row {
     case: String,
     category: String,
     window: &'static str,
@@ -122,20 +124,28 @@ struct Outcome {
     ms: u64,
 }
 
-fn judge(expected: &Value, decided: &Value, uncertain: bool) -> Verdict {
-    if uncertain {
-        return Verdict::Unsure;
+/// What a recorded answer decided: a boolean, an option key (`null` for
+/// none of these), or a score; `None` when unsure.
+fn decided(record: &DecisionRecord) -> Option<Value> {
+    match record.outcome {
+        Outcome::Yes => Some(json!(true)),
+        Outcome::No => Some(json!(false)),
+        Outcome::None => Some(Value::Null),
+        Outcome::Chosen | Outcome::Scored => Some(record.value.clone()),
+        Outcome::Unsure => None,
     }
-    let key = |v: &Value| match v {
-        Value::Object(m) => m.get("id").cloned().unwrap_or(Value::Null),
-        other => other.clone(),
+}
+
+fn judge(expected: &Value, decided: Option<&Value>) -> Verdict {
+    let Some(decided) = decided else {
+        return Verdict::Unsure;
     };
     let right = match expected {
         Value::Array(range) => {
             let (lo, hi) = (range[0].as_f64().unwrap(), range[1].as_f64().unwrap());
             decided.as_f64().is_some_and(|s| s >= lo && s <= hi)
         }
-        other => key(decided) == *other,
+        other => decided == other,
     };
     if right {
         Verdict::Right
@@ -147,63 +157,43 @@ fn judge(expected: &Value, decided: &Value, uncertain: bool) -> Verdict {
 async fn run_case(
     case: Case,
     window: &'static str,
-    bank: &BTreeMap<String, Value>,
-    model: Arc<GatewayDecisionModel>,
-) -> Result<Vec<Outcome>, String> {
+    decisions: &Decisions,
+) -> Result<Vec<Row>, String> {
     let turns = transcript(&case.turns);
     let size = if window == "exchange" { 2 } else { turns.len() };
-    let mut questions = Map::new();
-    for id in case.expect.keys() {
-        let mut q = bank
-            .get(id)
-            .cloned()
-            .ok_or_else(|| format!("no question {id}"))?;
-        let boolean = q["type"] == "boolean";
-        q["promote"] = json!({ "to": id, "write_false": boolean });
-        questions.insert(id.clone(), q);
-    }
-    let spec: DecideSpec = serde_json::from_value(json!({
-        "name": "eval",
-        "window": size,
-        "facts": case.facts.keys().collect::<Vec<_>>(),
-        "questions": questions,
-        "fallback": "none",
-        "timeout_ms": 15_000,
-    }))
-    .map_err(|e| format!("{}: {e}", case.id))?;
-    let extractor = spec.compile(model, None);
-
     let state = State::new();
     for (k, v) in case.state.iter().chain(case.facts.iter()) {
         let _ = state.set(k, v.clone());
     }
+    let grounding = case.facts.iter().map(|(k, v)| match v {
+        Value::String(s) => format!("{k}: {s}"),
+        other => format!("{k}: {other}"),
+    });
     let start = turns.len().saturating_sub(size);
-    let value = extractor
-        .extract_with_state(&turns[start..], &state)
-        .await
-        .map_err(|e| format!("{}: {e}", case.id))?;
-    let meta = &value["_decision"];
-    let uncertain: Vec<&str> = meta["uncertain"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect();
+    let conversation = Conversation::from_turns(&turns[start..]).with_context(grounding);
+    let ids = case.expect.keys().cloned().collect();
+    let round = decisions.ask(&ids, &conversation, &state).await;
+    if let Some(error) = round.error {
+        return Err(format!("{}: {error}", case.id));
+    }
     Ok(case
         .expect
         .iter()
         .map(|(id, expected)| {
-            let decided = value.get(id).cloned().unwrap_or(Value::Null);
-            Outcome {
+            let record = DecisionRecord::current(&state, id);
+            let decided = record.as_ref().and_then(decided);
+            Row {
                 case: case.id.clone(),
                 category: case.category.clone(),
                 window,
                 question: id.clone(),
                 expected: expected.clone(),
-                verdict: judge(expected, &decided, uncertain.contains(&id.as_str())),
-                decided,
-                raw: meta["answers"][id].clone(),
-                ms: meta["ms"].as_u64().unwrap_or(0),
+                verdict: judge(expected, decided.as_ref()),
+                decided: decided.unwrap_or(json!("unsure")),
+                raw: record.map_or(Value::Null, |r| {
+                    json!({ "outcome": r.outcome, "value": r.value, "confidence": r.confidence })
+                }),
+                ms: round.latency.as_millis() as u64,
             }
         })
         .collect())
@@ -217,7 +207,7 @@ fn percentile(mut v: Vec<u64>, q: f64) -> u64 {
     v[((v.len() - 1) as f64 * q).round() as usize]
 }
 
-fn render(outcomes: &[Outcome], errors: &[String]) -> String {
+fn render(outcomes: &[Row], errors: &[String]) -> String {
     let mut out = String::from("# Jev decision eval\n\n");
     let windows = ["exchange", "history"];
     // Per category.
@@ -281,7 +271,7 @@ fn render(outcomes: &[Outcome], errors: &[String]) -> String {
             let mut wrong = 0;
             let mut n = 0;
             for o in outcomes.iter().filter(|o| o.window == w) {
-                let (Some(p), Some(want)) = (o.raw["probability"].as_f64(), o.expected.as_bool())
+                let (Some(p), Some(want)) = (o.raw["confidence"].as_f64(), o.expected.as_bool())
                 else {
                     continue;
                 };
@@ -304,22 +294,16 @@ fn render(outcomes: &[Outcome], errors: &[String]) -> String {
 
     // What was not right.
     out.push_str("\n## Not right\n\n| Case | Window | Question | Expected | Decided | Raw answer |\n|---|---|---|---|---|---|\n");
-    let mut misses: Vec<&Outcome> = outcomes
+    let mut misses: Vec<&Row> = outcomes
         .iter()
         .filter(|o| o.verdict != Verdict::Right)
         .collect();
     misses.sort_by(|a, b| (b.verdict, &a.case, a.window).cmp(&(a.verdict, &b.case, b.window)));
     for o in misses {
-        let raw = match o.raw.get("probability") {
-            Some(p) => format!("P(true) {p}"),
-            None => format!(
-                "{} (confidence {})",
-                o.raw
-                    .get("choice")
-                    .or(o.raw.get("score"))
-                    .unwrap_or(&Value::Null),
-                o.raw.get("confidence").unwrap_or(&Value::Null)
-            ),
+        let raw = if o.expected.is_boolean() {
+            format!("P(true) {}", o.raw["confidence"])
+        } else {
+            format!("{} (certainty {})", o.raw["value"], o.raw["confidence"])
         };
         out.push_str(&format!(
             "| {} {} | {} | {} | {} | {} | {} |\n",
@@ -358,7 +342,16 @@ async fn jev_against_labelled_decisions() {
         GatewayDecisionModel::new(GatewayDecisionModel::JEV, key)
             .with_timeout(Duration::from_secs(15)),
     );
-    let bank = Arc::new(fixture.questions);
+    // One bank for every case, as one bank serves every session.
+    let decisions = Arc::new(
+        fixture
+            .questions
+            .iter()
+            .fold(Decisions::new(model), |d, (id, q)| {
+                d.question(id, q.compile())
+            })
+            .with_timeout(Duration::from_secs(15)),
+    );
     let semaphore = Arc::new(tokio::sync::Semaphore::new(8));
     let mut handles = Vec::new();
     for case in fixture.cases {
@@ -369,11 +362,10 @@ async fn jev_against_labelled_decisions() {
             continue;
         }
         for window in ["exchange", "history"] {
-            let (case, bank, model, sem) =
-                (case.clone(), bank.clone(), model.clone(), semaphore.clone());
+            let (case, decisions, sem) = (case.clone(), decisions.clone(), semaphore.clone());
             handles.push(tokio::spawn(async move {
                 let _permit = sem.acquire_owned().await.unwrap();
-                run_case(case, window, &bank, model).await
+                run_case(case, window, &decisions).await
             }));
         }
     }
@@ -430,25 +422,16 @@ fn the_fixture_is_well_formed() {
                 .questions
                 .get(id)
                 .unwrap_or_else(|| panic!("{}: no question {id}", case.id));
-            match q["type"].as_str() {
-                Some("boolean") => assert!(expected.is_boolean(), "{}: {id}", case.id),
-                Some("choice") => assert!(
-                    expected.is_string() || expected.is_null(),
-                    "{}: {id}",
-                    case.id
-                ),
-                Some("score") => assert!(expected.is_array(), "{}: {id}", case.id),
-                other => panic!("{id}: unknown type {other:?}"),
-            }
+            let fits = match &q.kind {
+                DecisionKind::Boolean { .. } => expected.is_boolean(),
+                DecisionKind::Choice { .. } => expected.is_string() || expected.is_null(),
+                DecisionKind::Score { .. } => expected.is_array(),
+            };
+            assert!(fits, "{}: {id} expects {expected}", case.id);
         }
     }
-    // Every question compiles as a spec entry.
-    let questions: Map<String, Value> = fixture.questions.into_iter().collect();
-    let spec: DecideSpec =
-        serde_json::from_value(json!({ "name": "eval", "questions": questions })).unwrap();
-    assert!(
-        spec.problems(&Default::default()).is_empty(),
-        "{:?}",
-        spec.problems(&Default::default())
-    );
+    // Every question is a valid spec entry.
+    for (id, q) in &fixture.questions {
+        assert!(q.problems(id).is_empty(), "{:?}", q.problems(id));
+    }
 }

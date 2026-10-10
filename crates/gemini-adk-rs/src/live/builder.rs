@@ -66,6 +66,7 @@ pub struct LiveSessionBuilder {
     telemetry_interval: Option<std::time::Duration>,
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
     flow: Option<crate::flow::FlowStack>,
+    decisions: Option<Arc<crate::decision::Decisions>>,
     tasks: Option<crate::tasks::TaskRuntime>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
     clock: Option<crate::clock::SharedClock>,
@@ -99,6 +100,7 @@ impl LiveSessionBuilder {
             telemetry_interval: None,
             middleware: Vec::new(),
             flow: None,
+            decisions: None,
             tasks: None,
             redactor: None,
             clock: None,
@@ -169,6 +171,20 @@ impl LiveSessionBuilder {
     /// drives; `flow_monitor` is the no-digression special case.
     pub fn flow_stack(mut self, stack: crate::flow::FlowStack) -> Self {
         self.flow = Some(stack);
+        self
+    }
+
+    /// The questions a decision model answers about the conversation, for
+    /// guards that use the `decided` atom (see [`crate::flow::decided`]).
+    ///
+    /// At each decision point (the caller's turn ends, or the model calls a
+    /// tool) the runtime asks, in one request, the questions the flow can act
+    /// on then, plus the standing ones, against the rolling conversation and
+    /// the active stages' grounding lines. A tool call is admitted after its
+    /// questions are answered for the caller's latest words, and a digression
+    /// whose trigger they satisfy opens before the call is admitted.
+    pub fn decisions(mut self, decisions: Arc<crate::decision::Decisions>) -> Self {
+        self.decisions = Some(decisions);
         self
     }
 
@@ -579,6 +595,10 @@ impl LiveSessionBuilder {
             tool_advisory: self.tool_advisory,
             telemetry_interval: self.telemetry_interval,
             middleware: self.middleware,
+            decisions: {
+                warn_unanswerable(self.flow.as_ref(), self.decisions.as_deref());
+                self.decisions
+            },
             flow: self.flow,
             tasks: self.tasks,
             redactor: self.redactor,
@@ -586,6 +606,32 @@ impl LiveSessionBuilder {
             lockstep: self.lockstep,
             event_capacity: self.event_capacity,
         })
+    }
+}
+
+/// Warn about `decided` guards no decision service can answer: their guards
+/// never hold.
+fn warn_unanswerable(
+    flow: Option<&crate::flow::FlowStack>,
+    decisions: Option<&crate::decision::Decisions>,
+) {
+    let Some(flow) = flow else {
+        return;
+    };
+    let mut named = flow.main().flow().decisions();
+    for ov in flow.overlays() {
+        named.extend(ov.trigger().decisions());
+        named.extend(ov.flow().decisions());
+    }
+    let missing: Vec<&String> = named
+        .iter()
+        .filter(|q| decisions.is_none_or(|d| d.get(q).is_none()))
+        .collect();
+    if !missing.is_empty() {
+        tracing::warn!(
+            ?missing,
+            "the flow's guards name decisions no decision service declares; those guards never hold"
+        );
     }
 }
 
@@ -626,6 +672,7 @@ pub(crate) struct SessionPlan {
     telemetry_interval: Option<std::time::Duration>,
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
     flow: Option<crate::flow::FlowStack>,
+    decisions: Option<Arc<crate::decision::Decisions>>,
     tasks: Option<crate::tasks::TaskRuntime>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
     clock: Option<crate::clock::SharedClock>,
@@ -744,6 +791,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
             Arc::new(chain)
         },
         flow: flow_monitor.clone(),
+        decisions: plan.decisions,
         tasks: plan.tasks,
         task_status,
         redactor: plan.redactor,

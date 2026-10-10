@@ -21,7 +21,7 @@ names. This page is the part you need to write a voice agent.
 | `runtime` | `{"steering": "context_update"}` offers the model only the tools the active stage allows (Gemini 3.8 Live). Without it, other tools are still offered but refused |
 | `tools` | Declared tools: what the model sees. See [Tools](#tools) |
 | `extract` | Out-of-band extractors that fill state from what the caller says |
-| `decide` | Decision-model questions (Jev on Vercel AI Gateway): confirmations, intents, picks among offered options, stage routing. See [Decisions](#decisions) |
+| `decisions` | Questions a decision model (Jev on Vercel AI Gateway) answers about the conversation, named by `decided` guards: confirmations, intents, picks among offered options, stage routing. See [Decisions](#decisions) |
 | `conversation` | The stages, digressions and policies |
 | `scenarios` | Offline tests; see scenarios.md |
 
@@ -60,10 +60,13 @@ succeeded stay denied.
 
 `"always"`, `{"is_true": key}`, `{"is_set": key}`, `{"eq": [key, value]}`,
 `{"captured": [keys]}`, `{"called_ok": tool}`, `{"done": stage}`,
-`{"all": [...]}`, `{"any": [...]}`, `{"not": guard}`.
+`{"decided": question}`, `{"all": [...]}`, `{"any": [...]}`,
+`{"not": guard}`.
 
-`called_ok` and `done` read the conversation's progress; the rest read
-**state keys**, and a state key is only ever true if something writes it.
+`called_ok` and `done` read the conversation's progress, and `decided` the
+decision model's answer for the caller's current turn (see
+[Decisions](#decisions)); the rest read **state keys**, and a state key is
+only ever true if something writes it.
 `adk spec check` reports a guard key nothing writes (`unwritten_key`).
 
 ## How a key gets written
@@ -72,7 +75,7 @@ succeeded stay denied.
 |---|---|---|
 | A stage's `collect` | Slots the caller gives | `"collect": ["party_size"]` |
 | `extract` + `promote` | Filling slots and flags from speech | see the worked example |
-| `decide` + `promote` | Confirmations, intents and picks, decided fast | see [Decisions](#decisions) |
+| A decision's `writes` | A pick among offered options, into the slot it fills | see [Decisions](#decisions) |
 | A tool's `set_state` | Facts a tool establishes | `"set_state": {"dob_verified": true}` |
 | A tool's `save_response_as` | Keeping the tool's response | `"save_response_as": "availability"` |
 | The runtime | `verbatim:{stage}`, `repair:{stage}:*`, `flow:*` | read only |
@@ -90,45 +93,63 @@ time; `adk spec run` creates one from the environment.
 ## Decisions
 
 When the person has an AI Gateway key with Jev access, confirmations,
-intents and picks among offered options can go to a decision model instead
-of `caller_signals`. It answers in about 250 ms (median through AI Gateway) with a probability,
-instead of a language model's seconds. Use it when they ask for Jev or for
-faster confirmations; it needs `AI_GATEWAY_API_KEY` at run time.
+intents, routing and picks among offered options can be questions a
+decision model answers, instead of `caller_signals` flags. It answers in
+about 250 ms (median through AI Gateway) with a probability, instead of a
+language model's seconds. Use it when they ask for Jev or for faster
+confirmations; it needs `AI_GATEWAY_API_KEY` at run time.
+
+Declare each question once, then guard on it with `decided`:
 
 ```json
-"decide": [{
-  "name": "caller_signals",
-  "window": 2,
-  "facts": ["party_size", "slot", "guest_name"],
-  "questions": {
-    "book_table_confirmed": {
-      "type": "boolean",
-      "instructions": "In their last turn, did the caller agree to the booking that was read back?",
-      "criteria": { "true": "the caller said yes in their own words",
-                    "false": "they hesitated, changed a detail, or only picked an option" },
-      "active_in": ["confirm"],
-      "promote": { "to": "book_table_confirmed", "at_least": 0.85 }
-    },
-    "intent_human_agent": {
-      "type": "boolean",
-      "instructions": "Did the caller ask to speak to a person?",
-      "promote": { "to": "intent:human_agent" }
-    }
+"decisions": {
+  "book_confirmed": {
+    "type": "boolean",
+    "instructions": "In their last turn, did the caller agree to the booking that was read back?",
+    "criteria": { "true": "the caller said yes in their own words",
+                  "false": "they hesitated, changed a detail, or only picked an option" }
+  },
+  "wants_person": {
+    "type": "boolean",
+    "instructions": "In their last turn, did the caller ask to speak to a person?"
+  },
+  "picked_slot": {
+    "type": "choice",
+    "instructions": "Which of the offered times did the caller choose?",
+    "options_from": "availability.slots",
+    "none": "the caller has not chosen one of the offered times",
+    "writes": "slot"
   }
-}]
+}
 ```
 
-- A `boolean` writes `true` at `at_least` (default 0.85) and above, and
-  writes nothing below. A `choice` with `options_from` picks among options
-  in state; give it `none` ("the caller has not picked one yet"), since a
-  choice always picks something. Slots with free values (names, dates) stay
-  in `extract`.
-- Answers between the thresholds go to the extraction model by default
-  (`"fallback": "llm"`).
-- `active_in` asks a question only in the stages where it matters, which is
-  also how a choice drives stage routing: promote it to a key the stages'
-  `next` guards compare.
-- Don't keep a `caller_signals` extract entry writing the same keys.
+```json
+{ "id": "confirm", "commit": { "tool": "book_table", "when": { "decided": "book_confirmed" } } }
+{ "name": "handoff", "trigger": { "decided": "wants_person" }, "stages": [ ... ] }
+```
+
+- `decided` forms: `"q"` (yes, picked, or scored), `{"q": false}` (no, or
+  `none_of_these`), `{"q": "option"}`, `{"q": {"at_least": n}}`,
+  `{"q": {"at_most": n}}`. `adk spec check` rejects one naming no question
+  or expecting what its question cannot answer.
+- An answer counts only for the caller turn it is about: no latching, no
+  `true_only`, nothing to clear when the caller changes a detail. Unsure
+  (between the thresholds, or the model too slow) satisfies nothing, so a
+  commit fails closed.
+- The runtime asks the questions the driving flow's guards and the
+  digressions' triggers name, plus any that `writes` a key an active
+  stage reads, in one request at the caller's turn end and before a tool
+  is admitted. Phase transitions and patterns are asked every turn. Ask
+  about "their last turn" for confirmations and intents.
+- A `choice` with `options_from` picks among options in state; give it
+  `none`, since a choice always picks something. `writes` puts the pick
+  into the slot the stage collects. Slots with free values (names, dates)
+  stay in `extract`.
+- `at_least` sets the bar: 0.85 `P(true)` for a boolean by default, 0.6
+  certainty for a choice or score.
+- Scenarios script answers with `{"decide": {"book_confirmed": true}}`; a
+  `user` step starts a new caller turn, so an earlier answer stops counting.
+- Don't keep a `caller_signals` extract entry for the same signals.
 
 ## Tools
 

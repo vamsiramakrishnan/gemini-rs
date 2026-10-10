@@ -188,13 +188,8 @@ pub async fn run(spec_path: &str) -> CliResult {
     let mut resources = SpecResources::default();
     if spec.requires_extraction() {
         resources.extraction_llm = Some(Arc::new(GeminiLlm::from_env()?));
-    } else if spec.decide.iter().any(|d| d.needs_llm()) {
-        // The fallback for uncertain decisions; without it they stay undecided.
-        resources.extraction_llm = GeminiLlm::from_env()
-            .ok()
-            .map(|llm| Arc::new(llm) as Arc<dyn gemini_adk_rs::llm::BaseLlm>);
     }
-    if !spec.decide.is_empty() {
+    if !spec.decisions.is_empty() {
         resources.decision_model = Some(Arc::new(
             gemini_adk_rs::decision::GatewayDecisionModel::from_env()?,
         ));

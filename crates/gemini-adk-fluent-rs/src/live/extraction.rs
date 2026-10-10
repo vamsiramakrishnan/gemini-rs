@@ -186,6 +186,37 @@ impl Live {
         self
     }
 
+    /// The questions a decision model answers about the conversation, for
+    /// guards that use the `decided` atom (`Guard::decided("confirmed")`,
+    /// `{"decided": "confirmed"}` in a spec).
+    ///
+    /// At each decision point (the caller's turn ends, or the model calls a
+    /// tool) the runtime asks the questions the flow can act on, in one
+    /// request, against the rolling conversation. Turns on input and output
+    /// transcription, which the conversation is built from.
+    ///
+    /// ```rust,ignore
+    /// use gemini_adk_rs::decision::{Decision, Decisions, GatewayDecisionModel, Question};
+    ///
+    /// let decisions = Decisions::new(Arc::new(GatewayDecisionModel::from_env()?)).question(
+    ///     "confirmed",
+    ///     Decision::new(Question::boolean(
+    ///         "In their last turn, did the caller agree to the booking that was read back?",
+    ///     )),
+    /// );
+    /// Live::builder()
+    ///     .decisions(decisions)
+    ///     .converse(&booking) // .commit("book", Guard::decided("confirmed"))
+    /// ```
+    pub fn decisions(mut self, decisions: gemini_adk_rs::decision::Decisions) -> Self {
+        self.config = self
+            .config
+            .input_transcription(true)
+            .output_transcription(true);
+        self.decisions = Some(Arc::new(decisions));
+        self
+    }
+
     /// Add a custom `TurnExtractor` implementation.
     pub fn extractor(mut self, extractor: Arc<dyn TurnExtractor>) -> Self {
         // Auto-enable transcription

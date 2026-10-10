@@ -239,6 +239,7 @@ pub(in crate::live) async fn run_control_lane(
                         &extractors,
                         &middleware,
                         &control_plane.flow,
+                        &control_plane.decisions,
                         &control_plane.tool_scope,
                         &mut tool_gate,
                         &completion_tx,

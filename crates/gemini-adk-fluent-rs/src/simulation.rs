@@ -38,7 +38,8 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use gemini_adk_rs::flow::{Enforcement, FlowExplanation};
+use gemini_adk_rs::decision::{Decision, Question};
+use gemini_adk_rs::flow::{DECISION_TURN_KEY, Enforcement, FlowExplanation};
 use gemini_adk_rs::live::{TranscriptTurn, TurnExtractor};
 use gemini_adk_rs::state::State;
 
@@ -58,6 +59,10 @@ pub struct Sim {
     turn_no: u32,
     /// Tools scheduled to succeed at a future turn — models tool latency.
     pending_tools: Vec<(String, u32)>,
+    /// The questions scripted answers are to, by id.
+    decisions: BTreeMap<String, Decision>,
+    /// Caller turns so far, for the turn answers are about.
+    caller_turns: u32,
 }
 
 impl Sim {
@@ -77,6 +82,8 @@ impl Sim {
             state: State::new(),
             turn_no: 0,
             pending_tools: Vec::new(),
+            decisions: BTreeMap::new(),
+            caller_turns: 0,
         }
     }
 
@@ -90,6 +97,7 @@ impl Sim {
     /// The fake user speaks: run the conversation's extractors over the utterance
     /// to fill slots (respecting validators), then advance a turn.
     pub async fn user(&mut self, utterance: &str) -> &mut Self {
+        self.next_caller_turn();
         let window = [TranscriptTurn {
             turn_number: self.turn_no,
             user: utterance.to_string(),
@@ -151,6 +159,46 @@ impl Sim {
         self
     }
 
+    /// Answer scripted decisions as these questions would be: a pick from
+    /// `options_from` and a `writes` key behave as in a live session.
+    /// Without the bank, an answer is recorded but writes nothing.
+    #[must_use]
+    pub fn with_decisions(mut self, bank: BTreeMap<String, Decision>) -> Self {
+        self.decisions = bank;
+        self
+    }
+
+    /// The caller just spoke, and a decision model answered: `true`/`false`
+    /// for a boolean, an option's key for a choice (`"none_of_these"` for
+    /// none), a number for a score, `null` for unsure. Earlier answers no
+    /// longer count, as at a new caller turn in a live session. The flow
+    /// takes the answers in at once, as before a tool is admitted: a
+    /// digression they trigger opens now.
+    pub fn decide(&mut self, answers: &BTreeMap<String, Value>) -> &mut Self {
+        let turn = self.next_caller_turn();
+        for (id, answer) in answers {
+            match self.decisions.get(id) {
+                Some(decision) => decision.record_scripted(id, answer, &self.state, &turn),
+                None => Decision::new(Question::boolean("")).record_scripted(
+                    id,
+                    answer,
+                    &self.state,
+                    &turn,
+                ),
+            }
+        }
+        self.stack.on_decisions(&self.state);
+        self
+    }
+
+    /// Start a new caller turn: answers to the previous one stop counting.
+    fn next_caller_turn(&mut self) -> String {
+        self.caller_turns += 1;
+        let turn = format!("scenario:{}", self.caller_turns);
+        let _ = self.state.set(DECISION_TURN_KEY, turn.clone());
+        turn
+    }
+
     fn advance(&mut self) {
         self.turn_no += 1;
         // Fire any tools whose latency has elapsed.
@@ -181,6 +229,9 @@ impl Sim {
             }
             SimStep::Remove { key } => {
                 let _ = self.state.remove(key);
+            }
+            SimStep::Decide(answers) => {
+                self.decide(answers);
             }
             SimStep::ToolOk(tool) => {
                 self.tool_ok(tool);
@@ -334,6 +385,10 @@ pub enum SimStep {
         /// Turns to wait.
         after: u32,
     },
+    /// The caller just spoke and a decision model answered these questions
+    /// (see [`Sim::decide`]): `{"decide": {"confirmed": true, "next_step":
+    /// "book", "frustration": 2.5, "picked": "none_of_these"}}`.
+    Decide(BTreeMap<String, Value>),
     /// Advance a turn with no input.
     Turn,
     /// Assert these step ids are active.
@@ -377,6 +432,7 @@ const RUNTIME_PREFIXES: &[&str] = &[
     "verbatim:",
     "turn:",
     "bg:",
+    "decision:",
 ];
 
 fn runtime_owned(key: &str) -> bool {
@@ -433,7 +489,46 @@ impl Scenario {
         };
         let mut ordered: Vec<&gemini_adk_rs::state::StateMutation> = journal.iter().collect();
         ordered.sort_by_key(|m| m.sequence);
+        // Answers recorded for the same caller turn become one `Decide` step.
+        let mut decided: BTreeMap<String, Value> = BTreeMap::new();
+        let mut decided_turn: Option<String> = None;
         for m in ordered {
+            if let Some(question) = m.key.strip_prefix(gemini_adk_rs::flow::DECISION_PREFIX)
+                && question != "turn"
+                && let Some(record) = m.new.clone().and_then(|v| {
+                    serde_json::from_value::<gemini_adk_rs::flow::DecisionRecord>(v).ok()
+                })
+            {
+                use gemini_adk_rs::flow::Outcome;
+                if decided_turn.as_ref().is_some_and(|t| *t != record.turn) && !decided.is_empty() {
+                    flush(&mut pending, &mut steps);
+                    steps.push(SimStep::Decide(std::mem::take(&mut decided)));
+                }
+                decided_turn = Some(record.turn.clone());
+                let answer = match record.outcome {
+                    Outcome::Yes => Value::Bool(true),
+                    Outcome::No => Value::Bool(false),
+                    Outcome::None => Value::String(gemini_adk_rs::decision::NONE_OPTION.into()),
+                    Outcome::Chosen | Outcome::Scored => record.value.clone(),
+                    Outcome::Unsure => Value::Null,
+                };
+                decided.insert(question.to_string(), answer);
+                continue;
+            }
+            // The answers were taken in before the next thing the flow did:
+            // a turn's evaluation, a tool's admission, or a write.
+            let boundary = !runtime_owned(&m.key)
+                || [
+                    "flow:active",
+                    TOOL_CALL_KEY,
+                    TOOL_DENIED_KEY,
+                    TOOL_RESULT_KEY,
+                ]
+                .contains(&m.key.as_str());
+            if boundary && !decided.is_empty() {
+                flush(&mut pending, &mut steps);
+                steps.push(SimStep::Decide(std::mem::take(&mut decided)));
+            }
             match m.key.as_str() {
                 "flow:active" => {
                     flush(&mut pending, &mut steps);
@@ -476,6 +571,9 @@ impl Scenario {
             }
         }
         flush(&mut pending, &mut steps);
+        if !decided.is_empty() {
+            steps.push(SimStep::Decide(decided));
+        }
         Self {
             name: name.into(),
             steps,
@@ -485,7 +583,12 @@ impl Scenario {
     /// Run the scenario against `convo`. Returns `Ok(())` if every `Expect*` step
     /// holds, else `Err` with the failing step index and a diagnostic.
     pub async fn run(&self, convo: &CompiledConversation, mode: Enforcement) -> Result<(), String> {
-        let mut sim = Sim::new(convo, mode);
+        self.run_in(Sim::new(convo, mode)).await
+    }
+
+    /// Run the steps in a prepared simulator (for example one with
+    /// [`Sim::with_decisions`]).
+    pub async fn run_in(&self, mut sim: Sim) -> Result<(), String> {
         for (i, step) in self.steps.iter().enumerate() {
             sim.apply(step)
                 .await
@@ -601,6 +704,95 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("expected conversation complete"));
+    }
+
+    #[tokio::test]
+    async fn decided_answers_gate_a_commit_for_their_turn_only() {
+        let convo = Conversation::new("booking")
+            .stage("offer")
+            .commit("book", Guard::decided("confirmed"))
+            .next("done", Guard::called_ok("book"))
+            .stage("done")
+            .terminal()
+            .require(["done"])
+            .compile()
+            .expect("compiles");
+        let bank = BTreeMap::from([
+            (
+                "confirmed".to_string(),
+                Decision::new(Question::boolean("The caller agreed to book.")),
+            ),
+            (
+                "slot_pick".to_string(),
+                Decision::new(Question::choice(
+                    "Which time did the caller pick?",
+                    [("x", "x")],
+                ))
+                .options_from("offered")
+                .or_none("No offered time was picked.")
+                .writes("slot"),
+            ),
+        ]);
+        let mut sim = Sim::new(&convo, Enforcement::Enforce).with_decisions(bank);
+        sim.set(
+            "offered",
+            serde_json::json!([{ "id": "9am", "start": "09:00" }, { "id": "2pm", "start": "14:00" }]),
+        );
+        assert!(!sim.allowed("book"));
+
+        let answers = |pairs: &[(&str, Value)]| {
+            pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), v.clone()))
+                .collect::<BTreeMap<_, _>>()
+        };
+        sim.decide(&answers(&[
+            ("confirmed", serde_json::json!(true)),
+            ("slot_pick", serde_json::json!("2pm")),
+        ]));
+        assert!(sim.allowed("book"));
+        assert_eq!(
+            sim.slot::<Value>("slot"),
+            Some(serde_json::json!({ "id": "2pm", "start": "14:00" })),
+            "a pick writes the offered option whole"
+        );
+
+        // The caller says something else: the yes was about the last turn.
+        sim.user("actually hold on").await;
+        assert!(!sim.allowed("book"));
+        sim.decide(&answers(&[("confirmed", Value::Null)]));
+        assert!(!sim.allowed("book"), "unsure satisfies nothing");
+    }
+
+    #[test]
+    fn journal_decisions_replay_as_decide_steps() {
+        use gemini_adk_rs::flow::{DecisionRecord, Outcome, TOOL_CALL_KEY, decision_key};
+        use gemini_adk_rs::state::MemoryJournalSink;
+        let journal = std::sync::Arc::new(MemoryJournalSink::new());
+        let state = State::new().with_journal_sink(journal.clone());
+        let record = |q: &str, outcome, value: Value| {
+            let record = DecisionRecord {
+                outcome,
+                value,
+                confidence: Some(0.97),
+                turn: "3:ab".into(),
+            };
+            let _ = state.set(decision_key(q), serde_json::to_value(record).unwrap());
+        };
+        let _ = state.set(DECISION_TURN_KEY, "3:ab");
+        record("confirmed", Outcome::Yes, Value::Null);
+        record("slot_pick", Outcome::None, Value::Null);
+        record("anger", Outcome::Scored, serde_json::json!(1.5));
+        let _ = state.set(TOOL_CALL_KEY, serde_json::json!({ "tool": "book" }));
+
+        let scenario = Scenario::from_journal("incident", &journal.entries());
+        assert_eq!(
+            serde_json::to_value(&scenario.steps).unwrap(),
+            serde_json::json!([
+                { "decide": { "anger": 1.5, "confirmed": true, "slot_pick": "none_of_these" } },
+                { "expect_allowed": "book" },
+            ])
+        );
     }
 
     #[tokio::test]

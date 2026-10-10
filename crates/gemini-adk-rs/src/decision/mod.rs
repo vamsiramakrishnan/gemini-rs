@@ -15,9 +15,10 @@
 //! name or a date. It can pick among options the session already holds (the
 //! time slots a tool offered) and decide categorical things (a confirmation,
 //! an intent, which stage comes next), usually far faster than a language
-//! model. [`DecisionExtractor`] turns those answers into session state with a
-//! threshold per question; [`GatewayDecisionModel`] (feature `ai-gateway`)
-//! calls Vercel AI Gateway.
+//! model. [`Decisions`] holds the questions a session asks and asks them
+//! against the rolling conversation; guards name them with the `decided` atom
+//! (see [`crate::flow::decided`]). [`GatewayDecisionModel`] (feature
+//! `ai-gateway`) calls Vercel AI Gateway.
 //!
 //! ```
 //! use gemini_adk_rs::decision::{Answer, DecisionRequest, MockDecisionModel, Question, DecisionModel};
@@ -38,9 +39,9 @@
 //! # });
 //! ```
 
-mod extractor;
 #[cfg(feature = "ai-gateway")]
 mod gateway;
+mod service;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -52,12 +53,12 @@ use serde_json::{Value, json};
 
 use crate::llm::LlmError;
 
-pub use extractor::{
-    DEFAULT_BOOLEAN_THRESHOLD, DEFAULT_CERTAINTY_THRESHOLD, DEFAULT_DECISION_TIMEOUT,
-    DecisionExtractor, DecisionQuestion, NONE_OPTION, Promote,
-};
 #[cfg(feature = "ai-gateway")]
 pub use gateway::GatewayDecisionModel;
+pub use service::{
+    Conversation, DEFAULT_BOOLEAN_THRESHOLD, DEFAULT_CERTAINTY_THRESHOLD, DEFAULT_DECISION_TIMEOUT,
+    DEFAULT_HISTORY_TURNS, Decision, Decisions, NONE_OPTION, Round,
+};
 
 /// The most options a choice question may have.
 pub const MAX_CHOICE_OPTIONS: usize = 255;
@@ -267,11 +268,29 @@ impl Answer {
                 probabilities,
                 confidence,
             } => confidence.or_else(|| probabilities.get(choice).copied()),
+            // A score between two levels (2.5 on a 0 to 3 scale) is not
+            // unsure about the direction: its certainty is the probability of
+            // the two levels it lies between.
             Self::Score {
+                score,
                 probabilities,
                 confidence,
-                ..
-            } => confidence.or_else(|| probabilities.values().copied().reduce(f64::max)),
+            } if !probabilities.is_empty() => {
+                let level = |i: f64| {
+                    probabilities
+                        .get(&format!("{}", i as u64))
+                        .copied()
+                        .unwrap_or(0.0)
+                };
+                let (lo, hi) = (score.floor(), score.ceil());
+                let mass = if lo == hi {
+                    level(lo)
+                } else {
+                    level(lo) + level(hi)
+                };
+                Some(confidence.map_or(mass, |c| c.max(mass)))
+            }
+            Self::Score { confidence, .. } => *confidence,
             _ => None,
         }
     }
@@ -623,7 +642,11 @@ mod tests {
             "probabilities": { "0": 0, "1": 0, "2": 0.02, "3": 0.98 }
         }));
         assert!(matches!(a, Answer::Score { score, .. } if (score - 2.97).abs() < 1e-9));
-        assert_eq!(a.certainty(), Some(0.98));
+        assert_eq!(
+            a.certainty(),
+            Some(1.0),
+            "the two levels the score lies between hold all the probability"
+        );
 
         assert!(matches!(
             Answer::from_value(json!({ "type": "refusal" })),

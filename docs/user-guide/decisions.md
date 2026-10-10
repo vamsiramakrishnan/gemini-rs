@@ -19,9 +19,15 @@ exactly this shape:
 - which stage comes next.
 
 An [extractor](extraction.md) backed by a language model can decide them too,
-but each call takes seconds, and the turn pipeline waits for it. A decision
-model writes no text, so it cannot fill an open slot such as a name or a
-date. Keep those with a language-model extractor.
+but each call takes seconds, and its answer is latched into a state key that
+then has to be cleared when the caller changes their mind. A decision model
+answers in about a quarter of a second. It writes no text, so it cannot fill
+an open slot such as a name or a date; keep those with an extractor.
+
+Decisions are part of the governed flow. You declare each question once, and
+guard on it where it matters with `decided`. The runtime works out which
+questions the flow can act on, asks them in one request about the rolling
+conversation, and records each answer for the caller turn it is about.
 
 ## Setup
 
@@ -47,162 +53,230 @@ not have access to this model".
 (`experimental_decide`). Run it with `npm run decide` to check the
 credential.
 
-## In Rust
-
-```rust,ignore
-use std::sync::Arc;
-use gemini_adk_rs::decision::{
-    DecisionExtractor, DecisionQuestion, GatewayDecisionModel, Promote, Question,
-};
-
-let jev = Arc::new(GatewayDecisionModel::from_env()?);
-let signals = DecisionExtractor::new("caller_signals", jev, 2)
-    .facts(["party_size", "slot"])
-    .question(
-        DecisionQuestion::new("confirmed", Question::boolean(
-            "In their last turn, did the caller agree to the booking that was read back?",
-        ).when("the caller said yes in their own words",
-               "they hesitated, changed a detail, or only picked an option"))
-        .active_in(["confirm"])
-        .promote(Promote::to("book_table_confirmed").at_least(0.85)),
-    )
-    .question(
-        DecisionQuestion::new("picked", Question::choice::<&str, &str>(
-            "Which of the offered times did the caller choose?", []))
-        .options_from("availability.options")
-        .or_none("the caller has not chosen an offered time")
-        .promote(Promote::to("slot")),
-    )
-    .with_llm_fallback(Arc::new(GeminiLlm::from_env()?));
-
-Live::builder().extractor(Arc::new(signals))
-```
-
-Each turn the extractor sends one state:
-
-- `conversation`: the window's caller lines, tool results and agent lines, in
-  order;
-- `facts`: the listed state keys;
-- `active_stages`: the conversation's active stages.
-
-It asks every question whose `active_in` stages are active, then decides each
-answer:
-
-| Answer | Decided | Uncertain |
-|---|---|---|
-| boolean | `true` when `P(true) ≥ at_least` (default 0.85). A no at `P(true) ≤ 1 - at_least` writes `false` only with `write_false` | between the two |
-| choice | the option when its certainty ≥ `at_least` (default 0.6) | below it |
-| score | the score when its certainty ≥ `at_least` | below it |
-| refusal | | always |
-
-Certainty is the model's reported confidence, or else the chosen option's
-probability. A decided value is promoted to its key through the usual
-[promotion rules](extraction.md), so guards read it like any extracted
-value.
-
-A commit guard that reads a promoted key also gets the tool lane's refresh.
-When the model calls the commit tool in the same turn the caller says yes,
-the extractor runs over the turn in progress before the refusal stands.
-
-### Options from state and "none of these"
-
-`options_from` reads a choice's options from a state path (`key` or
-`key.field`) at each turn, such as the slots a tool offered. Each option is a
-string, a number, or an object keyed by its `id`, `value` or `name`. An
-object option is promoted whole.
-
-A choice always picks some option. A question such as "which time did the
-caller pick?" therefore needs `or_none(..)`, which adds the option
-`none_of_these`. Choosing it decides nothing.
-
-### Fallbacks
-
-With `with_llm_fallback(llm)`, the uncertain questions, and only those, are
-asked again of a language model through structured output. Its answers are
-promoted instead.
-
-The turn pipeline waits for every extraction. So the extractor gives the
-decision model 2 seconds (`with_timeout`). When the call times out or fails,
-the fallback answers every promoted question; without a fallback, the
-extraction fails as an LLM extraction would.
-
-AI Gateway can also rerun the whole decision itself.
-`GatewayDecisionModel::fallback(model, when)` adds a Gateway decision
-fallback, with conditions such as `FallbackWhen::ProbabilityBetween` and
-`FallbackWhen::ConfidenceBelow`. Both stages are billed and their latencies
-add.
-
-The extractor's result, stored under its name, holds:
-
-- each decided value by question id, or null;
-- `_decision`, with the raw answers, the model, the latency in `ms`, the
-  `uncertain` ids, and what the fallback answered.
-
-## In a spec
+## Declare the questions
 
 ```json
-"decide": [{
-  "name": "caller_signals",
-  "window": 2,
-  "facts": ["party_size", "slot"],
-  "questions": {
-    "book_table_confirmed": {
-      "type": "boolean",
-      "instructions": "In their last turn, did the caller agree to the booking that was read back?",
-      "criteria": { "true": "the caller said yes in their own words",
-                    "false": "they hesitated, changed a detail, or only picked an option" },
-      "active_in": ["confirm"],
-      "promote": { "to": "book_table_confirmed", "at_least": 0.85 }
-    },
-    "intent_human_agent": {
-      "type": "boolean",
-      "instructions": "Did the caller ask to speak to a person?",
-      "promote": { "to": "intent:human_agent" }
-    },
-    "picked": {
-      "type": "choice",
-      "instructions": "Which of the offered times did the caller choose?",
-      "options_from": "availability.options",
-      "none": "the caller has not chosen an offered time",
-      "promote": { "to": "slot" }
-    }
+"decisions": {
+  "confirmed": {
+    "type": "boolean",
+    "instructions": "In their last turn, did the caller agree to the booking that was read back?",
+    "criteria": { "true": "the caller said yes in their own words",
+                  "false": "they hesitated, changed a detail, or only picked an option" }
+  },
+  "wants_person": {
+    "type": "boolean",
+    "instructions": "In their last turn, did the caller ask to speak to a person?"
+  },
+  "picked_slot": {
+    "type": "choice",
+    "instructions": "Which of the offered times did the caller choose?",
+    "options_from": "availability.slots",
+    "none": "the caller has not chosen one of the offered times",
+    "writes": "slot"
+  },
+  "next_step": {
+    "type": "choice",
+    "instructions": "What should the assistant do next, given the caller's last turn?",
+    "criteria": { "book": "the caller confirmed the read-back",
+                  "read_back_again": "the caller changed or questioned a detail",
+                  "keep_collecting": "nothing was decided yet" }
+  },
+  "frustration": {
+    "type": "score",
+    "instructions": "How frustrated does the caller sound in their last turn?",
+    "criteria": ["calm", "slightly impatient", "frustrated", "angry"]
   }
-}]
+}
 ```
 
 | Field | Default | Meaning |
 |---|---|---|
-| `window` | 2 | Turns sent: the agent's last turn and the caller's reply |
-| `facts` | none | State keys sent with the conversation |
-| `questions.*.active_in` | every turn | Ask only while one of these stages is active |
-| `questions.*.options_from` | none | Choice options from a state path |
-| `questions.*.none` | none | Adds `none_of_these` to a choice |
-| `questions.*.promote` | none | `to`, `at_least`, `write_false`, `keep_known` |
-| `fallback` | `"llm"` | `"llm"`: the extraction model answers uncertain questions. `"none"`. `{"gateway": {"model", "when"}}`: a Gateway decision fallback |
-| `trigger` | `every_turn` | As for `extract` |
-| `timeout_ms` | 2000 | How long to wait for the decision model; a slow or failed call goes to the fallback |
+| `type` | | `boolean`, `choice` (1 to 255 options) or `score` (2 to 10 levels) |
+| `instructions` | | The question. Ask about "their last turn" for a confirmation or an intent |
+| `criteria` | | Boolean: what `true` and `false` mean. Choice: option to description. Score: level descriptions, lowest first |
+| `options_from` | none | Choice options read from a state path (`key` or `key.field`) at each ask. An option is a string, a number, or an object keyed by its `id`, `value` or `name` |
+| `none` | none | Adds the option `none_of_these` to a choice. A choice always picks something, so a pick among offered options needs a way to say "not yet" |
+| `at_least` | 0.85 boolean, 0.6 otherwise | The `P(true)` a yes needs (a no needs `1 -` this), or the certainty a pick or score needs |
+| `writes` | none | Also write the decided value into this state key: the boolean, the chosen option (an object option whole), or the score |
 
-`SpecResources::decision_model` must be set. `adk spec run` creates a
-`GatewayDecisionModel` from the environment, and `adk spec codegen` writes
-the same into the generated project. Promotion targets count as written
-keys, so `adk spec check` accepts guards that read them.
+## Guard on them
+
+`decided` is a guard atom like `captured` or `called_ok`, usable wherever a
+guard is: a stage's `commit`, `done` and `next`, a digression's `trigger`, a
+flow step's gate and edges, a `never_until` constraint, a phase transition
+and a pattern.
+
+| Guard | Holds when the answer for the current caller turn |
+|---|---|
+| `{"decided": "confirmed"}` | is yes, picked an option, or gave a score |
+| `{"decided": {"confirmed": false}}` | is no, or picked `none_of_these` |
+| `{"decided": {"next_step": "book"}}` | picked `book` |
+| `{"decided": {"frustration": {"at_least": 2}}}` | is a score of 2 or more |
+| `{"decided": {"frustration": {"at_most": 1}}}` | is a score of 1 or less |
+
+In Rust, `Guard::decided`, `decided_no`, `decided_is`, `decided_at_least`
+and `decided_at_most`.
+
+```json
+"conversation": {
+  "stages": [
+    { "id": "offer", "collect": ["slot"], "next": [{ "to": "confirm", "when": { "captured": ["slot"] } }] },
+    { "id": "confirm",
+      "commit": { "tool": "book", "when": { "decided": "confirmed" } },
+      "next": [{ "to": "offer", "when": { "decided": { "next_step": "read_back_again" } } }] }
+  ],
+  "overlays": [
+    { "name": "handoff", "trigger": { "decided": "wants_person" }, "stages": [ ... ] }
+  ]
+}
+```
+
+An answer counts only for the caller turn it is about. A yes given three
+turns ago does not satisfy a guard now, so nothing is latched and nothing has
+to be cleared when the caller corrects themselves: the next ask reads the
+correction. An unsure answer satisfies no expectation, neither yes nor no.
+
+`adk spec check` rejects a `decided` that names no question, or expects
+something its question cannot answer (`false` of a choice without `none`, an
+option a fixed choice does not have, a bound on a boolean). It warns about a
+question that no guard names and that writes nothing.
+
+## When questions are asked
+
+There are two decision points:
+
+1. **The caller's turn ends.** Asked alongside the turn's extractors, so it
+   adds no wait to the turn pipeline.
+2. **The model calls a tool.** Asked before the tool is admitted, about the
+   turn still in progress. When the model calls the commit tool in the same
+   breath as the caller's "yes, go ahead", the gate reads that yes; a
+   digression the answers trigger (a request for a person) opens before the
+   call is judged.
+
+At each point the runtime asks the questions the flow can act on:
+
+- those named by the guards of the flow that is driving (its stages, edges
+  and constraints), so a stage entered during the turn already has its
+  answers, and by the triggers of digressions that could open;
+- those that `writes` a key an active stage's guards read, so a pick fills
+  the stage that collects it;
+- those named by phase transitions and patterns, asked at every caller turn.
+
+They go out in one request, and latency barely moves with the number of
+questions. A question already answered for this caller turn is not asked
+again. Questions only a digression's own stages name wait until it opens,
+and while a digression drives, the main flow's questions wait for it to
+finish.
+
+The decision model reads one state:
+
+- `conversation`: the last 40 turns (`Decisions::history_turns`), as caller lines, tool
+  results and agent lines in order;
+- `context`: what the active stages ground the model in;
+- `active_stages`: the stages that are active.
+
+Each answer is recorded in state under `decision:{id}`:
+
+```json
+{ "outcome": "yes", "confidence": 0.97, "turn": "7:3f2a…" }
+```
+
+| Outcome | From |
+|---|---|
+| `yes`, `no` | a boolean at `P(true) ≥ at_least`, or `≤ 1 - at_least` |
+| `chosen` (with `value`) | a choice whose certainty is at least `at_least` |
+| `none` | `none_of_these` picked with that certainty |
+| `scored` (with `value`) | a score whose certainty is at least `at_least` |
+| `unsure` | anything else: in the uncertain band, refused, too slow, failed, or a choice with no options offered yet |
+
+Certainty is the model's reported confidence, or else the chosen option's
+probability. A score between two levels (2.5 on a 0 to 3 scale) is not
+unsure about its direction: its certainty is the probability of the two
+levels it lies between.
+
+The model gets 2 seconds (`Decisions::with_timeout`). A slow or
+failed ask records its questions `unsure`, so a guard on them does not hold:
+the commit is refused, not admitted. A question recorded unsure this way is
+asked again at the next decision point.
+
+The bank holds no session state, so one `Decisions` can serve every session.
+
+## In Rust
+
+```rust,ignore
+use std::sync::Arc;
+use gemini_adk_rs::decision::{Decision, Decisions, GatewayDecisionModel, Question};
+
+let jev = Arc::new(GatewayDecisionModel::from_env()?);
+let decisions = Decisions::new(jev)
+    .question("confirmed", Decision::new(
+        Question::boolean("In their last turn, did the caller agree to the booking that was read back?")
+            .when("the caller said yes in their own words",
+                  "they hesitated, changed a detail, or only picked an option"),
+    ))
+    .question("picked_slot", Decision::new(
+        Question::choice::<&str, &str>("Which of the offered times did the caller choose?", []),
+    )
+        .options_from("availability.slots")
+        .or_none("the caller has not chosen one of the offered times")
+        .writes("slot"));
+
+let booking = Conversation::new("booking")
+    .stage("offer").collect(["slot"])
+        .next("confirm", Guard::captured(["slot"]))
+    .stage("confirm").commit("book", Guard::decided("confirmed"))
+        .next("done", Guard::called_ok("book"))
+    .stage("done").terminal()
+    .compile()?;
+
+Live::builder().decisions(decisions).converse(&booking)
+```
+
+`Live::builder().decisions(..)` turns on input and output transcription,
+which the conversation is built from.
+
+In a spec, `SpecResources::decision_model` must be set when `decisions` is
+declared. `adk spec run` creates a `GatewayDecisionModel` from the
+environment, and `adk spec codegen` writes the same bank and guards into the
+generated project.
+
+## Offline scenarios
+
+A scenario scripts the answers with a `decide` step, which starts a new
+caller turn:
+
+```json
+{ "decide": { "confirmed": true, "picked_slot": "2026-10-20T09:00", "frustration": 2.5 } }
+```
+
+`true`/`false` answer a boolean, an option's key a choice (`"none_of_these"`
+for none), a number a score, and `null` is unsure. A pick from
+`options_from` writes the offered option, and `writes` applies, as in a live
+session. A `user` step also starts a new caller turn, so a scripted yes does
+not outlive the turn it was given in. `Scenario::from_journal` turns the
+answers recorded in a session's journal back into `decide` steps, so an
+incident replays with the same answers.
 
 ## Where to use it
 
-- **Confirmations and intents.** This is where seconds of extraction latency
-  cost the most: the commit tool waits on them.
-- **Stage routing.** A choice over the next stages, asked only in the stage
-  that branches (`active_in`). Its answer is written to a key the stages'
-  `next` guards compare against.
-- **Picks among offered options.** `options_from` plus `none`, instead of
-  asking a language model to restate the option.
+- **Confirmations.** `commit` guarded by `decided`, judged at the tool gate
+  in about a quarter of a second, with no latched flag to clear when the
+  caller changes a detail.
+- **Intents that open digressions.** A `trigger` on `decided` opens the
+  handoff or the emergency path before the tool the model called with it is
+  judged.
+- **Stage routing.** A choice over what happens next, compared in `next`
+  guards with `{"decided": {"next_step": "…"}}`. It is asked only while the
+  stage that branches on it is active.
+- **Picks among offered options.** `options_from` plus `none` plus `writes`,
+  instead of asking a language model to restate the option.
+- **Escalation and tone.** A score with `at_least` in a pattern or a phase
+  transition (asked every turn), such as moving to a de-escalation phase.
 - **Judging live runs.** The spec live-eval harness asks Jev whether the
   agent claimed a success no tool result supports, whether the read-back
   matched, and how far the caller's goal was met.
 
-Keep classification separate from authorization. A decision writes state;
-the governed flow's guards decide what the model may do with it. Set
-`at_least` by the cost of a wrong answer. A commit confirmation needs a
+Set `at_least` by the cost of a wrong answer. A commit confirmation needs a
 higher bar than an intent that only starts a handoff.
 
 ## Measured
@@ -230,45 +304,48 @@ with thinking off, and 7.7 s with it on.
 
 `tests/decision_eval.rs` runs 75 labelled cases from
 `tests/fixtures/decisions/cases.json` through the same path a session
-uses: a `decide` entry compiled to a `DecisionExtractor` over
-`GatewayDecisionModel`, with the fallback off so the numbers are Jev's
-alone. The cases cover consent, replies to a different question, prompt
-injection, speech-recognition noise, other languages, long calls, asking
-for a person, cancelling, dental emergencies, picks among offered times and
-prescriptions, frustration, and judging a finished call. Each case runs with
-the last exchange (window 2) and with the whole call. The 150 calls take
-about 5 seconds.
+uses: the fixture's questions are `decisions` entries compiled into one
+`Decisions` bank, each case is asked with `Decisions::ask` over its
+`Conversation` (its facts as the active stages' grounding), and the answer
+is read back from state as a `decided` guard reads it. The cases cover
+consent, replies to a different question, prompt injection,
+speech-recognition noise, other languages, long calls, asking for a
+person, cancelling, dental emergencies, picks among offered times and
+prescriptions, frustration, and judging a finished call. Each case runs
+with the last exchange and with the whole call. The 150 asks take about 5
+seconds.
 
 ```text
 cargo test -p gemini-adk-fluent-rs --test decision_eval -- --ignored --nocapture
 ```
 
-| Window | Right | Unsure | Wrong | p50 / p90 |
+| Conversation | Right | Unsure | Wrong | p50 / p90 |
 |---|---|---|---|---|
-| last exchange | 76 | 11 | 0 | 224 / 478 ms |
-| whole call | 77 | 10 | 0 | 227 / 369 ms |
+| last exchange | 78 | 9 | 0 | 222 / 336 ms |
+| whole call | 77 | 10 | 0 | 219 / 368 ms |
 
 - **Nothing was decided wrongly at the default thresholds.** What Jev
   could not decide is what a person would also find ambiguous: "mm hmm"
-  (0.74 to 0.82), "Yes, but can you make it 7:30?" (0.22 to 0.33), the
-  injection (0.23 to 0.33), "I don't want to talk to a machine" (0.66 to
-  0.71), "I'll call back later" (0.57 to 0.61).
+  (0.70 to 0.78), "Yes, but can you make it 7:30?" (0.21 to 0.24), the
+  injection (0.27 to 0.36), "I don't want to talk to a machine" (0.65),
+  "I'll call back later" (0.57 to 0.62).
 - **The closest call was a time pick before any read-back.** "Seven
   o'clock is perfect", said when the agent had asked for a name, scored
-  0.69 to 0.70. That is below the 0.85 consent threshold but above 0.6, so
-  lowering the threshold for confirmations would book it.
-- **Picks, emergencies, other languages, long calls and judging were all
-  right**, including "my blood pressure one" for Lisinopril and the misheard
-  "met forming" for Metformin.
-- **Score answers split between two adjacent levels.** "This is the third
-  time I've called" scored 2.5 on a 0 to 3 scale with confidence 0.5, below
-  the 0.6 certainty threshold, though both levels it was split between
-  (frustrated, angry) are right.
-- **The whole call is as fast as the last exchange and slightly better.**
-  Asking about "their last turn" keeps an earlier yes from being read
-  again.
+  0.74 to 0.75. That is below the 0.85 consent threshold, so it stays
+  unsure; lowering the threshold for confirmations would book it.
+- **Picks, emergencies, scores, other languages, long calls and judging
+  were all right**, including "my blood pressure one" for Lisinopril, the
+  misheard "met forming" for Metformin, and "this is the third time I've
+  called" (2.5 between frustrated and angry, both right).
+- **The whole call is as fast as the last exchange.** Asking about "their
+  last turn" keeps an earlier yes from being read again, which is why the
+  runtime can send 40 turns of history.
 
 ### Live A/B
+
+Measured with the earlier mechanism, where Jev answered as a turn-end
+extractor that latched flags, before `decided` guards and the tool-gate
+decision point.
 
 `SPEC_LIVE_SIGNALS=both` in the spec live-eval harness ran the 11 scenarios on
 `gemini-3.8-live` with typed and with spoken (TTS) callers. The two arms

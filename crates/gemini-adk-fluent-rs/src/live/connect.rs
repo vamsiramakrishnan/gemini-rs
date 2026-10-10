@@ -291,6 +291,9 @@ impl Live {
             builder = builder.greeting(greeting);
         }
         builder = builder.callbacks(self.callbacks);
+        if let Some(decisions) = self.decisions {
+            builder = builder.decisions(decisions);
+        }
         for ext in self.extractors {
             builder = builder.extractor(ext);
         }

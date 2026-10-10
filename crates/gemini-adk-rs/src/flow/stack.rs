@@ -229,6 +229,16 @@ struct ActiveOverlay {
     resume: Resume,
 }
 
+/// See [`FlowStack::decision_scope`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DecisionScope {
+    /// Questions named by the driving layer's guards and the enterable
+    /// digressions' triggers.
+    pub questions: BTreeSet<String>,
+    /// State keys the active steps' guards and those triggers read.
+    pub reads: BTreeSet<String>,
+}
+
 /// A shared, lock-protected [`FlowStack`] — the form in which the Live
 /// control plane owns governance, so runtime surfaces (e.g.
 /// [`LiveHandle::explain`](crate::live::LiveHandle::explain)) can snapshot it
@@ -978,6 +988,43 @@ impl FlowStack {
             overlay_path: self.overlay_path().into_iter().map(str::to_owned).collect(),
             terminated: self.is_terminated(),
         }
+    }
+
+    /// What a decision model should be asked now: the questions named by the
+    /// driving layer's guards and by the triggers of the digressions that can
+    /// still be entered, and the state keys the driving layer could act on
+    /// (for decisions that write a key). Empty after termination.
+    pub fn decision_scope(&self, state: &State) -> DecisionScope {
+        if self.is_terminated() {
+            return DecisionScope::default();
+        }
+        let current = self.current();
+        let mut questions = current.flow().decisions();
+        let mut reads = current.reads_now(state);
+        for ov in &self.overlays {
+            if !self.active.iter().any(|a| a.name == ov.name) {
+                questions.extend(ov.trigger.decisions());
+                reads.extend(ov.trigger.state_keys());
+            }
+        }
+        DecisionScope { questions, reads }
+    }
+
+    /// Apply fresh decisions mid-turn: enter a digression whose trigger now
+    /// holds, or re-evaluate the driving layer. Counts no turn and advances
+    /// no repair policy, so it can run before a tool call is admitted: a
+    /// caller who asks for a person and a model that transfers in the same
+    /// turn then see the transfer counted inside the handoff digression.
+    pub fn on_decisions(&mut self, state: &State) {
+        if self.is_terminated() {
+            return;
+        }
+        if let Some(idx) = self.triggered(state) {
+            self.enter(idx, state);
+        } else {
+            self.relatch(state);
+        }
+        self.publish_timing(state);
     }
 
     /// Re-evaluate the current layer after directly setting state.
@@ -1891,5 +1938,100 @@ mod tests {
         stack.on_turn(&state);
         assert!(stack.admits_tool("faq_tool", &state).is_ok());
         assert!(stack.admits_tool("main_tool", &state).is_err());
+    }
+
+    fn answer(state: &State, question: &str, outcome: crate::flow::Outcome, turn: &str) {
+        let _ = state.set(crate::flow::DECISION_TURN_KEY, turn);
+        let _ = state.set(
+            crate::flow::decision_key(question),
+            serde_json::to_value(crate::flow::DecisionRecord {
+                outcome,
+                value: serde_json::Value::Null,
+                confidence: None,
+                turn: turn.into(),
+            })
+            .unwrap(),
+        );
+    }
+
+    fn booking_with_handoff() -> FlowStack {
+        let main = Flow::new()
+            .step("collect")
+            .done(Guard::captured(["slot"]))
+            .step("confirm")
+            .after("collect")
+            .allow(["book"])
+            .commit("book", Guard::decided("confirmed"))
+            .done(Guard::called_ok("book"))
+            .step("end")
+            .after("confirm")
+            .terminal()
+            .build()
+            .expect("valid")
+            .compile()
+            .expect("compiles");
+        let handoff = Flow::new()
+            .step("transfer")
+            .allow(["transfer"])
+            .done(Guard::called_ok("transfer"))
+            .build()
+            .expect("valid")
+            .compile()
+            .expect("compiles");
+        FlowStack::new(main, Enforcement::Enforce).with_overlay(Overlay::new(
+            "handoff",
+            Guard::decided("wants_person"),
+            handoff,
+            Resume::Terminate,
+        ))
+    }
+
+    #[test]
+    fn the_decision_scope_names_guards_and_triggers_and_what_active_steps_read() {
+        let stack = booking_with_handoff();
+        let state = State::new();
+        let scope = stack.decision_scope(&state);
+        assert_eq!(
+            scope.questions,
+            ["confirmed", "wants_person"].map(String::from).into()
+        );
+        assert!(
+            scope.reads.contains("slot"),
+            "collect reads the slot: {scope:?}"
+        );
+    }
+
+    #[test]
+    fn a_decided_commit_is_admitted_only_for_the_current_turn() {
+        let mut stack = booking_with_handoff();
+        let state = State::new();
+        let _ = state.set("slot", "19:00");
+        stack.on_turn(&state);
+        assert!(
+            stack.admits_tool("book", &state).is_err(),
+            "not confirmed yet"
+        );
+        answer(&state, "confirmed", crate::flow::Outcome::Yes, "t1");
+        assert!(stack.admits_tool("book", &state).is_ok());
+        // The caller spoke again; the yes was about the previous turn.
+        let _ = state.set(crate::flow::DECISION_TURN_KEY, "t2");
+        let refusal = stack.admits_tool("book", &state).unwrap_err();
+        assert!(refusal.contains("confirmed"), "{refusal}");
+    }
+
+    #[test]
+    fn fresh_decisions_open_a_digression_mid_turn() {
+        let mut stack = booking_with_handoff();
+        let state = State::new();
+        stack.on_turn(&state);
+        assert_eq!(stack.active_overlay(), None);
+        answer(&state, "wants_person", crate::flow::Outcome::Yes, "t1");
+        stack.on_decisions(&state);
+        assert_eq!(stack.active_overlay(), Some("handoff"));
+        assert!(stack.admits_tool("transfer", &state).is_ok());
+        stack.on_tool_ok("transfer", &state);
+        stack.on_turn(&state);
+        stack.on_turn(&state);
+        assert!(stack.is_terminated(), "one transfer completes the handoff");
     }
 }

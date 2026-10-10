@@ -340,6 +340,15 @@ pub fn catalog() -> Catalog {
                 json!({ "done": "collect" }),
             ),
             entry(
+                "decided",
+                "A decision model's answer to a question in `decisions`, about the \
+                 caller's latest words: a question id (yes, picked, or scored), or \
+                 {question: true | false | option | {\"at_least\": n} | {\"at_most\": n}}. \
+                 Asked by the runtime when the flow can act on it; an earlier answer \
+                 does not count.",
+                json!({ "decided": { "next_step": "book" } }),
+            ),
+            entry(
                 "all",
                 "Every guard holds.",
                 json!({ "all": [{ "is_set": "slot" }, { "is_true": "user_confirmed" }] }),
@@ -685,26 +694,16 @@ fn unknown_fields(doc: &Value, out: &mut Vec<Diagnostic>) {
     for (i, t) in array(doc, "/tools") {
         unknown_in(t, &format!("/tools/{i}"), &tool, out);
     }
-    let decide = schema_fields(&schema, Some("DecideSpec"));
-    let mut question = schema_fields(&schema, Some("DecideQuestionSpec"));
+    let mut decision = schema_fields(&schema, Some("DecisionSpec"));
     // The question type's own fields are flattened in.
-    question.extend(["type", "instructions", "criteria"].map(String::from));
-    let promote = schema_fields(&schema, Some("DecidePromoteSpec"));
-    for (i, d) in array(doc, "/decide") {
-        let base = format!("/decide/{i}");
-        unknown_in(d, &base, &decide, out);
-        for (id, q) in d
-            .get("questions")
-            .and_then(Value::as_object)
-            .into_iter()
-            .flatten()
-        {
-            let qbase = format!("{base}/questions/{}", escape(id));
-            unknown_in(q, &qbase, &question, out);
-            if let Some(p) = q.get("promote") {
-                unknown_in(p, &format!("{qbase}/promote"), &promote, out);
-            }
-        }
+    decision.extend(["type", "instructions", "criteria"].map(String::from));
+    for (id, d) in doc
+        .get("decisions")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        unknown_in(d, &format!("/decisions/{}", escape(id)), &decision, out);
     }
     let Some(conv) = doc.get("conversation").filter(|c| c.is_object()) else {
         return;

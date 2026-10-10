@@ -66,18 +66,37 @@ pub(in crate::live) async fn handle_turn_complete(
     // 3. Capture a journal cursor before extractor/computed/phase mutations.
     let pre_watcher_cursor = watchers.as_ref().map(|_| state.mutation_cursor());
 
-    // 4. Run extractors matching EveryTurn or Interval triggers. (Extracted so the
-    // trigger-gating + interval-tracker bookkeeping is a named, harness-covered
-    // unit — see `harness` below and docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
-    run_turn_extractors(
-        extractors,
-        transcript_buffer,
-        state,
-        callbacks,
-        extraction_turn_tracker,
-        event_tx,
-    )
-    .await;
+    // 4. Run extractors matching EveryTurn or Interval triggers, and, beside
+    // them, the decision round for a turn the caller spoke in: the decision
+    // model reads the rolling conversation, not the extractors' output, so it
+    // need not wait for them. (Extracted so the trigger-gating +
+    // interval-tracker bookkeeping is a named, harness-covered unit — see
+    // `harness` below and docs/plans/2026-06-07-turn-tool-pipeline-rfc.md.)
+    let decision_input = control_plane
+        .decisions
+        .clone()
+        .filter(|_| ended.as_ref().is_some_and(|t| !t.user.trim().is_empty()))
+        .map(|d| {
+            let turns = transcript_buffer.window(d.history_len()).to_vec();
+            (d, turns)
+        });
+    let flow = &control_plane.flow;
+    let decide = async {
+        if let Some((decisions, turns)) = &decision_input {
+            super::decisions::decision_round(decisions, flow, turns, state).await;
+        }
+    };
+    tokio::join!(
+        run_turn_extractors(
+            extractors,
+            transcript_buffer,
+            state,
+            callbacks,
+            extraction_turn_tracker,
+            event_tx,
+        ),
+        decide
+    );
 
     // 5. Recompute derived state
     if let Some(computed) = computed {
