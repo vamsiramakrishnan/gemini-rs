@@ -207,10 +207,57 @@ its schema. The runtime also adds three things:
 A transient failure (HTTP 5xx, 429 or a transport error) is retried once
 after 300 ms. A failed extraction loses what the caller said in that turn.
 
-`gemini-flash-lite-latest` answers in under a second. In testing it also
-marked "Seven o'clock is perfect", said when picking a time, as agreeing to
-book. Use it only for fields where that kind of mistake is harmless, not for
-confirmations or intents.
+### Choosing the extraction model
+
+Name the model. In a spec, `models.extraction` sets it for every `extract`
+entry, and an entry's own `model` overrides it:
+
+```json
+"models": { "extraction": "gemini-3.1-flash-lite" },
+"extract": [
+  { "name": "caller_identity", "instruction": "...", "schema": { ... } },
+  { "name": "notes", "model": "gemini-3.5-flash", "instruction": "...", "schema": { ... } }
+]
+```
+
+A `gemini-*` name runs on `GeminiLlm`. `SpecResources::models`, an
+`LlmRegistry`, resolves any other name, such as a model served elsewhere,
+and takes precedence. An entry that names no model runs on
+`SpecResources::extraction_llm`; `adk spec run` creates it from
+`GEMINI_TEXT_MODEL`, else `gemini-flash-latest`. `adk spec check` warns
+(`unpinned_extraction_model`) when extraction names no model, and its fix
+pins `gemini-3.1-flash-lite`.
+
+`gemini-flash-latest` is a rolling alias: it served `gemini-3.8-flash` when
+this was measured, and its latency changes when the alias moves.
+`tests/extraction_latency.rs` replays the pharmacy fixture's three
+extractors over the turn "I need a refill of my Lisinopril", all three at
+once as the turn pipeline runs them, six turns at a time (18 concurrent
+requests), and checks the name, date of birth, medication and signals:
+
+| Model | Turn p50 / p90 / p99 / max | Correct |
+|---|---|---|
+| `gemini-flash-latest` (`gemini-3.8-flash`) | 6.7 / 19.5 / 49.1 / 62.2 s | 60/60 |
+| `gemini-3.5-flash` | 1.1 / 1.9 / 3.3 / 5.7 s | 60/60 |
+| `gemini-3.1-flash-lite` | 1.0 / 1.4 / 1.5 / 1.7 s | 60/60 |
+| `gemini-3.5-flash-lite`, `gemini-flash-lite-latest` | 0.7 / 0.9 / 1.3 / 1.9 s | 15 and 16 of 60 |
+| `gemini-2.5-flash-lite` | 0.4 / 0.7 / 0.9 / 1.0 s | 0/60 |
+
+With three turns at a time, `gemini-flash-latest` took 3.3 s at the median
+and 9 s at most; under load its tail reaches the 49 and 58 s turns seen in
+live runs. Every call succeeded on the first try: the time is the model's.
+`gemini-3.5-flash-lite` left the medication out in 45 of 60 turns (the agent
+had gone on to ask which one), and `gemini-2.5-flash-lite` dropped the date
+of birth. `gemini-3.5-flash-lite` also rejects a thinking budget of 0; the
+extractor then resends without it, once per extractor. In earlier testing
+`gemini-flash-lite-latest` marked "Seven o'clock is perfect", said when
+picking a time, as agreeing to book. Run the probe against your own
+extractors before switching:
+
+```text
+EXTRACTION_MODELS=gemini-3.1-flash-lite,gemini-3.5-flash \
+  cargo test -p gemini-adk-fluent-rs --test extraction_latency -- --ignored --nocapture
+```
 
 ## Schema Definition
 
@@ -357,7 +404,10 @@ Live::builder()
 
 Turn-end extraction runs on the control lane, and so do tool calls. A tool
 call that arrives while an extraction is running waits for it, so the
-extraction model's latency adds directly to the tool's response time.
+extraction model's latency adds directly to the tool's response time. In a
+live run on `gemini-flash-latest`, two pharmacy tool calls waited 49 and
+58 s behind the previous turn's extraction; pin a fast model (see
+[Choosing the extraction model](#choosing-the-extraction-model)).
 
 A commit guard often reads a key an extractor writes, such as a caller's
 confirmation. The caller says "yes" and the model calls the commit tool in

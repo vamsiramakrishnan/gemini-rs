@@ -68,6 +68,7 @@
       "description": "Transfer the caller to a member of staff."
     }
   ],
+  "models": { "extraction": "gemini-3.1-flash-lite" },
   "extract": [
     {
       "name": "booking_details",

@@ -24,7 +24,7 @@ impl SessionSpec {
         if !self.skills.is_empty() {
             let document = serde_json::to_string_pretty(self).expect("session specs serialize");
             let mut resources = String::from("    let resources = SpecResources {\n");
-            if self.requires_extraction() {
+            if self.requires_extraction() && self.uses_default_extraction_model() {
                 resources.push_str(
                     "        extraction_llm: Some(std::sync::Arc::new(GeminiLlm::from_env()?)),\n",
                 );
@@ -254,7 +254,7 @@ impl SessionSpec {
             out.push_str(&gen_runtime(runtime));
         }
         for extract in &self.extract {
-            out.push_str(&gen_extract(extract));
+            out.push_str(&gen_extract(extract, self.models.extraction.as_deref()));
         }
         if !self.decisions.is_empty() {
             out.push_str(&gen_decisions(self));
@@ -533,13 +533,23 @@ fn gen_pred(pred: &Pred) -> String {
     }
 }
 
-fn gen_extract(extract: &super::ExtractSpec) -> String {
+fn gen_extract(extract: &super::ExtractSpec, default_model: Option<&str>) -> String {
     let mut out = String::new();
     out.push_str("        .extractor(Arc::new(\n");
+    // The entry's model, else the spec's `models.extraction`, else the
+    // environment's (GEMINI_TEXT_MODEL, or gemini-flash-latest).
+    let llm = match extract.model.as_deref().or(default_model) {
+        Some(model) => format!(
+            "Arc::new(GeminiLlm::new(gemini_adk_fluent_rs::gemini_adk_rs::llm::GeminiLlmParams {{\n                    \
+             model: Some({}.into()),\n                    ..Default::default()\n                }}))",
+            rust_str(model)
+        ),
+        None => "Arc::new(GeminiLlm::new(Default::default()))".to_string(),
+    };
     let _ = writeln!(
         out,
         "            LlmExtractor::new(\n                {}.to_string(),\n                \
-         Arc::new(GeminiLlm::new(Default::default())),\n                {}.to_string(),\n                {},\n            )",
+         {llm},\n                {}.to_string(),\n                {},\n            )",
         rust_str(&extract.name),
         rust_str(&extract.instruction),
         extract.window
@@ -1261,6 +1271,24 @@ mod tests {
         assert!(code.contains("spec.apply(Live::builder()"));
         assert!(code.contains("submit_adjustment"));
         assert!(code.contains("task_scenarios"));
+    }
+
+    #[test]
+    fn extraction_is_generated_on_the_model_the_spec_names() {
+        let mut named = spec();
+        named.models.extraction = Some("gemini-3.1-flash-lite".into());
+        let code = named.to_rust();
+        assert!(
+            code.contains("model: Some(\"gemini-3.1-flash-lite\".into())"),
+            "{code}"
+        );
+        assert!(
+            !code.contains("GeminiLlm::new(Default::default())"),
+            "{code}"
+        );
+
+        let unnamed = spec().to_rust();
+        assert!(unnamed.contains("GeminiLlm::new(Default::default())"));
     }
 
     #[test]

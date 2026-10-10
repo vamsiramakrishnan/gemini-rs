@@ -44,6 +44,7 @@
       "response": { "charged": true, "confirmation": "TXN-83921" }
     }
   ],
+  "models": { "extraction": "gemini-3.1-flash-lite" },
   "extract": [
     {
       "name": "promise_to_pay",

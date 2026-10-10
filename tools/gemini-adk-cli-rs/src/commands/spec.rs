@@ -186,7 +186,8 @@ pub async fn run(spec_path: &str) -> CliResult {
         );
     }
     let mut resources = SpecResources::default();
-    if spec.requires_extraction() {
+    // Extraction that names its model is resolved by the spec itself.
+    if spec.requires_extraction() && spec.uses_default_extraction_model() {
         resources.extraction_llm = Some(Arc::new(GeminiLlm::from_env()?));
     }
     if !spec.decisions.is_empty() {

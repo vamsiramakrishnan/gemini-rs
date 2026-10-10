@@ -87,8 +87,11 @@ warn you: a spec without extraction passes every check and scenario and then
 never leaves its first stage on a real call. Confirmations and intents (`book_confirmed`,
 `intent:human_agent`) come from one extractor, conventionally
 `caller_signals`, with boolean fields and `"policy": "true_only"`; a key with
-a colon is promoted with `"to"`. Extractors need an extraction model at run
-time; `adk spec run` creates one from the environment.
+a colon is promoted with `"to"`. Name the extraction model:
+`"models": {"extraction": "gemini-3.1-flash-lite"}` (an entry's own `model`
+overrides it). Unnamed extraction runs on the host default, the rolling
+`gemini-flash-latest`, which measured 6.7 s per turn at the median and up to
+62 s under load; `adk spec check` warns (`unpinned_extraction_model`).
 
 ## Decisions
 
@@ -276,6 +279,7 @@ how `handoff_to_staff` is implemented), and its four scenarios pass.
       "description": "Transfer the caller to a member of staff."
     }
   ],
+  "models": { "extraction": "gemini-3.1-flash-lite" },
   "extract": [
     {
       "name": "booking_details",

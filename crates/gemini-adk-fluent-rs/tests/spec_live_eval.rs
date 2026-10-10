@@ -27,6 +27,7 @@
 //! | `SPEC_LIVE_ONLY` | all | Comma-separated scenario names |
 //! | `SPEC_LIVE_PARALLEL` | `3` | Sessions run at once |
 //! | `SPEC_LIVE_TRACE` | unset | `1` adds the runtime's `info` events to each timeline; run one scenario at a time |
+//! | `SPEC_LIVE_EXTRACTION_MODEL` | the fixture's `models.extraction` | The text model every `extract` entry runs on |
 //! | `SPEC_LIVE_SIGNALS` | `flash` | Who decides confirmations and intents: `flash` (the fixtures' Gemini extractors), `jev` (TypeSafe's Jev through Vercel AI Gateway) or `both` (an A/B) |
 //!
 //! The `jev` arm turns each fixture's all-boolean extractor (its caller
@@ -1035,6 +1036,9 @@ async fn run_one(scenario: &Scenario, model: &str, voice_input: bool, jev: bool)
         judge: None,
     };
     let mut doc = fixture(scenario.fixture);
+    if let Ok(model) = std::env::var("SPEC_LIVE_EXTRACTION_MODEL") {
+        doc["models"]["extraction"] = json!(model);
+    }
     let signal_names = signal_extractors(&doc);
     if jev {
         doc = jev_arm(scenario.fixture, doc);
@@ -1361,6 +1365,11 @@ fn ab_summary(runs: &[Run]) -> String {
 
 fn render(runs: &[Run]) -> String {
     let mut out = String::from("# Spec live evaluation\n\n");
+    out.push_str(&format!(
+        "Extraction model: `{}`.\n\n",
+        std::env::var("SPEC_LIVE_EXTRACTION_MODEL")
+            .unwrap_or_else(|_| "each fixture's models.extraction".into())
+    ));
     out.push_str(&ab_summary(runs));
     out.push_str("\n| Scenario | Model | Input | Signals | Checks |\n|---|---|---|---|---|\n");
     for r in runs {

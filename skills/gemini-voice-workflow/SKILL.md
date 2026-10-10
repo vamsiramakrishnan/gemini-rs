@@ -174,9 +174,11 @@ avoids it.
 - **Every extractor is a model call the turn waits for.** A tool call that
   arrives meanwhile waits too, and on a phone line seconds of silence sound
   like a dead line. Keep extractors few (one for slots, one for signals).
-  The extraction model is `GEMINI_TEXT_MODEL` (default `gemini-flash-latest`);
-  `gemini-flash-lite-latest` is faster but marked picking a time as agreeing
-  to book, so don't use it when the spec has confirmations.
+  Pin the extraction model with `models.extraction`
+  (`gemini-3.1-flash-lite` was correct and about 1 s per turn); the unpinned
+  default, `gemini-flash-latest`, took up to 62 s under load, and
+  `gemini-flash-lite-latest` left out a named medication and marked picking a
+  time as agreeing to book.
 - **A confirmation extractor should read two turns.** `"window": 2` sees the
   read-back and the reply; a wider window can find a "yes" from before a
   correction.

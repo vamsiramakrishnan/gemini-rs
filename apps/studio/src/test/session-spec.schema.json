@@ -1117,6 +1117,13 @@
           "description": "Instruction for the extraction model.",
           "type": "string"
         },
+        "model": {
+          "description": "The text model this entry runs on, such as `gemini-3.1-flash-lite`. Overrides `models.extraction`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "description": "Extraction name — the state key the full result is stored under.",
           "type": "string"
@@ -1287,6 +1294,19 @@
             "$ref": "#/definitions/MemorySlotSpec"
           },
           "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ModelsSpec": {
+      "description": "The models a spec runs on, by role.",
+      "properties": {
+        "extraction": {
+          "description": "The text model `extract` entries run on, such as `gemini-3.1-flash-lite`, unless an entry names its own. Name one: the host default is the rolling `gemini-flash-latest` alias, whose model (and latency) changes under you, and every turn waits for extraction.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -4579,6 +4599,14 @@
       ],
       "default": "text",
       "description": "Output modality. Defaults to text."
+    },
+    "models": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ModelsSpec"
+        }
+      ],
+      "description": "The models the spec runs on, by role."
     },
     "name": {
       "default": "",

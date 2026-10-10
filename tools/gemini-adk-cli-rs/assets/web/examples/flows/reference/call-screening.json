@@ -41,6 +41,7 @@
       "set_state": { "message_taken": true }
     }
   ],
+  "models": { "extraction": "gemini-3.1-flash-lite" },
   "extract": [
     {
       "name": "screening",
