@@ -181,12 +181,22 @@ spec's `scenarios` are run against it:
   "name": "booking",
   "modality": "audio",
   "tools": [{ "name": "book", "description": "Book the table", "response": { "confirmation": "B-1" } }],
+  "extract": [
+    { "name": "booking", "instruction": "Extract the party size and the requested time.",
+      "schema": { "type": "object", "properties": {
+        "party_size": { "type": "integer" }, "slot": { "type": "string" } } },
+      "promote": [{ "field": "party_size", "policy": "overwrite" }, { "field": "slot", "policy": "overwrite" }] },
+    { "name": "caller_signals", "instruction": "Set a field to true only when the caller clearly said so.",
+      "schema": { "type": "object", "properties": {
+        "user_confirmed": { "type": "boolean", "description": "The caller agreed to the booking read back to them." } } },
+      "promote": [{ "field": "user_confirmed", "policy": "true_only" }] }
+  ],
   "conversation": {
     "name": "booking",
     "stages": [
       { "id": "collect", "say": "Help the user book a table.", "collect": ["party_size", "slot"],
         "next": [{ "to": "confirm", "when": { "captured": ["party_size", "slot"] } }] },
-      { "id": "confirm", "allow": ["book"],
+      { "id": "confirm", "say": "Read the booking back and book it once the caller agrees.", "allow": ["book"],
         "commit": { "tool": "book", "when": { "is_true": "user_confirmed" } },
         "next": [{ "to": "done", "when": { "called_ok": "book" } }] },
       { "id": "done", "terminal": true }
@@ -201,9 +211,14 @@ spec's `scenarios` are run against it:
 ```
 
 - A spec sets `conversation` or `flow`, not both.
+- `collect` names the slots a stage needs; it does not fill them. Here the
+  `booking` extractor fills `party_size` and `slot` from what the caller says,
+  and `caller_signals` sets `user_confirmed` when the caller agrees. Without
+  them the call never leaves `collect` and `book` is never admitted.
 - `validate` compiles the conversation. Its compiled flow goes through the
   same checks as a hand-written one: unknown tools, and guards reading keys
-  nothing writes. Collected slots count as written.
+  nothing writes. Collected slots count as written, so a missing extractor
+  for them is not reported.
 - A stage's `resolve` slot is filled by the declared tool of the same name
   (or the one named in `resolver`). A resolver with no declared tool is an
   error.
