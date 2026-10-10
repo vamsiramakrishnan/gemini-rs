@@ -226,6 +226,48 @@ Adding questions or state barely moves latency. One call in 78 took about
 `gemini-flash-latest` extraction of the same kind took 2.3 s at the median
 with thinking off, and 7.7 s with it on.
 
+### Labelled decisions, without a Live session
+
+`tests/decision_eval.rs` runs 75 labelled cases from
+`tests/fixtures/decisions/cases.json` through the same path a session
+uses: a `decide` entry compiled to a `DecisionExtractor` over
+`GatewayDecisionModel`, with the fallback off so the numbers are Jev's
+alone. The cases cover consent, replies to a different question, prompt
+injection, speech-recognition noise, other languages, long calls, asking
+for a person, cancelling, dental emergencies, picks among offered times and
+prescriptions, frustration, and judging a finished call. Each case runs with
+the last exchange (window 2) and with the whole call. The 150 calls take
+about 5 seconds.
+
+```text
+cargo test -p gemini-adk-fluent-rs --test decision_eval -- --ignored --nocapture
+```
+
+| Window | Right | Unsure | Wrong | p50 / p90 |
+|---|---|---|---|---|
+| last exchange | 76 | 11 | 0 | 224 / 478 ms |
+| whole call | 77 | 10 | 0 | 227 / 369 ms |
+
+- **Nothing was decided wrongly at the default thresholds.** What Jev
+  could not decide is what a person would also find ambiguous: "mm hmm"
+  (0.74 to 0.82), "Yes, but can you make it 7:30?" (0.22 to 0.33), the
+  injection (0.23 to 0.33), "I don't want to talk to a machine" (0.66 to
+  0.71), "I'll call back later" (0.57 to 0.61).
+- **The closest call was a time pick before any read-back.** "Seven
+  o'clock is perfect", said when the agent had asked for a name, scored
+  0.69 to 0.70. That is below the 0.85 consent threshold but above 0.6, so
+  lowering the threshold for confirmations would book it.
+- **Picks, emergencies, other languages, long calls and judging were all
+  right**, including "my blood pressure one" for Lisinopril and the misheard
+  "met forming" for Metformin.
+- **Score answers split between two adjacent levels.** "This is the third
+  time I've called" scored 2.5 on a 0 to 3 scale with confidence 0.5, below
+  the 0.6 certainty threshold, though both levels it was split between
+  (frustrated, angry) are right.
+- **The whole call is as fast as the last exchange and slightly better.**
+  Asking about "their last turn" keeps an earlier yes from being read
+  again.
+
 ### Live A/B
 
 `SPEC_LIVE_SIGNALS=both` in the spec live-eval harness ran the 11 scenarios on

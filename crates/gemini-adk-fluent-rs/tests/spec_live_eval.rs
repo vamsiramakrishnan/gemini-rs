@@ -61,6 +61,7 @@ use gemini_adk_rs::{JournalSink, State, StateMutation};
 use gemini_genai_rs::prelude::ModelId;
 use gemini_genai_rs::session::SessionEvent;
 
+use common::env::env_or_local;
 use common::voice;
 
 /// How long the agent may stay quiet before an exchange is over.
@@ -819,20 +820,6 @@ fn jev_arm(fixture: &str, mut doc: Value) -> Value {
     doc["extract"] = json!(keep);
     doc["decide"] = json!(decide);
     doc
-}
-
-/// A variable from the environment, else from `.env.local` at the
-/// repository root. Values are never printed.
-fn env_or_local(key: &str) -> Option<String> {
-    if let Some(v) = std::env::var(key).ok().filter(|v| !v.trim().is_empty()) {
-        return Some(v);
-    }
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.env.local");
-    let text = std::fs::read_to_string(path).ok()?;
-    text.lines().find_map(|line| {
-        let (k, v) = line.trim().split_once('=')?;
-        (k.trim() == key).then(|| v.trim().trim_matches('"').trim_matches('\'').to_string())
-    })
 }
 
 /// Jev on AI Gateway, with the key from the environment or `.env.local`.
