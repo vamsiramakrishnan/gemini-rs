@@ -20,6 +20,10 @@ The authoring interface answers each of these as JSON. The library is
 | `adk spec patch <spec> <ops> [--write]` | `authoring::apply_patch(&doc, &ops)` | The patched spec and its check report |
 
 The full document shape is the spec's JSON Schema (`adk spec schema`).
+The [`gemini-voice-workflow` skill](https://github.com/vamsiramakrishnan/gemini-rs/tree/main/skills/gemini-voice-workflow)
+teaches a coding agent this loop, with the stage patterns and scenario rules
+that `check` cannot enforce. `adk spec graph agent.json` prints the stages as
+a Mermaid diagram.
 
 ## The loop
 
