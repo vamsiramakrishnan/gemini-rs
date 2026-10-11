@@ -60,7 +60,15 @@ def run(impl, lines, args, port):
     out = subprocess.run(["taskset", "-c", args.client_cpus] + cmd, env=env, capture_output=True, text=True)
     wall = time.monotonic() - t0
     mock_cpu = proc_cpu_s(mock.pid) - m0
-    stats = get(f"http://127.0.0.1:{port}/stats")
+    # The stand-in records a call once it sees the connection close, which
+    # can trail the client's exit: wait until every call it started is done.
+    deadline = time.monotonic() + 30
+    while True:
+        stats = get(f"http://127.0.0.1:{port}/stats")
+        settled = stats["calls_hung_up"] + sum(stats["failures"].values())
+        if settled >= stats["calls_started"] or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
     mock.terminate()
     mock.wait()
     try:

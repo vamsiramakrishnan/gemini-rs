@@ -14,6 +14,10 @@ def q(d, k):
     return "–" if not d or d.get(k) is None else f"{d[k]:g}"
 
 
+def num(v, fmt="g"):
+    return "–" if v is None else format(v, fmt)
+
+
 def main(path):
     runs = [json.loads(line) for line in open(path)]
     runs.sort(key=lambda r: (ORDER[r["impl"]], r["lines"]))
@@ -22,10 +26,13 @@ def main(path):
     print("|---|---|---|---|---|---|---|")
     for r in runs:
         c = r["client"]
+        if "error" in c:
+            print(f"| {NAMES[r['impl']]} | {r['lines']} | the client failed | – | – | – | – |")
+            continue
         base = c.get("rss_after_imports_kb", c["rss_start_kb"])
         print(
-            f"| {NAMES[r['impl']]} | {r['lines']} | {c['booked']}/{c['calls']} | {c['cpu_pct_of_one_core']:g} "
-            f"| {r['cpu_ms_per_call_second']:g} | {c['rss_peak_kb'] / 1024:.0f} "
+            f"| {NAMES[r['impl']]} | {r['lines']} | {c['booked']}/{c['calls']} | {num(c['cpu_pct_of_one_core'])} "
+            f"| {num(r['cpu_ms_per_call_second'])} | {c['rss_peak_kb'] / 1024:.0f} "
             f"| {(c['rss_peak_kb'] - base) / r['lines']:.0f} |"
         )
     print()

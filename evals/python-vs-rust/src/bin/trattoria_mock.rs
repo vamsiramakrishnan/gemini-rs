@@ -223,10 +223,12 @@ async fn call(socket: WebSocket, shared: App) {
     let (events_tx, events_rx) = mpsc::unbounded_channel::<Inbound>();
     let (mic_tx, mic_rx) = watch::channel(0f64);
 
+    // What the caller's mic delivered, kept outside the reader so that a
+    // reader cut short by a failed call still reports it.
+    let heard = Arc::new(parking_lot::Mutex::new(Heard::default()));
+    let reader_heard = heard.clone();
     let reader_shared = shared.clone();
-    let reader = tokio::spawn(async move {
-        let mut heard_ms = 0f64;
-        let mut late = Vec::new();
+    let mut reader = tokio::spawn(async move {
         while let Some(Ok(msg)) = stream.next().await {
             let text = match msg {
                 Message::Text(t) => t,
@@ -248,11 +250,16 @@ async fn call(socket: WebSocket, shared: App) {
                     .unwrap_or("");
                 // A client holding the floor sends silence in place of the
                 // mic while the model speaks; those frames carry no clock.
-                if let Some(captured) = stamp_of(data).filter(|c| *c > 0) {
-                    late.push(now_us().saturating_sub(captured) as f32 / 1000.0);
-                }
-                heard_ms += (data.len() * 3 / 4) as f64 / MIC_BYTES_PER_MS;
-                mic_tx.send_replace(heard_ms);
+                let ms = {
+                    let mut h = reader_heard.lock();
+                    if let Some(captured) = stamp_of(data).filter(|c| *c > 0) {
+                        h.late_ms
+                            .push(now_us().saturating_sub(captured) as f32 / 1000.0);
+                    }
+                    h.ms += (data.len() * 3 / 4) as f64 / MIC_BYTES_PER_MS;
+                    h.ms
+                };
+                mic_tx.send_replace(ms);
                 continue;
             }
             if reader_shared.timing.log {
@@ -292,9 +299,6 @@ async fn call(socket: WebSocket, shared: App) {
                 break;
             }
         }
-        let mut s = reader_shared.stats.lock();
-        s.mic_ms += heard_ms;
-        s.mic_late_ms.extend(late);
     });
 
     let mut script = Script {
@@ -317,11 +321,24 @@ async fn call(socket: WebSocket, shared: App) {
         }
         Err(reason) => {
             *shared.stats.lock().failures.entry(reason).or_default() += 1;
+            // Hang up, and count what the client sent before it noticed.
             let _ = sink.send(Message::Close(None)).await;
+            let _ = tokio::time::timeout(Duration::from_secs(2), &mut reader).await;
         }
     }
     reader.abort();
     let _ = reader.await;
+    let heard = std::mem::take(&mut *heard.lock());
+    let mut s = shared.stats.lock();
+    s.mic_ms += heard.ms;
+    s.mic_late_ms.extend(heard.late_ms);
+}
+
+/// The caller's audio as one connection delivered it.
+#[derive(Default)]
+struct Heard {
+    ms: f64,
+    late_ms: Vec<f32>,
 }
 
 struct Script<'a, S> {
