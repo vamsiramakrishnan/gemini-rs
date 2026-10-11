@@ -100,8 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guard read past the end of a program whose copied `def` never closed its
   signature.
 - CI: the Python binding's lockfile carries code mode's dependencies, and
-  `deny.toml` allows BlueOak-1.0.0 (permissive), the license of `minicbor`,
-  which Monty uses.
+  `deny.toml` allows two permissive licenses Monty brings in: BlueOak-1.0.0
+  (`minicbor`) and Unicode-DFS-2016 (`unicode_names2`).
 
 - **Code execution no longer ends a Live session at setup.** Gemini 3.8 Live,
   3.8 Live Extended Thinking and 2.5 native audio on Google AI close the

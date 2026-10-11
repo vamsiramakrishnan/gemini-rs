@@ -33,6 +33,9 @@ allow = [
   # Blue Oak Model License: permissive (OSI-approved). minicbor, which Monty
   # (code mode's interpreter) uses for its snapshots.
   "BlueOak-1.0.0",
+  # Unicode data license (2016), the predecessor of Unicode-3.0:
+  # unicode_names2, which Monty uses for `\N{...}` escapes.
+  "Unicode-DFS-2016",
 ]
 # Internal unpublished crates (examples, apps, tools) are not distributed.
 private = { ignore = true }
