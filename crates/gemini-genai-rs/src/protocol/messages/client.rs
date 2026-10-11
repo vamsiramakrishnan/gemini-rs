@@ -159,19 +159,26 @@ impl SessionConfig {
     /// `tools` as this target accepts them: `behavior` is removed from
     /// function declarations where async tool calling is not supported.
     fn wire_tools(&self, tools: &[Tool]) -> Vec<Tool> {
-        if self.supports_async_tools() {
-            return tools.to_vec();
-        }
+        let async_tools = self.supports_async_tools();
+        let code_execution = self.supports_code_execution();
         tools
             .iter()
-            .map(|tool| {
+            .filter_map(|tool| {
                 let mut t = tool.clone();
-                if let Some(ref mut decls) = t.function_declarations {
+                if !async_tools && let Some(ref mut decls) = t.function_declarations {
                     for d in decls.iter_mut() {
                         d.behavior = None;
                     }
                 }
-                t
+                if !code_execution && t.code_execution.take().is_some() {
+                    // A tool entry that only carried code execution goes.
+                    let other = t.function_declarations.is_some()
+                        || t.google_search.is_some()
+                        || t.google_search_retrieval.is_some()
+                        || t.url_context.is_some();
+                    return other.then_some(t);
+                }
+                Some(t)
             })
             .collect()
     }

@@ -188,7 +188,9 @@ impl PartialEq<&str> for ModelId {
 /// assert!(p.context_update);
 /// let x = LiveModelProfile::of(&ModelId::LIVE_3_8_EXTENDED_THINKING);
 /// assert!(x.thinking && x.thinking_level_required);
-/// assert_eq!(LiveModelProfile::of(&ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO), LiveModelProfile::DEFAULT);
+/// let native = LiveModelProfile::of(&ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO);
+/// assert_eq!(native, LiveModelProfile::GEMINI_2_5_NATIVE_AUDIO);
+/// assert!(!native.code_execution && !p.code_execution);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -213,6 +215,11 @@ pub struct LiveModelProfile {
     /// and the system instruction mid-session. Gemini 2.5 Live closes the
     /// session over one (1007, "Request contains an invalid argument").
     pub context_update: bool,
+    /// Accepts the built-in `codeExecution` tool on Google AI. Gemini 3.8
+    /// Live, 3.8 Live Extended Thinking and 2.5 native audio close the
+    /// session at setup over it (1007, "Code Execution tool is not supported
+    /// for this model"; measured 2026-10-11). Vertex AI was not measured.
+    pub code_execution: bool,
 }
 
 impl LiveModelProfile {
@@ -224,6 +231,14 @@ impl LiveModelProfile {
         proactivity_flag: true,
         vertex_async_tools: false,
         context_update: false,
+        code_execution: true,
+    };
+
+    /// Gemini 2.5 native audio: as [`DEFAULT`](Self::DEFAULT), without the
+    /// `codeExecution` tool.
+    pub const GEMINI_2_5_NATIVE_AUDIO: Self = Self {
+        code_execution: false,
+        ..Self::DEFAULT
     };
 
     /// Gemini 3.8 Live. No thinking: `thinkingLevel` is refused and a
@@ -235,6 +250,7 @@ impl LiveModelProfile {
         proactivity_flag: false,
         vertex_async_tools: true,
         context_update: true,
+        code_execution: false,
     };
 
     /// Gemini 3.8 Live Extended Thinking: requires `thinkingLevel`, and
@@ -247,6 +263,7 @@ impl LiveModelProfile {
         proactivity_flag: false,
         vertex_async_tools: true,
         context_update: true,
+        code_execution: false,
     };
 
     /// The profile for `model`, matched on its name (with or without a
@@ -257,6 +274,8 @@ impl LiveModelProfile {
             Self::GEMINI_3_8_LIVE_EXTENDED_THINKING
         } else if name.starts_with("gemini-3.8-live") {
             Self::GEMINI_3_8_LIVE
+        } else if name.contains("native-audio") {
+            Self::GEMINI_2_5_NATIVE_AUDIO
         } else {
             Self::DEFAULT
         }
