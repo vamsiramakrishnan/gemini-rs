@@ -92,7 +92,8 @@ pub struct CodeLimitsSpec {
     /// Wall-clock time per program, its calls included, in ms. Default 30000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wall_ms: Option<u64>,
-    /// Characters of a program's result the model reads. Default 4000.
+    /// Characters of a program's result (and of its printed output) the
+    /// model reads. Default 2000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_chars: Option<usize>,
     /// Memory per program in MiB, enforced by worker-process sandboxes.

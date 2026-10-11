@@ -101,7 +101,7 @@ impl Default for CodeLimits {
             calls: 20,
             cpu: Duration::from_secs(2),
             wall: Duration::from_secs(30),
-            output_chars: 4_000,
+            output_chars: 2_000,
             memory: 64 * 1024 * 1024,
         }
     }
@@ -401,21 +401,24 @@ impl CodeMode {
             }
             Err(error) => json!({ "error": error }),
         };
+        // A printout over the limit is refused whole: cut, it reads as the
+        // full data, and in live runs the model answered from what was left.
         let printed = printed.trim();
+        let size = printed.chars().count();
+        if size > limit {
+            return json!({
+                "error": format!(
+                    "The program printed {size} characters, over the limit of {limit}, \
+                     so none of it is shown. Print only the values you need: compute \
+                     the answer in the program."
+                )
+            });
+        }
         if !printed.is_empty() {
-            response["printed"] = Value::String(truncate(printed, limit));
+            response["printed"] = Value::String(printed.to_string());
         }
         response
     }
-}
-
-fn truncate(text: &str, limit: usize) -> String {
-    if text.chars().count() <= limit {
-        return text.to_string();
-    }
-    let mut cut: String = text.chars().take(limit).collect();
-    cut.push_str(&format!(" [cut at {limit} characters]"));
-    cut
 }
 
 fn default_sandbox() -> Arc<dyn CodeSandbox> {
@@ -571,5 +574,29 @@ impl Program {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_over_limit_printout_is_refused_whole() {
+        let mode = CodeMode::new().limits(CodeLimits {
+            output_chars: 10,
+            ..CodeLimits::default()
+        });
+        let response = mode.response(Ok(Value::Null), "0123456789abc");
+        assert!(
+            response.get("printed").is_none(),
+            "nothing partial is shown"
+        );
+        let error = response["error"].as_str().unwrap();
+        assert!(error.contains("printed 13 characters"), "{error}");
+        assert_eq!(
+            mode.response(Ok(json!(1)), "short"),
+            json!({ "result": 1, "printed": "short" })
+        );
     }
 }

@@ -150,7 +150,7 @@ reads evidence the model cannot assert, and a program cannot assert it either.
 | `calls` | 20 | The call past the limit ends the program with the reason |
 | `cpu` | 2 s | Interpreter time, excluding calls: `TimeoutError` |
 | `wall` | 30 s | The whole program, calls included: ended before its next call |
-| `output_chars` | 4,000 | A larger result is refused with a note to return less; printed output is cut |
+| `output_chars` | 2,000 | A larger result or printout is refused whole, with a note to compute the answer in the program |
 | `memory` | 64 MiB | Enforced by `MontyPool` only |
 
 The spec spells them `calls`, `cpu_ms`, `wall_ms`, `output_chars` and
