@@ -74,6 +74,12 @@ pub struct SkillSpec {
     /// Existing model-free tests for the governed workflow.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tests: Vec<SpecTest>,
+    /// A code tool for this skill, declared as `{skill}__run_code` while the
+    /// skill is foreground: a program whose functions are the skill's tools
+    /// by their local names. Without `functions`, every read tool that the
+    /// skill's flow does not guard as a commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<super::CodeSpec>,
 }
 
 impl SkillSpec {
@@ -100,6 +106,7 @@ impl SkillSpec {
             tests: self.tests.clone(),
             ..Default::default()
         }
+        .with_skill_code(self)
     }
 
     /// Validate identity, field contracts, effect policies and governance.
@@ -269,6 +276,20 @@ impl SkillSpec {
                         ));
                     }
                     _ => {}
+                }
+            }
+        }
+        if let Some(code) = &self.code {
+            for name in &code.functions {
+                if self.tools.iter().any(|t| {
+                    &t.tool.name == name && matches!(t.effect, TaskToolEffect::Commit { .. })
+                }) {
+                    errors.push(format!(
+                        "skill '{}' code: '{name}' is a commit, which waits for approval in \
+                         the application; a program cannot wait for it, so leave it out of \
+                         code.functions",
+                        self.name
+                    ));
                 }
             }
         }
@@ -467,6 +488,7 @@ impl SkillSpec {
                     .ok_or_else(|| format!("unknown receipt tool '{name}'"))?;
                 apply_result_state(declaration, result, state)
             })),
+            code: definition.compile_code_mode(resources.code_sandbox.clone()),
         })
     }
 

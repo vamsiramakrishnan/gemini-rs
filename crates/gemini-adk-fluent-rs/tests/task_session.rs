@@ -197,6 +197,82 @@ async fn a_late_result_and_speech_interruption_preserve_the_original_task() {
 }
 
 #[tokio::test]
+async fn a_skill_program_reads_through_its_task() {
+    let mut doc = serde_json::to_value(support_spec()).unwrap();
+    doc["skills"][0]["code"] = json!({});
+    let spec = SessionSpec::from_value(doc).unwrap();
+    let resources = SpecResources::default().implement(ContextTool::new(
+        "lookup",
+        "Controlled invoice lookup",
+        None,
+        |_args, ctx| async move {
+            Ok(json!({"invoice": ctx.state.get::<String>("invoice").unwrap(), "lines": [10.5, 20.25, 4.0]}))
+        },
+    ));
+    let live = spec
+        .apply(Live::builder(), &State::new(), &resources)
+        .unwrap();
+    let (transport, control) = ScriptedServer::new()
+        .calls(
+            "billing__run_code",
+            json!({"code": "r = lookup()\n{'invoice': r['invoice'], 'total': sum(r['lines'])}"}),
+        )
+        .into_transport();
+    let handle = live.connect_with_transport(transport).await.unwrap();
+    handle
+        .task_command(TaskCommand::Start {
+            skill: "billing".into(),
+            input: json!({"invoice": "INV-42"}),
+            parent: None,
+        })
+        .await
+        .unwrap();
+    control.release();
+    wait_for_operation(&handle, OperationStatus::Succeeded).await;
+    let snapshot = handle.task_snapshot().unwrap();
+    assert_eq!(snapshot.operations.len(), 1, "the program's one call");
+    assert_eq!(snapshot.operations[0].tool, "lookup");
+    assert_eq!(snapshot.operations[0].owner.task, TaskId("task-1".into()));
+    let frames: Vec<Value> = control
+        .outbound_frames()
+        .iter()
+        .map(|f| serde_json::from_slice(f).unwrap())
+        .collect();
+    let setup = frames.iter().find_map(|f| f.get("setup")).expect("setup");
+    let names: Vec<&str> = setup["tools"][0]["functionDeclarations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"billing__run_code"), "{names:?}");
+    let code = setup["tools"][0]["functionDeclarations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["name"] == "billing__run_code")
+        .unwrap();
+    let description = code["description"].as_str().unwrap();
+    assert!(description.contains("def lookup("), "{description}");
+    assert!(
+        !description.contains("def adjust("),
+        "the commit is left out"
+    );
+    let response = frames
+        .iter()
+        .filter_map(|f| f.pointer("/toolResponse/functionResponses"))
+        .filter_map(Value::as_array)
+        .flatten()
+        .find(|r| r["name"] == "billing__run_code")
+        .expect("the program's response");
+    assert_eq!(
+        response["response"],
+        json!({"result": {"invoice": "INV-42", "total": 34.75}})
+    );
+    handle.disconnect().await.unwrap();
+}
+
+#[tokio::test]
 async fn model_requests_cannot_approve_their_own_effects() {
     let live = support_spec()
         .apply(Live::builder(), &State::new(), &SpecResources::default())

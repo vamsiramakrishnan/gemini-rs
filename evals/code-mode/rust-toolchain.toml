@@ -1,4 +1,0 @@
-# Monty 1.1.0 declares 1.96 but uses standard library impls that 1.96 lacks;
-# 1.99 builds it.
-[toolchain]
-channel = "1.99"

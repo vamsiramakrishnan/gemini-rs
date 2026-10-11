@@ -5,12 +5,14 @@ edition = "2024"
 publish = false
 description = "Code execution against plain function calling on Gemini 3.8 Live"
 
-# Outside the workspace: Monty needs a newer toolchain than the workspace's
-# 1.93 floor (see rust-toolchain.toml and README.md).
+# Outside the workspace so it never runs in CI: every run opens live
+# sessions and needs GEMINI_API_KEY.
 [workspace]
 
 [dependencies]
 gemini-genai-rs = { path = "../../crates/gemini-genai-rs", features = ["live", "tls-native"] }
+gemini-adk-rs = { path = "../../crates/gemini-adk-rs" }
+gemini-adk-fluent-rs = { path = "../../crates/gemini-adk-fluent-rs" }
 monty = "=1.1.0"
 monty-types = "=1.1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

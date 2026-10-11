@@ -482,7 +482,7 @@ mod tests {
             vec!["verify_identity", "get_balance", "transfer", "run_code"]
         );
         let description = code_description(&tools).unwrap();
-        assert!(description.contains("For a single lookup, call the tool directly."));
+        assert!(description.contains("Call a tool directly only when its result"));
 
         let hidden = with_code(catalog(), &code.direct(false));
         assert_eq!(

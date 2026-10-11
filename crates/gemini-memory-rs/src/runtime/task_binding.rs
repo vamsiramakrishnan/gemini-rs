@@ -602,6 +602,7 @@ mod tests {
             tools: Vec::new(),
             tool_factory: Arc::new(|_| Ok(ToolDispatcher::new())),
             receipt_applier: None,
+            code: None,
             project_output: Some(Arc::new(|state| {
                 Ok(json!({"diet":state.get_raw("user:diet")}))
             })),

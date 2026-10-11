@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use gemini_genai_rs::prelude::{FunctionCallingBehavior, FunctionDeclaration, Tool};
 use serde_json::json;
 
+use crate::code_mode::CodeMode;
 use crate::tasks::{TaskCommand, TaskError, TaskRuntime, TaskToolEffect};
 
 pub(super) const CONTROL_TOOL: &str = "task_control";
@@ -19,6 +20,38 @@ const PARENT_ARG: &str = "parent_task";
 /// The typed entry point of `skill`.
 pub(super) fn start_tool(skill: &str) -> String {
     format!("{START_PREFIX}{skill}")
+}
+
+/// The qualified name of `skill`'s code tool, `{skill}__run_code`.
+pub(super) fn code_tool(skill: &str, code: &CodeMode) -> String {
+    format!("{skill}__{}", code.tool())
+}
+
+/// `skill`'s code tool declaration: the functions `offered` admits, by the
+/// skill's own tool names, since a program calls only that skill's tools.
+pub(super) fn code_declaration(
+    skill: &crate::tasks::SkillSummary,
+    code: &CodeMode,
+    offered: impl Fn(&str) -> bool,
+) -> Option<FunctionDeclaration> {
+    let locals = local_declarations(&skill.tools);
+    let mut declaration = code.declaration(&locals, offered)?;
+    declaration.name = code_tool(&skill.key.name, code);
+    declaration.description = format!("{}: {}", skill.key.name, declaration.description);
+    Some(declaration)
+}
+
+/// A skill's tools as function declarations under their local names.
+pub(super) fn local_declarations(tools: &[crate::tasks::TaskTool]) -> Vec<FunctionDeclaration> {
+    tools
+        .iter()
+        .map(|tool| FunctionDeclaration {
+            name: tool.name.clone(),
+            description: tool.description.clone(),
+            parameters: tool.parameters.clone(),
+            behavior: None,
+        })
+        .collect()
 }
 
 /// The tools every task session keeps declared: `task_control` and each
@@ -160,7 +193,17 @@ pub(super) fn declarations(runtime: &TaskRuntime) -> Vec<Tool> {
     }];
     declarations.extend(runtime.catalog().iter().map(start_declaration));
     for skill in runtime.catalog() {
-        declarations.extend(skill.tools.into_iter().map(|tool| {
+        let code = runtime.skill_code(&skill.key.name);
+        if let Some(code) = code
+            && let Some(declaration) = code_declaration(&skill, code, |_| true)
+        {
+            declarations.push(declaration);
+        }
+        let tools = skill
+            .tools
+            .into_iter()
+            .filter(|tool| code.is_none_or(|code| !code.hides(&tool.name)));
+        declarations.extend(tools.map(|tool| {
             let effect = match tool.effect {
                 TaskToolEffect::Read => "Read operation; wait for its result before answering.",
                 TaskToolEffect::Commit { .. } => "Calling this tool creates an approval proposal in the application. Call it when the requested action and arguments are clear, then ask the user to approve that proposal in the application. No external action executes until trusted approval. Spoken consent does not approve the proposal. Wait for a successful receipt before claiming success.",

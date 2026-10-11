@@ -59,7 +59,19 @@ impl TaskLane {
         };
         let mut names = task_tools::entry_names(runtime);
         if let Some((skill, tools)) = runtime.foreground_offer() {
-            names.extend(tools.iter().map(|tool| format!("{skill}__{tool}")));
+            let code = runtime.skill_code(&skill);
+            names.extend(
+                tools
+                    .iter()
+                    .filter(|tool| code.is_none_or(|code| !code.hides(tool)))
+                    .map(|tool| format!("{skill}__{tool}")),
+            );
+            // The skill's code tool, while a function it exposes is offered.
+            if let Some(code) = code
+                && tools.iter().any(|tool| code.exposes(tool))
+            {
+                names.insert(task_tools::code_tool(&skill, code));
+            }
         }
         // Withdrawing a tool whose call is still open would leave its
         // response answering a function the model no longer has.
@@ -231,6 +243,23 @@ impl TaskLane {
         completion_tx: &mpsc::WeakSender<ControlEvent>,
     ) {
         for call in calls {
+            // A program for the foreground skill's code tool runs here, each
+            // of its calls an invocation of the task.
+            if let Some(response) = Self::run_program(&call, runtime).await {
+                self.sync_context(runtime, writer).await;
+                if let Err(error) = writer
+                    .send_tool_response(vec![FunctionResponse {
+                        name: call.name,
+                        id: call.id,
+                        response,
+                        scheduling: Some(FunctionResponseScheduling::WhenIdle),
+                    }])
+                    .await
+                {
+                    tracing::warn!(%error, "program response delivery failed");
+                }
+                continue;
+            }
             let start = task_tools::start_command(&call.name, call.args.clone(), runtime);
             let is_control = call.name == task_tools::CONTROL_TOOL || start.is_some();
             let command = if let Some(start) = start {
@@ -339,6 +368,72 @@ impl TaskLane {
                 tracing::warn!(%error, "task response delivery failed");
             }
         }
+    }
+
+    /// Run `call` when it is the foreground skill's code tool: each call the
+    /// program makes is invoked on the task, admitted by its flow and
+    /// approvals, executed, and completed, so its receipt moves the task on
+    /// before the program reads the result. `None` for any other call.
+    async fn run_program(call: &FunctionCall, runtime: &mut TaskRuntime) -> Option<Value> {
+        let (skill, task) = {
+            let snapshot = runtime.snapshot();
+            let id = snapshot.foreground.clone()?;
+            let task = snapshot.tasks.iter().find(|t| t.id == id)?;
+            (task.skill.name.clone(), id)
+        };
+        let code = runtime.skill_code(&skill)?.clone();
+        if call.name != task_tools::code_tool(&skill, &code) {
+            return None;
+        }
+        let Some(source) = call.args.get("code").and_then(Value::as_str) else {
+            return Some(json!({"error": "needs `code`: the Python program to run"}));
+        };
+        let tools = runtime
+            .catalog()
+            .into_iter()
+            .find(|s| s.key.name == skill)
+            .map(|s| s.tools)
+            .unwrap_or_default();
+        let catalog = task_tools::local_declarations(&tools);
+        let started = std::time::Instant::now();
+        let wall = code.limit().wall;
+        let mut program = code.start(source, &catalog).await;
+        while let Some((tool, args)) = program
+            .call()
+            .map(|(name, args)| (name.to_string(), args.clone()))
+        {
+            if started.elapsed() > wall {
+                program.abort(format!(
+                    "The program ran past its time limit of {} s, its calls included.",
+                    wall.as_secs()
+                ));
+                break;
+            }
+            let command = TaskCommand::Invoke {
+                task: task.clone(),
+                tool,
+                args,
+                idempotency_key: None,
+            };
+            let answer = match runtime.command(command) {
+                Err(error) => Err(error.to_string()),
+                Ok(Some(invocation)) => {
+                    let completion = invocation.execute().await;
+                    runtime.complete(completion).result
+                }
+                Ok(None) => Err(
+                    "This call waits for approval in the application and has not run.".to_string(),
+                ),
+            };
+            program.answer(answer).await;
+        }
+        tracing::info!(
+            tool = %call.name,
+            calls = program.calls().len(),
+            duration_ms = started.elapsed().as_millis() as u64,
+            "program ran"
+        );
+        program.response()
     }
 
     pub(super) async fn complete(
@@ -538,7 +633,7 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<Sent>>);
+    struct Recorder(Mutex<Vec<Sent>>, Mutex<Vec<Value>>);
 
     impl Recorder {
         fn take(&self) -> Vec<Sent> {
@@ -559,6 +654,9 @@ mod tests {
             responses: Vec<FunctionResponse>,
         ) -> Result<(), SessionError> {
             let mut sent = self.0.lock();
+            self.1
+                .lock()
+                .extend(responses.iter().map(|r| r.response.clone()));
             sent.extend(responses.into_iter().map(|r| Sent::Response(r.name)));
             Ok(())
         }
@@ -624,7 +722,10 @@ mod tests {
 
     impl Harness {
         fn new(scoped: bool) -> Self {
-            let runtime = two_skill_runtime();
+            Self::with_runtime(scoped, two_skill_runtime())
+        }
+
+        fn with_runtime(scoped: bool, runtime: TaskRuntime) -> Self {
             let scope = scoped.then(|| {
                 Arc::new(ToolScope::new(
                     task_tools::declarations(&runtime),
@@ -867,6 +968,69 @@ mod tests {
         assert!(
             sent.iter()
                 .any(|s| matches!(s, Sent::Context(text) if text.contains("You handle billing.")))
+        );
+    }
+
+    /// The two skills, billing with a code tool over `verify` and `pay`
+    /// that is its only way to reach them.
+    fn billing_with_code() -> TaskRuntime {
+        let mut runtime = two_skill_runtime();
+        runtime.set_skill_code(
+            "billing",
+            crate::code_mode::CodeMode::new()
+                .functions(["verify", "pay"])
+                .direct(false),
+        );
+        runtime
+    }
+
+    #[tokio::test]
+    async fn a_skill_program_runs_its_calls_as_governed_invocations() {
+        let mut h = Harness::with_runtime(true, billing_with_code());
+        h.call("task_control", json!({"action":"start","skill":"billing"}))
+            .await;
+        let declared: Vec<_> = h
+            .writer
+            .take()
+            .into_iter()
+            .filter_map(|s| match s {
+                Sent::Update { tools: Some(t), .. } => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            declared.last().unwrap(),
+            &tools(&[
+                "task_control",
+                "start_billing",
+                "start_faq",
+                "billing__run_code"
+            ]),
+            "the code tool stands in for the functions it hides"
+        );
+
+        // Paying before verifying is refused by the skill's flow; verifying
+        // moves it on within the same program.
+        h.call(
+            "billing__run_code",
+            json!({"code": "try:\n    pay()\n    early = 'paid'\nexcept RuntimeError as e:\n    early = 'refused'\nverify()\n[early, pay()]"}),
+        )
+        .await;
+        let response = h.writer.1.lock().last().cloned().unwrap();
+        assert_eq!(response, json!({"result": ["refused", {"ok": true}]}));
+        let snapshot = h.runtime.snapshot();
+        let ops: Vec<_> = snapshot
+            .operations
+            .iter()
+            .map(|op| (op.tool.clone(), format!("{:?}", op.status)))
+            .collect();
+        assert_eq!(
+            ops,
+            [
+                ("verify".to_string(), "Succeeded".to_string()),
+                ("pay".to_string(), "Succeeded".to_string())
+            ],
+            "the refused call never became an operation"
         );
     }
 }

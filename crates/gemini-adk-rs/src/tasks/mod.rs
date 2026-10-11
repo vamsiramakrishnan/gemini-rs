@@ -69,6 +69,7 @@ pub(crate) fn two_skill_runtime() -> TaskRuntime {
                 })
                 .collect(),
             receipt_applier: None,
+            code: None,
             project_output: None,
         }
     }

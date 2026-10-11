@@ -228,6 +228,28 @@ impl SessionSpec {
     }
 }
 
+impl SessionSpec {
+    /// A skill's definition with the skill's `code`, its functions filled in
+    /// when unset: the skill's read tools that are not commits.
+    pub(super) fn with_skill_code(mut self, skill: &super::SkillSpec) -> Self {
+        let Some(mut code) = skill.code.clone() else {
+            return self;
+        };
+        if code.functions.is_empty() {
+            let commits = self.commit_tools();
+            code.functions = skill
+                .tools
+                .iter()
+                .filter(|t| matches!(t.effect, gemini_adk_rs::tasks::TaskToolEffect::Read))
+                .map(|t| t.tool.name.clone())
+                .filter(|name| !commits.contains(name))
+                .collect();
+        }
+        self.code = Some(code);
+        self
+    }
+}
+
 impl ToolSpec {
     /// What the tool returns, as a program's docstring shows it: from
     /// `returns`, or the shape of the canned `response` of a mock tool.

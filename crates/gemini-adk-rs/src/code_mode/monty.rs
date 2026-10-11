@@ -79,7 +79,10 @@ fn run(
     stops: &UnboundedSender<Suspension>,
     answers: &mpsc::Receiver<Result<Value, String>>,
 ) {
-    let cap = Some(limits.output_chars);
+    // Monty raises MemoryError past the print cap, which would end a program
+    // that only printed too much; collect with headroom and let the response
+    // cut what the model reads.
+    let cap = Some(limits.output_chars.saturating_mul(16).max(1 << 16));
     let mut printed = String::new();
     let finish = |result: Result<Value, String>, printed: String| {
         let _ = stops.send(Suspension::Finished { result, printed });

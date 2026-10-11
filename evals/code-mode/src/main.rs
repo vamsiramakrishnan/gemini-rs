@@ -29,6 +29,8 @@ use gemini_genai_rs::protocol::{
 };
 use gemini_genai_rs::session::SessionCommand;
 use gemini_genai_rs::transport::{Codec, JsonCodec, Transport, TungsteniteTransport};
+mod sdk;
+
 use monty::{MontyRun, RunProgress};
 use monty_types::{
     CompileOptions, ExcType, MontyException, MontyObject, ObjectRef, PrintWriter,
@@ -928,29 +930,35 @@ async fn run_task(base: &SessionConfig, arm: Arm, task: &Task) -> Value {
 async fn main() {
     let mut runs = 3usize;
     let mut arms = vec![Arm::Tools, Arm::Server, Arm::Code];
+    let mut sdk_arms: Vec<sdk::SdkArm> = Vec::new();
     let mut only: Option<Vec<String>> = None;
     let mut json_path = None;
     let mut model = ModelId::LIVE_3_8;
+    let mut model_name = "models/gemini-3.8-live".to_string();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--runs" => runs = args.next().unwrap().parse().unwrap(),
             "--arms" => {
-                arms = args
-                    .next()
-                    .unwrap()
-                    .split(',')
-                    .map(|a| match a {
-                        "tools" => Arm::Tools,
-                        "server" => Arm::Server,
-                        "code" => Arm::Code,
+                arms.clear();
+                for a in args.next().unwrap().split(',') {
+                    match a {
+                        "tools" => arms.push(Arm::Tools),
+                        "server" => arms.push(Arm::Server),
+                        "code" => arms.push(Arm::Code),
+                        "sdk-tools" => sdk_arms.push(sdk::SdkArm::Tools),
+                        "sdk-code" => sdk_arms.push(sdk::SdkArm::Code),
+                        "sdk-hybrid" => sdk_arms.push(sdk::SdkArm::Hybrid),
                         other => panic!("unknown arm {other}"),
-                    })
-                    .collect()
+                    }
+                }
             }
             "--tasks" => only = Some(args.next().unwrap().split(',').map(str::to_string).collect()),
             "--json" => json_path = args.next(),
-            "--model" => model = ModelId::qualified(args.next().unwrap()),
+            "--model" => {
+                model_name = args.next().unwrap();
+                model = ModelId::qualified(model_name.clone());
+            }
             other => panic!("unknown argument {other}"),
         }
     }
@@ -985,6 +993,22 @@ async fn main() {
                 );
                 results.push(r);
             }
+        }
+        for &arm in &sdk_arms {
+            for run in 0..runs {
+                let r = sdk::run_task_sdk(&model_name, arm, task).await;
+                println!(
+                    "{:<18} {:<10} #{run} ok={:<5} ms={:<6} trips={} code={} errs={} tokens={} refusals={} unbacked={} | {}",
+                    task.id, arm.name(), r["ok"], r["ms"], r["round_trips"], r["code_blocks"], r["code_errors"], r["max_prompt_tokens"], r["refusals"], r["unbacked_claims"], r["why"]
+                );
+                if let Some(e) = r.get("error") {
+                    println!("  error: {e}");
+                }
+                results.push(r);
+            }
+        }
+        if let Some(path) = &json_path {
+            std::fs::write(path, serde_json::to_string_pretty(&results).unwrap()).unwrap();
         }
     }
     if let Some(path) = json_path {

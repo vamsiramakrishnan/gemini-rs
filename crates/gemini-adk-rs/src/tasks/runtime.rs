@@ -179,6 +179,25 @@ impl TaskRuntime {
                     )));
                 }
             }
+            if let Some(code) = &skill.code {
+                if let Some(missing) = code
+                    .function_list()
+                    .iter()
+                    .find(|f| !skill.tools.iter().any(|t| t.name == f.name))
+                {
+                    return Err(err(format!(
+                        "skill '{}' code tool exposes '{}', which is not one of its tools",
+                        skill.name, missing.name
+                    )));
+                }
+                if skill.tools.iter().any(|t| t.name == code.tool()) {
+                    return Err(err(format!(
+                        "skill '{}' code tool '{}' is also one of its tools",
+                        skill.name,
+                        code.tool()
+                    )));
+                }
+            }
             let name = skill.name.clone();
             if catalog.insert(name.clone(), Arc::new(skill)).is_some() {
                 return Err(err(format!("duplicate installed skill '{name}'")));
@@ -951,6 +970,19 @@ impl TaskRuntime {
             "Task {} / skill {}@{} / revision {}\n{}",
             task.id.0, task.skill.name, task.skill.version, task.revision, task.skill.instruction
         ))
+    }
+
+    /// Give the installed skill `name` a code tool, for tests.
+    #[cfg(test)]
+    pub(crate) fn set_skill_code(&mut self, name: &str, code: crate::code_mode::CodeMode) {
+        if let Some(skill) = self.skills.get_mut(name) {
+            Arc::make_mut(skill).code = Some(code);
+        }
+    }
+
+    /// The code tool of the skill `name`, if it has one.
+    pub fn skill_code(&self, name: &str) -> Option<&crate::code_mode::CodeMode> {
+        self.skills.get(name)?.code.as_ref()
     }
 
     /// The foreground task's skill and the tools it offers the model now:

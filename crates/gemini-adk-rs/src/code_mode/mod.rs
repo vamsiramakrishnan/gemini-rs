@@ -297,24 +297,28 @@ impl CodeMode {
             return None;
         }
         let when = if self.direct {
-            "Use it when an answer needs several calls, or arithmetic, dates, \
-             sorting or counting over what they return. For a single lookup, \
-             call the tool directly."
+            "Use it whenever the answer needs arithmetic, dates, counting, sorting \
+             or comparing over what a function returns, or several calls: call \
+             the function inside the program rather than calling the tool first \
+             and copying its result in. Call a tool directly only when its result \
+             is the answer as it stands."
         } else {
-            "Use it to call these functions, and to work out arithmetic, dates, \
-             sorting or counting over what they return."
+            "Use it to call the functions below and to work out arithmetic, \
+             dates, counting or sorting over what they return."
         };
         Some(FunctionDeclaration {
             name: self.tool.clone(),
             description: format!(
                 "Run a short Python program and get back the value of its last \
-                 expression, and anything it prints. {when} The functions below \
-                 are already defined: call them directly, never import, define \
-                 or mock them. A call the conversation does not allow yet \
-                 raises RuntimeError with the reason; tell the caller what is \
-                 needed instead of retrying. End the program with an expression \
-                 holding only what you need to answer. The program can import \
-                 datetime, math, json and re.\n\n{}",
+                 expression, and anything it prints. {when} Do the whole request \
+                 in one program. Each function's docstring says what it returns: \
+                 rely on it rather than printing results to look at them. End the \
+                 program with an expression holding only the values you need to \
+                 answer. The functions are already defined: call them directly; \
+                 never import, define or mock them. A call the conversation does \
+                 not allow yet raises RuntimeError with the reason: tell the \
+                 caller what is needed instead of retrying. The program can \
+                 import datetime, math, json and re.\n\n{}",
                 stubs.join("\n")
             ),
             parameters: Some(json!({
@@ -377,7 +381,7 @@ fn truncate(text: &str, limit: usize) -> String {
         return text.to_string();
     }
     let mut cut: String = text.chars().take(limit).collect();
-    cut.push_str(" [cut]");
+    cut.push_str(&format!(" [cut at {limit} characters]"));
     cut
 }
 

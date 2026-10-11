@@ -2676,6 +2676,17 @@
     "SkillSpec": {
       "description": "A versioned capability installed in one speaking session.",
       "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CodeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A code tool for this skill, declared as `{skill}__run_code` while the skill is foreground: a program whose functions are the skill's tools by their local names. Without `functions`, every read tool that the skill's flow does not guard as a commit."
+        },
         "computed": {
           "description": "Derived task state, evaluated in dependency order.",
           "items": {
