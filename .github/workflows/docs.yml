@@ -65,7 +65,7 @@ jobs:
       # ── The rustdoc API reference ───────────────────────────────────────────
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.93.1"
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@v2
       # `--all-features`: the deployed reference is the one place a
       # feature-gated module (`vad`, `otel`, `vertex-ai-sessions`, `dsp`,

@@ -258,16 +258,15 @@ impl SkillSpec {
                     crate::policy::Policy::Redact { .. } => {
                         errors.push("task skills do not yet provide redaction across input steering, approvals and results; redact policies are unsupported".into());
                     }
-                    crate::policy::Policy::Commit { tool, .. } => {
+                    crate::policy::Policy::Commit { tool, .. }
                         if !self.tools.iter().any(|t| {
                             t.tool.name == *tool
                                 && matches!(t.effect, TaskToolEffect::Commit { .. })
-                        }) {
+                        }) => {
                             errors.push(format!(
                                 "commit policy '{tool}' needs a commit effect declaration"
                             ));
                         }
-                    }
                     _ => {}
                 }
             }

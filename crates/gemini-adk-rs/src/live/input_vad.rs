@@ -76,7 +76,7 @@ impl BackendInputVad {
     /// Process arbitrary little-endian PCM16 bytes and return speech edge events.
     pub fn process_pcm_bytes(&mut self, bytes: &[u8]) -> Vec<VadEvent> {
         self.pending_samples
-            .extend(bytes.chunks_exact(2).map(|pair| {
+            .extend(bytes.as_chunks::<2>().0.iter().map(|pair| {
                 let raw = [pair[0], pair[1]];
                 i16::from_le_bytes(raw)
             }));

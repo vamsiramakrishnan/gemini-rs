@@ -47,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `FlowStack::gate_scope` takes the session state, to find the
   steps a called tool would open.
 
+### Changed
+
+- **Breaking: the minimum Rust is 1.99** (was 1.93), and the checked-in
+  toolchain pins 1.99.0. Code mode runs programs in Monty, which needs it.
+  `SipError::Sip` now boxes the SIP stack's error.
+
 ### Fixed
 
 - **Code execution no longer ends a Live session at setup.** Gemini 3.8 Live,

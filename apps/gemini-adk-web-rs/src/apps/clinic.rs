@@ -743,11 +743,10 @@ impl DemoApp for Clinic {
                                                 state.set("is_new_patient", true);
                                             }
                                         }
-                                        "reschedule_appointment" | "cancel_appointment" => {
-                                            if r.response.get("status").is_some() {
+                                        "reschedule_appointment" | "cancel_appointment"
+                                            if r.response.get("status").is_some() => {
                                                 state.set("appointment_booked", true);
                                             }
-                                        }
                                         _ => {}
                                     }
                                 })

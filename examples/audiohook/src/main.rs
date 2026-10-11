@@ -246,7 +246,7 @@ fn filler_config() -> Option<bridge::FillerConfig> {
     match std::fs::read(&path) {
         Ok(bytes) => {
             let clip: Vec<i16> = bytes
-                .chunks_exact(2)
+                .as_chunks::<2>().0.iter()
                 .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
                 .collect();
             info!(

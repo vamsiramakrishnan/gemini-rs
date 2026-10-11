@@ -134,13 +134,12 @@ impl ToolFunction for AgentTool {
                 AgentEvent::Session(SessionEvent::TextDelta(text)) => {
                     output_parts.push(text);
                 }
-                AgentEvent::Session(SessionEvent::TextComplete(text)) => {
-                    if output_parts.is_empty() {
+                AgentEvent::Session(SessionEvent::TextComplete(text))
+                    if output_parts.is_empty() => {
                         output_parts.push(text);
                     }
                     // If we already have deltas, TextComplete is the full assembled text
                     // Don't double-count — deltas already captured incrementally
-                }
                 _ => {}
             }
         }

@@ -39,7 +39,7 @@ exclude = [
 [workspace.package]
 version = "4.0.0"
 edition = "2024"
-rust-version = "1.93"
+rust-version = "1.99"
 license = "MIT"
 repository = "https://github.com/vamsiramakrishnan/gemini-rs"
 

@@ -464,11 +464,11 @@ impl SessionTelemetry {
 
         let turn_count = self.turn_duration_count.load(Relaxed);
         let turn_complete_count = self.turn_complete_count.load(Relaxed);
-        let avg_turn_ms = if turn_count > 0 {
-            self.turn_duration_sum_ns.load(Relaxed) / turn_count / 1_000_000
-        } else {
-            0
-        };
+        let avg_turn_ms = self
+            .turn_duration_sum_ns
+            .load(Relaxed)
+            .checked_div(turn_count)
+            .map_or(0, |ns| ns / 1_000_000);
 
         // Audio throughput (KB/s over session lifetime)
         let throughput_kbps = if elapsed_secs > 0.0 {

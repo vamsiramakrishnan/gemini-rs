@@ -120,7 +120,7 @@ pub async fn speak(text: &str, voice: &str) -> Option<Vec<u8>> {
 /// that had nothing to do with the system under test.
 pub fn resample_24k_to_16k(input: &[u8]) -> Vec<u8> {
     let samples: Vec<i16> = input
-        .chunks_exact(2)
+        .as_chunks::<2>().0.iter()
         .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
         .collect();
     if samples.is_empty() {
@@ -237,7 +237,7 @@ mod tests {
         let samples: Vec<u8> = (0..3_000i16).flat_map(|i| (i * 10).to_le_bytes()).collect();
         let output = resample_24k_to_16k(&samples);
         let values: Vec<i16> = output
-            .chunks_exact(2)
+            .as_chunks::<2>().0.iter()
             .map(|p| i16::from_le_bytes([p[0], p[1]]))
             .collect();
         assert!(
