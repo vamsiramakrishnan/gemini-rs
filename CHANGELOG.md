@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [steering modes](docs/user-guide/steering-modes.md#what-a-flow-offers).
 - **Breaking:** `FlowStack::gate_scope` takes the session state, to find the
   steps a called tool would open.
+- `Client::base_url` and `GeminiLlmParams.base_url` send REST requests to
+  another host (a gateway, a proxy or a local stand-in), keeping the path and
+  credentials, as google-genai's `http_options.base_url` does. **Breaking:**
+  a `GeminiLlmParams` literal without `..Default::default()` needs the new
+  field.
 
 ### Changed
 

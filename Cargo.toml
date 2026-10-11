@@ -31,6 +31,8 @@ exclude = [
     "evals/turnbench/predictor",
     # Needs a newer toolchain than the workspace (see its rust-toolchain.toml).
     "evals/code-mode",
+    # A load harness with its own lockfile; it never runs in CI.
+    "evals/python-vs-rust",
     # The Python binding crate links libpython and is built by maturin, not
     # `cargo build --workspace`; keep it out of the workspace graph/CI gates.
     "crates/gemini-adk-py",

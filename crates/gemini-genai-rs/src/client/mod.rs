@@ -42,6 +42,8 @@ pub struct Client {
     endpoint: ApiEndpoint,
     model: ModelId,
     auth: Arc<dyn RestAuth>,
+    /// Scheme, host and port that replace the platform's in REST URLs.
+    base_url: Option<String>,
     #[cfg(feature = "http")]
     http: http::HttpClient,
 }
@@ -56,6 +58,7 @@ impl Client {
             endpoint,
             model: ModelId::FLASH_LATEST,
             auth,
+            base_url: None,
             #[cfg(feature = "http")]
             http: http::HttpClient::new(http::HttpConfig::default()),
         }
@@ -70,6 +73,7 @@ impl Client {
             endpoint,
             model: ModelId::FLASH_LATEST,
             auth,
+            base_url: None,
             #[cfg(feature = "http")]
             http: http::HttpClient::new(http::HttpConfig::default()),
         }
@@ -90,6 +94,7 @@ impl Client {
             endpoint,
             model: ModelId::FLASH_LATEST,
             auth,
+            base_url: None,
             #[cfg(feature = "http")]
             http: http::HttpClient::new(http::HttpConfig::default()),
         }
@@ -125,6 +130,7 @@ impl Client {
             endpoint,
             model: ModelId::FLASH_LATEST,
             auth,
+            base_url: None,
             #[cfg(feature = "http")]
             http: http::HttpClient::new(http::HttpConfig::default()),
         }
@@ -133,6 +139,25 @@ impl Client {
     /// Set the default model for all API calls.
     pub fn model(mut self, model: impl Into<ModelId>) -> Self {
         self.model = model.into();
+        self
+    }
+
+    /// Send REST requests to `base_url` instead of the platform's host.
+    ///
+    /// The path, API version and credentials stay as they are; only the
+    /// scheme, host and port change. Use it for a gateway, a proxy or a local
+    /// stand-in, as google-genai's `http_options.base_url` does. Live
+    /// sessions are not affected.
+    ///
+    /// ```
+    /// use gemini_genai_rs::{Client, prelude::ServiceEndpoint};
+    ///
+    /// let client = Client::from_api_key("key").base_url("http://127.0.0.1:8080");
+    /// let url = client.rest_url(ServiceEndpoint::GenerateContent);
+    /// assert!(url.starts_with("http://127.0.0.1:8080/v1beta/models/"));
+    /// ```
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = Some(base_url.into().trim_end_matches('/').to_string());
         self
     }
 
@@ -155,12 +180,25 @@ impl Client {
 
     /// Build the REST URL for a given service endpoint, using the default model.
     pub fn rest_url(&self, endpoint: ServiceEndpoint) -> String {
-        self.auth.rest_url(endpoint, Some(&self.model))
+        self.rebase(self.auth.rest_url(endpoint, Some(&self.model)))
     }
 
     /// Build the REST URL for a given service endpoint with a specific model.
     pub fn rest_url_for(&self, endpoint: ServiceEndpoint, model: &ModelId) -> String {
-        self.auth.rest_url(endpoint, Some(model))
+        self.rebase(self.auth.rest_url(endpoint, Some(model)))
+    }
+
+    /// `url` on [`Client::base_url`]'s host, when one is set.
+    fn rebase(&self, url: String) -> String {
+        let Some(base) = &self.base_url else {
+            return url;
+        };
+        // Everything after `scheme://host[:port]` is kept.
+        let path = url
+            .split_once("://")
+            .and_then(|(_, rest)| rest.find('/').map(|i| &rest[i..]))
+            .unwrap_or("");
+        format!("{base}{path}")
     }
 
     /// Get auth headers for REST API calls.
@@ -244,6 +282,26 @@ mod tests {
         let url = client.rest_url(ServiceEndpoint::GenerateContent);
         assert!(url.contains("us-east1-aiplatform.googleapis.com"));
         assert!(url.contains(":generateContent"));
+    }
+
+    #[test]
+    fn base_url_replaces_only_the_host() {
+        let model = ModelId::from_static("gemini-3.5-flash-lite");
+        let google = Client::from_api_key("my-key").base_url("http://127.0.0.1:8766/");
+        assert_eq!(
+            google.rest_url_for(ServiceEndpoint::GenerateContent, &model),
+            "http://127.0.0.1:8766/v1beta/models/gemini-3.5-flash-lite:generateContent"
+        );
+        let vertex = Client::from_vertex("proj", "us-east1", "tok").base_url("https://gw.example");
+        let url = vertex.rest_url_for(ServiceEndpoint::GenerateContent, &model);
+        assert!(
+            url.starts_with("https://gw.example/v1beta1/projects/proj/locations/us-east1/"),
+            "{url}"
+        );
+        // Unset, the platform's host stays.
+        let plain =
+            Client::from_api_key("k").rest_url_for(ServiceEndpoint::GenerateContent, &model);
+        assert!(plain.starts_with("https://generativelanguage.googleapis.com/v1beta/"));
     }
 
     #[test]
