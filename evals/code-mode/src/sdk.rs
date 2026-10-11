@@ -60,6 +60,9 @@ struct Seen {
     errors: Vec<String>,
     /// Whether the model has said anything since its last call.
     spoke_since_calls: bool,
+    /// Whether a turn has completed since the model last spoke or called:
+    /// the server reports a turn's usage with its `turnComplete`.
+    completed_since_output: bool,
 }
 
 /// Wait until a turn has completed since `turns`, the model has spoken
@@ -74,7 +77,9 @@ async fn settle(seen: &Mutex<Seen>, turns: usize) {
             .last_event
             .is_some_and(|t| t.elapsed() > Duration::from_millis(2500));
         let reacted = s.round_trips == 0 || s.spoke_since_calls;
-        if (s.turns > turns && quiet && reacted) || Instant::now() > deadline {
+        if (s.turns > turns && quiet && reacted && s.completed_since_output)
+            || Instant::now() > deadline
+        {
             return;
         }
     }
@@ -151,11 +156,13 @@ pub async fn run_task_sdk(model: &str, arm: SdkArm, task: &Task) -> Value {
                         s.first_output.get_or_insert(now);
                         s.text.push_str(&t);
                         s.spoke_since_calls = true;
+                        s.completed_since_output = false;
                     }
                     SessionEvent::ToolCall(calls) => {
                         s.first_output.get_or_insert(now);
                         s.round_trips += 1;
                         s.spoke_since_calls = false;
+                        s.completed_since_output = false;
                         for call in calls {
                             if call.name == "run_code" {
                                 s.programs.push(
@@ -169,7 +176,10 @@ pub async fn run_task_sdk(model: &str, arm: SdkArm, task: &Task) -> Value {
                         let prompt = usage.prompt_token_count.unwrap_or(0);
                         s.prompt_tokens = s.prompt_tokens.max(prompt);
                     }
-                    SessionEvent::TurnComplete => s.turns += 1,
+                    SessionEvent::TurnComplete => {
+                        s.turns += 1;
+                        s.completed_since_output = true;
+                    }
                     _ => {}
                 }
             }

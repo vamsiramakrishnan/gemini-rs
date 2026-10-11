@@ -973,7 +973,7 @@ impl TaskRuntime {
     }
 
     /// Give the installed skill `name` a code tool, for tests.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "code-mode"))]
     pub(crate) fn set_skill_code(&mut self, name: &str, code: crate::code_mode::CodeMode) {
         if let Some(skill) = self.skills.get_mut(name) {
             Arc::make_mut(skill).code = Some(code);

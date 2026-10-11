@@ -971,6 +971,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "code-mode")]
     /// The two skills, billing with a code tool over `verify` and `pay`
     /// that is its only way to reach them.
     fn billing_with_code() -> TaskRuntime {
@@ -984,6 +985,7 @@ mod tests {
         runtime
     }
 
+    #[cfg(feature = "code-mode")]
     #[tokio::test]
     async fn a_skill_program_runs_its_calls_as_governed_invocations() {
         let mut h = Harness::with_runtime(true, billing_with_code());

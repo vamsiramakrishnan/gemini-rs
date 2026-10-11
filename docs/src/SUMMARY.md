@@ -33,6 +33,7 @@
 # Tools & Extraction
 
 - [Tool System](./user-guide/tools.md)
+- [Code Mode: Programs over Your Tools](./user-guide/code-mode.md)
 - [Per-Tool Policies](./user-guide/tool-policies.md)
 - [Model Context Protocol (MCP) Tools](./user-guide/mcp-tools.md)
 - [Extraction Pipeline](./user-guide/extraction.md)

@@ -22,6 +22,7 @@ names. This page is the part you need to write a voice agent.
 | `tools` | Declared tools: what the model sees. See [Tools](#tools) |
 | `extract` | Out-of-band extractors that fill state from what the caller says |
 | `decisions` | Questions a decision model (Jev on Vercel AI Gateway) answers about the conversation, named by `decided` guards: confirmations, intents, picks among offered options, stage routing. See [Decisions](#decisions) |
+| `code` | `{}` gives the model `run_code`: a short Python program whose functions are the declared tools, each call governed like a direct one. Use it when the agent must add up, count or compare over many rows (a payment history), work out dates, or chain reads. It leaves commits out by default. Give such tools a `returns` schema so programs read the right keys. A skill can have its own `code` |
 | `conversation` | The stages, digressions and policies |
 | `scenarios` | Offline tests; see scenarios.md |
 

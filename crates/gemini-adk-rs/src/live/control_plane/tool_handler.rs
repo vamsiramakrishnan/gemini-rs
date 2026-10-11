@@ -762,6 +762,7 @@ mod tests {
     use gemini_genai_rs::session::SessionError;
     use serde_json::json;
 
+    #[cfg(feature = "code-mode")]
     use crate::code_mode::CodeMode;
     use crate::flow::{Enforcement, Flow, FlowMonitor, Guard};
     use crate::live::background_tool::ToolExecutionMode;
@@ -1831,6 +1832,7 @@ mod tests {
 
     // ── Code mode ────────────────────────────────────────────────────────────
 
+    #[cfg(feature = "code-mode")]
     /// A teller's tools: `verify_identity`, then `lookup_payments` (three
     /// payments), and `transfer`, which no program may call. Each run is
     /// recorded by name.
@@ -1866,6 +1868,7 @@ mod tests {
         dispatcher
     }
 
+    #[cfg(feature = "code-mode")]
     /// Verify first, then look up payments.
     fn teller_flow() -> crate::flow::SharedFlowStack {
         let flow = Flow::new()
@@ -1883,12 +1886,14 @@ mod tests {
             .into_shared()
     }
 
+    #[cfg(feature = "code-mode")]
     struct Outcome {
         responses: Vec<FunctionResponse>,
         executions: Vec<(String, serde_json::Value)>,
         cancelled: Vec<String>,
     }
 
+    #[cfg(feature = "code-mode")]
     async fn run_code(
         program: &str,
         code: CodeMode,
@@ -1942,6 +1947,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "code-mode")]
     #[tokio::test]
     async fn a_program_calls_tools_down_the_governed_path() {
         // The program tries the history before verifying: the flow refuses
@@ -1981,6 +1987,7 @@ mod tests {
         assert!(ran.executions[0].1.get("error").is_some());
     }
 
+    #[cfg(feature = "code-mode")]
     #[tokio::test]
     async fn a_program_cannot_call_a_tool_it_does_not_expose() {
         let runs = Arc::new(parking_lot::Mutex::new(Vec::new()));
@@ -1999,6 +2006,7 @@ mod tests {
         assert!(error.contains("NameError"), "{error}");
     }
 
+    #[cfg(feature = "code-mode")]
     #[tokio::test]
     async fn a_barge_in_cancels_the_program_without_a_response() {
         let runs = Arc::new(parking_lot::Mutex::new(Vec::new()));
@@ -2020,6 +2028,7 @@ mod tests {
         assert_eq!(ran.cancelled, ["p1"]);
     }
 
+    #[cfg(feature = "code-mode")]
     #[tokio::test]
     async fn a_program_over_its_call_limit_ends_with_the_reason() {
         let runs = Arc::new(parking_lot::Mutex::new(Vec::new()));
@@ -2043,6 +2052,7 @@ mod tests {
         assert!(error.contains("more than 3 function calls"), "{error}");
     }
 
+    #[cfg(feature = "code-mode")]
     #[tokio::test]
     async fn a_large_result_is_refused_with_a_note_to_return_less() {
         let runs = Arc::new(parking_lot::Mutex::new(Vec::new()));

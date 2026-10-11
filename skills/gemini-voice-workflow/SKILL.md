@@ -171,6 +171,11 @@ avoids it.
 - **Models claim success they didn't get.** In live runs the model said
   "your table is booked" right after its booking call was refused. Have the
   commit stage say to report the result only after the tool returns.
+- **Models add up badly over long results.** Over 120 payment rows Gemini
+  3.8 Live gave a wrong total in 3 of 5 runs, said as confidently as the right
+  ones. When the agent must sum, count or compare over a tool's rows, add
+  `"code": {}` so it computes in a program, and give the tool a `returns`
+  schema.
 - **Every extractor is a model call the turn waits for.** A tool call that
   arrives meanwhile waits too, and on a phone line seconds of silence sound
   like a dead line. Keep extractors few (one for slots, one for signals).

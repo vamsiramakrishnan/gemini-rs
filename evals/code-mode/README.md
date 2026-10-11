@@ -12,6 +12,17 @@ latency, time to the first action, round trips and prompt tokens.
 | `server` | The same, plus Gemini's own `codeExecution`. Every Live model tried refuses it at setup (1007) |
 | `code` | One tool, `run_code(code)`: Python that calls the five tools as functions, run in-process by [Monty](https://crates.io/crates/monty), pausing at each call so the host runs it through the same tools and the same commit gate |
 
+The `sdk-*` arms run the same tasks through the SDK as shipped: a `Live`
+session with the five tools registered, the booking gated by a governed flow
+(`never(book_table).until(confirmed)`, the caller's yes set as state from the
+line that gives it), and [code mode](../../docs/user-guide/code-mode.md):
+
+| Arm | What the model gets |
+|---|---|
+| `sdk-tools` | The five tools |
+| `sdk-code` | `run_code` over the four reads (`direct(false)`), and `book_table` as a direct call |
+| `sdk-hybrid` | `run_code` beside all five tools: the SDK default |
+
 The tasks (ground truth is computed, not hand-written) cover dates to work
 out, fan-out over days, aggregation over 6, 22 and 120 rows, a dependent
 chain, and bookings that must wait for the caller's yes.
@@ -25,8 +36,8 @@ little slower to its first action.
 
 ## Run it
 
-Outside the workspace: Monty needs a newer toolchain than the workspace's
-(`rust-toolchain.toml` pins 1.99, which `rustup` installs on first build).
+Outside the workspace, so that it never runs in CI: every run opens live
+sessions.
 
 ```text
 cd evals/code-mode
@@ -37,7 +48,7 @@ python3 summarize.py results.json
 | Flag | Default | Meaning |
 |---|---|---|
 | `--runs N` | `3` | Runs per task and arm |
-| `--arms` | `tools,server,code` | Which arms |
+| `--arms` | `tools,server,code` | Which arms, `sdk-tools`, `sdk-code` and `sdk-hybrid` included |
 | `--tasks` | all | Task id prefixes, such as `t1,t9` |
 | `--model` | `gemini-3.8-live` | Live model |
 | `--json PATH` | none | Write every run, with the programs the model wrote |

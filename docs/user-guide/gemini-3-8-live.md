@@ -210,9 +210,9 @@ Gemini 3.8 Live, 3.8 Live Extended Thinking and 2.5 native audio on Google AI
 refuse the built-in `codeExecution` tool: the session closes at setup (1007,
 "Code Execution tool is not supported for this model"; measured 2026-10-11).
 The setup message leaves the tool off for these models and connect logs it
-among the ignored settings. To have the model compute over tool results,
-expose a tool that runs code you host; [`evals/code-mode`](../../evals/code-mode/README.md)
-measures one such design against plain function calls.
+among the ignored settings. To have the model compute over tool results, use
+[code mode](code-mode.md): a `run_code` tool whose programs call your own
+tools, each call governed like a direct one.
 
 ## Tools: informative responses
 

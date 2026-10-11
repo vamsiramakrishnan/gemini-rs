@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Code mode: programs over your own tools.** `Live::code_mode(CodeMode)`,
+  `SessionSpec.code` and `SkillSpec.code` give the model `run_code`: a short
+  Python program whose functions are the session's tools, run in
+  [Monty](https://github.com/pydantic/monty). The model reads only the
+  program's final value. Every call a program makes goes down the same path
+  as a direct call (phase tools, decision gate, flow gate, middleware, the
+  tool, the flow advance); a refused call raises `RuntimeError` in the
+  program, each call is recorded as a tool execution, and a barge-in cancels
+  the program. The tool is declared with Python stubs generated from the
+  tools' declarations (`ToolSpec.returns`, or a mock's response, gives the
+  result shape); under `ContextUpdate` steering it lists only the functions
+  the flow offers. Commits are left out by default. Limits bound calls,
+  interpreter time, wall time, output and (in worker processes) memory. See
+  [code mode](docs/user-guide/code-mode.md).
+- **Two sandboxes.** `InProcess` (feature `code-mode`, on by default) runs
+  Monty on a blocking thread; it cannot bound memory, and `'a' * 10**10` can
+  abort the process. `MontyPool` (feature `code-pool`) runs programs in Monty
+  worker processes with a memory cap and hard deadlines, where the same
+  program ends only its worker. `SpecResources::code_sandbox` picks one for a
+  spec, and `adk spec run` uses a pool when `MONTY_BIN` is set.
+- **Code mode in skills.** A skill's code tool, `{skill}__run_code`, calls
+  the skill's tools by their local names; each call is a task invocation
+  governed by the skill's flow, and its receipt moves the task on before the
+  program reads the result.
+- `evals/code-mode` runs the same ten tasks through the SDK (`sdk-tools`,
+  `sdk-code`, `sdk-hybrid`), next to the raw-protocol arms.
 - **Replace tools and the instruction mid-session.**
   `SessionHandle::update_context(ContextUpdate)` sends a `contextUpdate`
   message, which replaces the declared tools, the system instruction, or

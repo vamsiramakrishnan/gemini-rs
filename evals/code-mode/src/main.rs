@@ -764,6 +764,13 @@ impl Wire {
                     return stats;
                 }
             };
+            if std::env::var_os("DUMP_USAGE").is_some()
+                && let Ok(raw) = serde_json::from_slice::<Value>(&bytes)
+            {
+                let keys: Vec<&String> = raw.as_object().map(|o| o.keys().collect()).unwrap_or_default();
+                let sc = raw.get("serverContent").map(|c| c.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default());
+                eprintln!("frame keys={keys:?} serverContent={sc:?} prompt={:?}", raw.pointer("/usageMetadata/promptTokenCount"));
+            }
             if let Ok(raw) = serde_json::from_slice::<Value>(&bytes)
                 && let Some(u) = raw.get("usageMetadata")
             {
