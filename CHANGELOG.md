@@ -47,6 +47,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `FlowStack::gate_scope` takes the session state, to find the
   steps a called tool would open.
 
+### Fixed
+
+- **Code execution no longer ends a Live session at setup.** Gemini 3.8 Live,
+  3.8 Live Extended Thinking and 2.5 native audio on Google AI close the
+  session over the `codeExecution` tool (1007). The setup message leaves it
+  off for them, `SessionConfig::ignored_settings()` lists
+  `tools.codeExecution` so connect warns, and
+  `SessionConfig::supports_code_execution()` reports support.
+  `LiveModelProfile` gains `code_execution` and `GEMINI_2_5_NATIVE_AUDIO`.
+  Text agents are unaffected.
+
 ## [4.0.0] - 2026-10-02
 
 ### Multi-capability agents
