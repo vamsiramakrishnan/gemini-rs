@@ -38,6 +38,9 @@ pub struct GeminiLlmParams {
     pub headers: Option<HashMap<String, String>>,
     /// Custom token provider for VertexAI. Defaults to reading `GOOGLE_ACCESS_TOKEN` env var.
     pub token_provider: Option<Arc<dyn TokenProvider>>,
+    /// Scheme, host and port to send requests to instead of the platform's,
+    /// such as a gateway or a local stand-in (see `Client::base_url`).
+    pub base_url: Option<String>,
 }
 
 /// Concrete Gemini LLM implementation using gemini-live `Client`.
@@ -185,7 +188,7 @@ impl GeminiLlm {
         #[cfg(feature = "gemini-llm")]
         let client = {
             use gemini_genai_rs::{Client, prelude::ModelId};
-            match variant {
+            let client = match variant {
                 GoogleLlmVariant::GeminiApi => {
                     let api_key = params.api_key.as_deref().unwrap_or("");
                     Client::from_api_key(api_key).model(ModelId::new(model.clone()))
@@ -201,6 +204,10 @@ impl GeminiLlm {
                     Client::from_vertex_refreshable(project, location, move || tp.token())
                         .model(ModelId::new(model.clone()))
                 }
+            };
+            match &params.base_url {
+                Some(base) => client.base_url(base.clone()),
+                None => client,
             }
         };
 
