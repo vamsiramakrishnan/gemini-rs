@@ -619,6 +619,13 @@ fn gen_code(spec: &SessionSpec) -> String {
         let _ = writeln!(out, "                .tool_name({})", rust_str(code.tool()));
     }
     for function in code.function_list() {
+        if function.direct == Some(false) {
+            let _ = writeln!(
+                out,
+                "                .only_in_code({})",
+                rust_str(&function.name)
+            );
+        }
         match &function.returns {
             Some(returns) => {
                 let _ = writeln!(

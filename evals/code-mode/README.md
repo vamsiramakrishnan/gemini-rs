@@ -22,6 +22,7 @@ line that gives it), and [code mode](../../docs/user-guide/code-mode.md):
 | `sdk-tools` | The five tools |
 | `sdk-code` | `run_code` over the four reads (`direct(false)`), and `book_table` as a direct call |
 | `sdk-hybrid` | `run_code` beside all five tools: the SDK default |
+| `sdk-tuned` | The hybrid, with `lookup_payment_history` (up to 120 rows) marked `only_in_code` |
 
 The tasks (ground truth is computed, not hand-written) cover dates to work
 out, fan-out over days, aggregation over 6, 22 and 120 rows, a dependent

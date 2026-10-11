@@ -213,26 +213,31 @@ pub fn without_redefinitions(source: &str, functions: &[String]) -> Result<Strin
         let trimmed = line.trim_start();
         let indent = line.len() - trimmed.len();
         if let Some(name) = defined_name(trimmed).filter(|n| functions.iter().any(|f| f == n)) {
-            // The signature may span lines; it ends at the line ending in ':'.
-            let mut end = i;
-            while end < lines.len() && !strip_comment(lines[end]).trim_end().ends_with(':') {
-                end += 1;
-            }
-            let mut body_end = end + 1;
-            while body_end < lines.len() {
-                let next = lines[body_end];
-                let next_indent = next.len() - next.trim_start().len();
-                if next.trim().is_empty() || next_indent > indent {
-                    body_end += 1;
-                } else {
-                    break;
+            // A signature with no end is left for the interpreter to report.
+            let Some((end, inline)) = signature_end(&lines, i) else {
+                kept.push(line);
+                i += 1;
+                continue;
+            };
+            let (body, next) = if strip_comment(inline).trim().is_empty() {
+                let mut next = end + 1;
+                while let Some(following) = lines.get(next) {
+                    let following_indent = following.len() - following.trim_start().len();
+                    if following.trim().is_empty() || following_indent > indent {
+                        next += 1;
+                    } else {
+                        break;
+                    }
                 }
-            }
-            let body = lines[(end + 1).min(lines.len())..body_end].join("\n");
+                (lines[end + 1..next].join("\n"), next)
+            } else {
+                // `def f(x): pass` on one line.
+                (inline.to_string(), end + 1)
+            };
             if !does_nothing(&body) {
                 return Err(redefined(name));
             }
-            i = body_end;
+            i = next;
             continue;
         }
         if let Some(imported) = imported_names(trimmed)
@@ -248,6 +253,25 @@ pub fn without_redefinitions(source: &str, functions: &[String]) -> Result<Strin
         i += 1;
     }
     Ok(kept.join("\n"))
+}
+
+/// Where the signature of the `def` on line `start` ends: the line holding
+/// its closing `:` (the first outside brackets) and the text after it, an
+/// inline body. `None` when the program ends first.
+fn signature_end<'a>(lines: &[&'a str], start: usize) -> Option<(usize, &'a str)> {
+    let mut depth = 0i32;
+    for (index, line) in lines.iter().enumerate().skip(start) {
+        let code = strip_comment(line);
+        for (at, c) in code.char_indices() {
+            match c {
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                ':' if depth == 0 => return Some((index, &line[at + 1..])),
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 fn redefined(name: &str) -> String {
@@ -432,5 +456,27 @@ mod tests {
             without_redefinitions(fine, &names(&["check_availability"])).unwrap(),
             fine
         );
+    }
+
+    #[test]
+    fn a_one_line_stub_is_removed_and_an_unfinished_one_left_alone() {
+        let one_line = "def lookup(account_id: str) -> dict: pass  # the system's\nlookup('A1')";
+        assert_eq!(
+            without_redefinitions(one_line, &names(&["lookup"])).unwrap(),
+            "lookup('A1')"
+        );
+        // From a live run: a stub whose signature never closes.
+        let broken = "print(import json\ndef lookup(account_id: str -> dict\nlookup('A1')";
+        assert_eq!(
+            without_redefinitions(broken, &names(&["lookup"])).unwrap(),
+            broken
+        );
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn no_program_text_makes_it_panic(source in "(def lookup|lookup|from t import lookup|[ ():\\n#'\"=.a-z]){0,40}") {
+            let _ = without_redefinitions(&source, &names(&["lookup"]));
+        }
     }
 }

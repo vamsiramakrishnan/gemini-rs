@@ -958,6 +958,7 @@ async fn main() {
                         "sdk-tools" => sdk_arms.push(sdk::SdkArm::Tools),
                         "sdk-code" => sdk_arms.push(sdk::SdkArm::Code),
                         "sdk-hybrid" => sdk_arms.push(sdk::SdkArm::Hybrid),
+                        "sdk-tuned" => sdk_arms.push(sdk::SdkArm::Tuned),
                         other => panic!("unknown arm {other}"),
                     }
                 }

@@ -6,6 +6,8 @@
 //! - `sdk-code`: the four reads only through `run_code`; `book_table` stays
 //!   a direct call, as the SDK recommends for commits.
 //! - `sdk-hybrid`: `run_code` beside all five tools (the SDK default).
+//! - `sdk-tuned`: the hybrid, with the payment history (which runs to 120
+//!   rows) reachable only through programs.
 //!
 //! The caller's yes is set as state from the line the task confirms on, so
 //! the flow gate (`never(book_table).until(confirmed)`) decides bookings
@@ -32,6 +34,7 @@ pub enum SdkArm {
     Tools,
     Code,
     Hybrid,
+    Tuned,
 }
 
 impl SdkArm {
@@ -40,6 +43,7 @@ impl SdkArm {
             Self::Tools => "sdk-tools",
             Self::Code => "sdk-code",
             Self::Hybrid => "sdk-hybrid",
+            Self::Tuned => "sdk-tuned",
         }
     }
 }
@@ -133,6 +137,12 @@ pub async fn run_task_sdk(model: &str, arm: SdkArm, task: &Task, spoken: bool) -
         SdkArm::Tools => live,
         SdkArm::Code => live.code_mode(CodeMode::new().functions(reads).direct(false)),
         SdkArm::Hybrid => live.code_mode(CodeMode::new().functions(reads)),
+        // The author knows the payment history runs long: programs only.
+        SdkArm::Tuned => live.code_mode(
+            CodeMode::new()
+                .functions(reads)
+                .only_in_code("lookup_payment_history"),
+        ),
     };
     let handle = match tokio::time::timeout(Duration::from_secs(60), live.connect_from_env()).await
     {

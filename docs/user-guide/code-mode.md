@@ -62,6 +62,7 @@ and background tools:
 | `tool` | `run_code` | The code tool's name |
 | `functions` | every tool but commits and background tools | The tools a program can call |
 | `direct` | `true` | Keep the functions declared as tools of their own too |
+| `only_in_code` | none | Tools declared only through the code tool, whatever `direct` says; they join `functions` |
 | `limits` | see [Limits](#limits) | Bounds on each program |
 
 `check` reports a function that is not a declared tool, or a code tool name
@@ -88,12 +89,24 @@ alike. The `Returns` line comes from `function_returning`, a spec tool's
 Without it the model guesses the result's keys, and a wrong guess costs a
 failed program.
 
+A tool whose result the model should never read whole, such as a long
+history, belongs in `only_in_code` (`CodeMode::only_in_code` in Rust). Given
+the payment history as a direct tool as well, Gemini 3.8 Live often fetched
+all 120 rows with a direct call and then pasted them into a program, which
+costs the tokens code mode exists to save.
+
 Under [`ContextUpdate` steering](steering-modes.md) the code tool is declared
 only while the flow offers a function it exposes, and its stubs list only
 those functions, so a program is never told about a tool the current step
 does not allow. With `direct(false)` (`"direct": false`) the functions are
 not declared on their own at all; the model reaches them only through
 programs.
+
+The model sometimes copies the stubs into its program (`def
+check_availability(...): pass`), which would shadow the real function so
+that every call returns `None`. A definition that does nothing, or an import
+of only these names, is removed before the program runs; any other
+definition of one of them is refused with the reason.
 
 The description's wording matters, and it is tuned on Gemini 3.8 Live. An
 earlier wording, "for a single lookup, call the tool directly", led the model

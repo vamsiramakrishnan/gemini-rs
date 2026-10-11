@@ -117,6 +117,11 @@ pub struct CodeFunction {
     /// it the model guesses the result's keys, and a wrong guess costs it a
     /// failed program.
     pub returns: Option<String>,
+    /// Whether the tool stays declared on its own too; `None` follows
+    /// [`CodeMode::direct`]. A tool that returns many rows is better reached
+    /// only through programs: given it directly, Gemini 3.8 Live fetched 120
+    /// rows and then pasted them into a program.
+    pub direct: Option<bool>,
 }
 
 /// The code tool of a session: its name, the tools a program can call, its
@@ -167,6 +172,20 @@ impl CodeMode {
         self.push(CodeFunction {
             name: name.into(),
             returns: None,
+            direct: None,
+        });
+        self
+    }
+
+    /// Let programs call the tool `name`, and declare it only through the
+    /// code tool, whatever [`direct`](Self::direct) says. For a tool whose
+    /// result the model should never read whole, such as a long history.
+    #[must_use]
+    pub fn only_in_code(mut self, name: impl Into<String>) -> Self {
+        self.push(CodeFunction {
+            name: name.into(),
+            returns: None,
+            direct: Some(false),
         });
         self
     }
@@ -181,6 +200,7 @@ impl CodeMode {
         self.push(CodeFunction {
             name: name.into(),
             returns: Some(returns.into()),
+            direct: None,
         });
         self
     }
@@ -233,6 +253,9 @@ impl CodeMode {
                 if function.returns.is_some() {
                     existing.returns = function.returns;
                 }
+                if function.direct.is_some() {
+                    existing.direct = function.direct;
+                }
             }
             None => self.functions.push(function),
         }
@@ -270,7 +293,10 @@ impl CodeMode {
 
     /// Whether the model reaches the tool `name` only through programs.
     pub fn hides(&self, name: &str) -> bool {
-        !self.direct && self.exposes(name)
+        self.functions
+            .iter()
+            .find(|f| f.name == name)
+            .is_some_and(|f| !f.direct.unwrap_or(self.direct))
     }
 
     /// The code tool's declaration, listing the functions in `catalog` that
@@ -282,10 +308,14 @@ impl CodeMode {
         offered: impl Fn(&str) -> bool,
     ) -> Option<FunctionDeclaration> {
         let catalog: Vec<&FunctionDeclaration> = catalog.into_iter().collect();
-        let stubs: Vec<String> = self
+        let listed: Vec<&CodeFunction> = self
             .functions
             .iter()
             .filter(|f| offered(&f.name))
+            .filter(|f| catalog.iter().any(|d| d.name == f.name))
+            .collect();
+        let stubs: Vec<String> = listed
+            .iter()
             .filter_map(|f| {
                 catalog
                     .iter()
@@ -296,7 +326,7 @@ impl CodeMode {
         if stubs.is_empty() {
             return None;
         }
-        let when = if self.direct {
+        let when = if listed.iter().any(|f| !self.hides(&f.name)) {
             "Use it whenever the answer needs arithmetic, dates, counting, sorting \
              or comparing over what a function returns, or several calls: call \
              the function inside the program rather than calling the tool first \

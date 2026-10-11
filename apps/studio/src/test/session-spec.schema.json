@@ -276,6 +276,13 @@
           ],
           "description": "Bounds on each program."
         },
+        "only_in_code": {
+          "description": "Tools a program can call that are declared only through the code tool, whatever `direct` says: those whose results the model should not read whole, such as a long history. Listed tools join `functions`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "tool": {
           "description": "The code tool's name. Default `run_code`.",
           "type": [
