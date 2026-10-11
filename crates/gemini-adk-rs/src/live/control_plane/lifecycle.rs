@@ -859,6 +859,12 @@ async fn deliver_instruction_and_context(
         && let Err(e) = writer.update_context(context_update).await
     {
         tracing::warn!(error = %e, "contextUpdate at the turn boundary failed");
+        // Not sent: forget it, so the next turn sends the tools and the
+        // instruction again instead of finding them unchanged.
+        if let Some(scope) = &control_plane.tool_scope {
+            scope.forget();
+        }
+        *shared.last_instruction.lock() = None;
     }
 
     // Add on_enter_context content to the batch (if a phase transition produced it).

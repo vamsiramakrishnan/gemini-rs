@@ -79,13 +79,19 @@ impl TaskLane {
         let brief = runtime.foreground_brief().unwrap_or_default();
         let instruction = compose_instruction(scope.base_instruction(), &brief);
         if let Some(update) = scope.sync(&names, Some(instruction)) {
-            if let Err(error) = writer.update_context(update).await {
-                tracing::warn!(%error, "re-declaring the task tools failed");
+            match writer.update_context(update).await {
+                Ok(()) => {
+                    let _ = self
+                        .state
+                        .session()
+                        .set(DECLARED_TOOLS_KEY, scope.declared());
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "re-declaring the task tools failed");
+                    // Not sent: the next sync sends it again.
+                    scope.forget();
+                }
             }
-            let _ = self
-                .state
-                .session()
-                .set(DECLARED_TOOLS_KEY, scope.declared());
         }
     }
 
@@ -632,8 +638,14 @@ mod tests {
         Context(String),
     }
 
+    /// What the lane sent, the responses' bodies, and whether the next
+    /// `contextUpdate` should fail.
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<Sent>>, Mutex<Vec<Value>>);
+    struct Recorder(
+        Mutex<Vec<Sent>>,
+        Mutex<Vec<Value>>,
+        std::sync::atomic::AtomicBool,
+    );
 
     impl Recorder {
         fn take(&self) -> Vec<Sent> {
@@ -681,6 +693,9 @@ mod tests {
             Ok(())
         }
         async fn update_context(&self, update: ContextUpdate) -> Result<(), SessionError> {
+            if self.2.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                return Err(SessionError::NotConnected);
+            }
             let tools = update.tools.map(|tools| {
                 tools
                     .iter()
@@ -1034,5 +1049,31 @@ mod tests {
             ],
             "the refused call never became an operation"
         );
+    }
+
+    #[tokio::test]
+    async fn a_failed_update_is_sent_again_at_the_next_sync() {
+        let mut h = Harness::new(true);
+        h.writer.2.store(true, std::sync::atomic::Ordering::SeqCst);
+        h.call("task_control", json!({"action":"start","skill":"billing"}))
+            .await;
+        assert!(
+            !h.writer
+                .take()
+                .iter()
+                .any(|s| matches!(s, Sent::Update { .. })),
+            "the first update failed"
+        );
+        h.call("billing__verify", json!({})).await;
+        let sent = h.writer.take();
+        let Some(Sent::Update { tools, instruction }) = sent.first() else {
+            panic!("the update goes out again first: {sent:?}");
+        };
+        assert!(
+            tools
+                .as_ref()
+                .is_some_and(|t| t.contains(&"billing__verify".to_string()))
+        );
+        assert!(instruction.is_some(), "the brief is sent again too");
     }
 }

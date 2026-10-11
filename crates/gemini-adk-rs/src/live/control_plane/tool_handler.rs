@@ -88,15 +88,6 @@ pub(in crate::live) async fn handle_tool_calls(
         event_tx,
     };
 
-    // Decision point: answer the questions that decide whether these calls
-    // are admitted, about the caller's latest words including the turn in
-    // progress. A commit guarded on the caller's yes then sees this turn's
-    // yes, and a digression the answers trigger opens first, so a transfer
-    // the model makes in the same breath counts inside it. A call no
-    // decision governs asks nothing and does not wait.
-    let tools: Vec<String> = calls.iter().map(|c| c.name.clone()).collect();
-    path.decide(&tools, transcript_buffer).await;
-
     // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list.
     // The code tool is in the phase when a function it exposes is.
     let phase_tools = match phase_machine {
@@ -134,6 +125,16 @@ pub(in crate::live) async fn handle_tool_calls(
             });
         }
     }
+
+    // Decision point: answer the questions that decide whether these calls
+    // are admitted, about the caller's latest words including the turn in
+    // progress. A commit guarded on the caller's yes then sees this turn's
+    // yes, and a digression the answers trigger opens first, so a transfer
+    // the model makes in the same breath counts inside it. A call no
+    // decision governs asks nothing and does not wait. Only calls the phase
+    // admits are asked about: one it refused must not open a digression.
+    let tools: Vec<String> = allowed_calls.iter().map(|c| c.name.clone()).collect();
+    path.decide(&tools, transcript_buffer).await;
 
     // Programs for the code tool are run by the runtime, after the direct
     // calls of this batch.
@@ -302,7 +303,7 @@ pub(in crate::live) async fn handle_tool_calls(
     if let Some(tools) =
         crate::live::tool_scope::rescope(tool_scope, phase_machine, flow, state).await
     {
-        crate::live::tool_scope::send_tools(writer, tools).await;
+        crate::live::tool_scope::send_tools(writer, tool_scope, tools).await;
     }
 
     // 5. Send tool responses (standard + ack) back to Gemini
@@ -1828,6 +1829,89 @@ mod tests {
             stack.lock().is_terminated(),
             "one transfer completes the handoff"
         );
+    }
+
+    #[tokio::test]
+    async fn a_call_the_phase_refuses_does_not_open_a_digression() {
+        // The same handoff, but the active phase does not enable `transfer`:
+        // the call is refused there, so the caller's words must not be asked
+        // about on its behalf and the digression stays closed.
+        let main = Flow::new()
+            .step("collect")
+            .done(Guard::is_true("never"))
+            .build()
+            .expect("valid");
+        let handoff = Flow::new()
+            .step("transfer")
+            .allow(["transfer"])
+            .done(Guard::called_ok("transfer"))
+            .build()
+            .expect("valid")
+            .compile()
+            .expect("compiles");
+        let stack = FlowMonitor::new(main, Enforcement::Enforce)
+            .into_stack()
+            .with_overlay(crate::flow::Overlay::new(
+                "handoff",
+                Guard::decided("wants_person"),
+                handoff,
+                crate::flow::Resume::Terminate,
+            ));
+        let flow = Some(stack.into_shared());
+        let mut phase = crate::live::phase::Phase::new("main", "Collect the details.");
+        phase.tools_enabled = Some(vec!["lookup".into()]);
+        let mut machine = PhaseMachine::new("main");
+        machine.add_phase(phase);
+        let phases = Some(tokio::sync::Mutex::new(machine));
+        let runs = Arc::new(AtomicUsize::new(0));
+        let counted = runs.clone();
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(SimpleTool::new(
+            "transfer",
+            "transfer",
+            None,
+            move |_| {
+                let counted = counted.clone();
+                async move {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    Ok(json!({ "ok": true }))
+                }
+            },
+        )));
+        let state = State::new();
+        let mut transcript = TranscriptBuffer::new();
+        transcript.push_input("Can I talk to a real person?");
+        let writer: Arc<dyn SessionWriter> = Arc::new(NoopWriter);
+        let (tx, _rx) = tokio::sync::broadcast::channel(64);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel::<ControlEvent>(8);
+        handle_tool_calls(
+            vec![FunctionCall {
+                name: "transfer".into(),
+                args: json!({}),
+                id: Some("c1".into()),
+            }],
+            &EventCallbacks::default(),
+            &Some(Arc::new(dispatcher)),
+            &writer,
+            &state,
+            &phases,
+            &mut transcript,
+            &std::collections::HashMap::new(),
+            &None,
+            &[],
+            &Arc::new(MiddlewareChain::new()),
+            &flow,
+            &Some(listening_for("person")),
+            &None,
+            &None,
+            &mut ToolGate::new(),
+            &ctrl_tx.downgrade(),
+            &CancellationToken::new(),
+            &tx,
+        )
+        .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 0, "the phase refused it");
+        assert_eq!(flow.as_ref().unwrap().lock().active_overlay(), None);
     }
 
     // ── Code mode ────────────────────────────────────────────────────────────

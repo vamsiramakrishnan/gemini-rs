@@ -1,0 +1,521 @@
+[
+  {
+    "arm": "sdk-tuned-voice",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1968,
+    "ms": 9248,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1692,
+        "first_output_ms": 875,
+        "heard": "Is there a table for four on the second Friday of next month at 7:30 in the evening or later? What's the earliest?",
+        "ms": 9248,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1968,
+        "round_trips": 1,
+        "said": "There isn't a table at 7:30 PM, but the earliest available time for four people on Friday, November 13th, is 8:00 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 20199,
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "sdk-tuned-voice",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1968,
+    "ms": 9330,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1903,
+        "first_output_ms": 971,
+        "heard": "Is there a table for four on the second Friday of next month at 7:30 in the evening or later? What's the earliest?",
+        "ms": 9330,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1968,
+        "round_trips": 1,
+        "said": "There is no availability at 7:30 PM, but the earliest table for four on the second Friday of next month is at 8:00 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 20196,
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "sdk-tuned-voice",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1968,
+    "ms": 8197,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1744,
+        "first_output_ms": 886,
+        "heard": "Is there a table for four on the second Friday of next month at 7:30 in the evening or later? What's the earliest?",
+        "ms": 8197,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1968,
+        "round_trips": 1,
+        "said": "There's no table at 7:30, but the earliest available time for four on Friday, November 13th is 8:00 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 19089,
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "sdk-tuned-voice",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 2270,
+    "ms": 7181,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "calls": [
+          "list_prescriptions",
+          "check_refills"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 2730,
+        "first_output_ms": 1049,
+        "heard": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "ms": 7181,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2270,
+        "round_trips": 2,
+        "said": "You have 2 refills remaining on your Atorvastatin cholesterol medication."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 17835,
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "sdk-tuned-voice",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 2270,
+    "ms": 6228,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "calls": [
+          "list_prescriptions",
+          "check_refills"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 2499,
+        "first_output_ms": 1050,
+        "heard": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "ms": 6228,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2270,
+        "round_trips": 2,
+        "said": "You have 2 refills remaining on your Atorvastatin prescription."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 16924,
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "sdk-tuned-voice",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 2270,
+    "ms": 6870,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "calls": [
+          "list_prescriptions",
+          "check_refills"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 2623,
+        "first_output_ms": 1048,
+        "heard": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "ms": 6870,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2270,
+        "round_trips": 2,
+        "said": "You have two refills remaining on your Atorvastatin cholesterol medication."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 17523,
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "sdk-tuned-voice",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 2273,
+    "ms": 13356,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 2139,
+        "first_output_ms": 1171,
+        "heard": "For account Acme 9000 in calendar year 2025, what did I pay in total to the cent? How many payments were late? And what was the largest single payment?",
+        "ms": 13356,
+        "program_results": [
+          "{\"printed\":\"Total Paid: 2588.70\\nLate Payments: 22\\nMax Payment: 79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "def lookup_payment_history(account_id: str) -> dict: pass\nimport json\n\ndata = lookup_payment_history(account_id=\"ACME-9000\")\npayments = data.get(\"payments\", [])\n\ntotal_paid = 0.0\nlate_count = 0\nmax_payment = 0.0\n\nfor p in payments:\n    paid_date = p[\"paid\"]\n    due_date = p[\"due\"]\n    amount = p[\"amount\"]\n\n    if paid_date.startswith(\"2025\"):\n        total_paid += amount\n        if paid_date > due_date:\n            late_count += 1\n        if amount > max_payment:\n            max_payment = amount\n\nprint(f\"Total Paid: {total_paid:.2f}\")\nprint(f\"Late Payments: {late_count}\")\nprint(f\"Max Payment: {max_payment:.2f}\")\n"
+        ],
+        "prompt_tokens": 2273,
+        "round_trips": 1,
+        "said": "In 2025, you paid a total of 2,588.70 across 22 late payments, with your largest single payment being $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 30141,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-tuned-voice",
+    "bookings": [],
+    "code_blocks": 2,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 4876,
+    "ms": 14238,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "run_code",
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 3462,
+        "first_output_ms": 1410,
+        "heard": "For account Acme 9000 in calendar year 2025, what did I pay in total to the cent? How many payments were late? And what was the largest single payment?",
+        "ms": 14238,
+        "program_results": [
+          "{\"printed\":\"{'account_id': 'ACME-9000', 'payments': [{'amount': 20.0, 'due': '2024-07-01', 'paid': '2024-06-28'}, {'amount': 73.29, 'due': '2024-07-08', 'paid': '2024-07-10'}, {'amount': 65.58, 'due': '2024-07-15', 'paid': '2024-07-15'}, {'amount': 57.87, 'due': '2024-07-22', 'paid': '2024-07-20'}, {'amount': 49.16, 'due': '2024-07-29', 'paid': '2024-08-01'}, {'amount': 41.45, 'due': '2024-08-05', 'paid': '2024-08-06'}, {'amount': 33.74, 'due': '2024-08-12', 'paid': '2024-08-11'}, {'amount': 25.03, 'due': '2024-08-19', 'paid': '2024-08-16'}, {'amount': 78.32, 'due': '2024-08-26', 'paid': '2024…",
+          "{\"printed\":\"Total: 2588.70\\nLate: 22\\nMax: 79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "print(lookup_payment_history(\"acme-9000\"))",
+          "import datetime\ndata = lookup_payment_history(\"ACME-9000\")\ntotal_paid = 0.0\nlate_count = 0\nmax_payment = 0.0\n\nfor p in data['payments']:\n    due_date = datetime.date.fromisoformat(p['due'])\n    paid_date = datetime.date.fromisoformat(p['paid'])\n    if due_date.year == 2025:\n        total_paid += p['amount']\n        if paid_date > due_date:\n            late_count += 1\n        if p['amount'] > max_payment:\n            max_payment = p['amount']\n\nprint(f\"Total: {total_paid:.2f}\")\nprint(f\"Late: {late_count}\")\nprint(f\"Max: {max_payment:.2f}\")"
+        ],
+        "prompt_tokens": 4876,
+        "round_trips": 2,
+        "said": "You paid a total of $2,588.70 in 2025, with 22 payments made late and your largest single payment being $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 31081,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-tuned-voice",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 2280,
+    "ms": 13561,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1881,
+        "first_output_ms": 1129,
+        "heard": "For account Acme 9000 in calendar year 2025, what did I pay in total to the cent? How many payments were late? And what was the largest single payment?",
+        "ms": 13561,
+        "program_results": [
+          "{\"printed\":\"Total Paid: $2588.70\\nLate Payments: 22\\nLargest Payment: $79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "import datetime\nfrom functions import lookup_payment_history\n\ndata = lookup_payment_history(account_id='acme-9000')\npayments = data['payments']\n\ntotal_paid = 0.0\nlate_payments = 0\nmax_payment = 0.0\n\nfor payment in payments:\n    paid_date = datetime.date.fromisoformat(payment['paid'])\n    due_date = datetime.date.fromisoformat(payment['due'])\n    amount = payment['amount']\n    \n    if paid_date.year == 2025:\n        total_paid += amount\n        if paid_date > due_date:\n            late_payments += 1\n        if amount > max_payment:\n            max_payment = amount\n\nprint(f\"Total Paid: ${total_paid:.2f}\")\nprint(f\"Late Payments: {late_payments}\")\nprint(f\"Largest Payment: ${max_payment:.2f}\")\n"
+        ],
+        "prompt_tokens": 2280,
+        "round_trips": 1,
+        "said": "For account ACME-9000 in 2025, you paid a total of $2,588.70, had 22 late payments, and the largest payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 30348,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-tuned-voice",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 2275,
+    "ms": 17081,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1651,
+        "first_output_ms": 911,
+        "heard": "Please book a table for two on the second Friday of next month at 7:00 p.m. under Ellis.",
+        "ms": 8121,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1918,
+        "round_trips": 1,
+        "said": "I have a table for two available on Friday, November 13th, at 7:00 p.m. Should I book this for you under Ellis?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1607,
+        "first_output_ms": 910,
+        "heard": "Yes, that's right. Please book it.",
+        "ms": 8960,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2275,
+        "round_trips": 1,
+        "said": "Your table for two on Friday, November 13th at 7:00 p.m. is booked under Ellis, reference number TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 31616,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-tuned-voice",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 2305,
+    "ms": 18751,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1629,
+        "first_output_ms": 883,
+        "heard": "Please book a table for two on the second Friday of next month at 7:00 p.m. under Ellis.",
+        "ms": 9117,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1918,
+        "round_trips": 1,
+        "said": "I can confirm a table for two is available on Friday, November 13th at 7:00 p.m. under Ellis. Should I proceed with the booking?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1758,
+        "first_output_ms": 916,
+        "heard": "Yes, that's right. Please book it.",
+        "ms": 9634,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2305,
+        "round_trips": 1,
+        "said": "Your table for two is booked for Friday, November 13th at 7 p.m. under Ellis. Your reference number is TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 32806,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-tuned-voice",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 2294,
+    "ms": 14401,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1390,
+        "first_output_ms": 837,
+        "heard": "Please book a table for two on the second Friday of next month at 7:00 p.m. under Ellis.",
+        "ms": 8482,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1918,
+        "round_trips": 1,
+        "said": "I can book a table for two on Friday, November 13th, at 7 PM under the name Ellis. Shall I go ahead and confirm this booking?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1555,
+        "first_output_ms": 1007,
+        "heard": "Yes, that's right. Please book it.",
+        "ms": 5919,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2294,
+        "round_trips": 1,
+        "said": "Your table is booked. Your reference number is TR 2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 28527,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  }
+]

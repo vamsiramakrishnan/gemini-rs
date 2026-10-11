@@ -22,6 +22,7 @@ line that gives it), and [code mode](../../docs/user-guide/code-mode.md):
 | `sdk-tools` | The five tools |
 | `sdk-code` | `run_code` over the four reads (`direct(false)`), and `book_table` as a direct call |
 | `sdk-hybrid` | `run_code` beside all five tools: the SDK default |
+| `sdk-tuned` | The hybrid, with `lookup_payment_history` (up to 120 rows) marked `only_in_code` |
 
 The tasks (ground truth is computed, not hand-written) cover dates to work
 out, fan-out over days, aggregation over 6, 22 and 120 rows, a dependent
@@ -33,6 +34,12 @@ In short: 49 of 50 right in code mode against 46 of 50 with function calls,
 the whole difference at 120 rows (5/5 against 2/5, with 77% fewer prompt
 tokens and 8 s less); no difference on small tasks, where code mode is a
 little slower to its first action.
+
+Through the SDK (`sdk-*` arms, results in `results/2026-10-11-sdk-*.json`):
+function calls 46/50, code only 49/50, the hybrid 50/50, and the hybrid with
+the history `only_in_code` 48/50 at a third of function calls' tokens on the
+120 rows. `--voice` runs and the skill probe are reported in
+[code mode](../../docs/user-guide/code-mode.md#what-it-measured).
 
 ## Run it
 

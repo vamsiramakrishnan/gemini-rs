@@ -101,7 +101,7 @@ impl Default for CodeLimits {
             calls: 20,
             cpu: Duration::from_secs(2),
             wall: Duration::from_secs(30),
-            output_chars: 4_000,
+            output_chars: 2_000,
             memory: 64 * 1024 * 1024,
         }
     }
@@ -117,6 +117,11 @@ pub struct CodeFunction {
     /// it the model guesses the result's keys, and a wrong guess costs it a
     /// failed program.
     pub returns: Option<String>,
+    /// Whether the tool stays declared on its own too; `None` follows
+    /// [`CodeMode::direct`]. A tool that returns many rows is better reached
+    /// only through programs: given it directly, Gemini 3.8 Live fetched 120
+    /// rows and then pasted them into a program.
+    pub direct: Option<bool>,
 }
 
 /// The code tool of a session: its name, the tools a program can call, its
@@ -167,6 +172,20 @@ impl CodeMode {
         self.push(CodeFunction {
             name: name.into(),
             returns: None,
+            direct: None,
+        });
+        self
+    }
+
+    /// Let programs call the tool `name`, and declare it only through the
+    /// code tool, whatever [`direct`](Self::direct) says. For a tool whose
+    /// result the model should never read whole, such as a long history.
+    #[must_use]
+    pub fn only_in_code(mut self, name: impl Into<String>) -> Self {
+        self.push(CodeFunction {
+            name: name.into(),
+            returns: None,
+            direct: Some(false),
         });
         self
     }
@@ -181,6 +200,7 @@ impl CodeMode {
         self.push(CodeFunction {
             name: name.into(),
             returns: Some(returns.into()),
+            direct: None,
         });
         self
     }
@@ -233,6 +253,9 @@ impl CodeMode {
                 if function.returns.is_some() {
                     existing.returns = function.returns;
                 }
+                if function.direct.is_some() {
+                    existing.direct = function.direct;
+                }
             }
             None => self.functions.push(function),
         }
@@ -270,7 +293,10 @@ impl CodeMode {
 
     /// Whether the model reaches the tool `name` only through programs.
     pub fn hides(&self, name: &str) -> bool {
-        !self.direct && self.exposes(name)
+        self.functions
+            .iter()
+            .find(|f| f.name == name)
+            .is_some_and(|f| !f.direct.unwrap_or(self.direct))
     }
 
     /// The code tool's declaration, listing the functions in `catalog` that
@@ -282,10 +308,14 @@ impl CodeMode {
         offered: impl Fn(&str) -> bool,
     ) -> Option<FunctionDeclaration> {
         let catalog: Vec<&FunctionDeclaration> = catalog.into_iter().collect();
-        let stubs: Vec<String> = self
+        let listed: Vec<&CodeFunction> = self
             .functions
             .iter()
             .filter(|f| offered(&f.name))
+            .filter(|f| catalog.iter().any(|d| d.name == f.name))
+            .collect();
+        let stubs: Vec<String> = listed
+            .iter()
             .filter_map(|f| {
                 catalog
                     .iter()
@@ -296,7 +326,7 @@ impl CodeMode {
         if stubs.is_empty() {
             return None;
         }
-        let when = if self.direct {
+        let when = if listed.iter().any(|f| !self.hides(&f.name)) {
             "Use it whenever the answer needs arithmetic, dates, counting, sorting \
              or comparing over what a function returns, or several calls: call \
              the function inside the program rather than calling the tool first \
@@ -371,21 +401,24 @@ impl CodeMode {
             }
             Err(error) => json!({ "error": error }),
         };
+        // A printout over the limit is refused whole: cut, it reads as the
+        // full data, and in live runs the model answered from what was left.
         let printed = printed.trim();
+        let size = printed.chars().count();
+        if size > limit {
+            return json!({
+                "error": format!(
+                    "The program printed {size} characters, over the limit of {limit}, \
+                     so none of it is shown. Print only the values you need: compute \
+                     the answer in the program."
+                )
+            });
+        }
         if !printed.is_empty() {
-            response["printed"] = Value::String(truncate(printed, limit));
+            response["printed"] = Value::String(printed.to_string());
         }
         response
     }
-}
-
-fn truncate(text: &str, limit: usize) -> String {
-    if text.chars().count() <= limit {
-        return text.to_string();
-    }
-    let mut cut: String = text.chars().take(limit).collect();
-    cut.push_str(&format!(" [cut at {limit} characters]"));
-    cut
 }
 
 fn default_sandbox() -> Arc<dyn CodeSandbox> {
@@ -541,5 +574,29 @@ impl Program {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_over_limit_printout_is_refused_whole() {
+        let mode = CodeMode::new().limits(CodeLimits {
+            output_chars: 10,
+            ..CodeLimits::default()
+        });
+        let response = mode.response(Ok(Value::Null), "0123456789abc");
+        assert!(
+            response.get("printed").is_none(),
+            "nothing partial is shown"
+        );
+        let error = response["error"].as_str().unwrap();
+        assert!(error.contains("printed 13 characters"), "{error}");
+        assert_eq!(
+            mode.response(Ok(json!(1)), "short"),
+            json!({ "result": 1, "printed": "short" })
+        );
     }
 }

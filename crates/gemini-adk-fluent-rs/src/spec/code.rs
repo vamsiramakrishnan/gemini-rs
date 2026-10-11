@@ -45,6 +45,12 @@ pub struct CodeSpec {
     /// can make a single lookup without writing a program. Default `true`.
     #[serde(default = "yes", skip_serializing_if = "is_yes")]
     pub direct: bool,
+    /// Tools a program can call that are declared only through the code
+    /// tool, whatever `direct` says: those whose results the model should
+    /// not read whole, such as a long history. Listed tools join
+    /// `functions`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub only_in_code: Vec<String>,
     /// Bounds on each program.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<CodeLimitsSpec>,
@@ -56,6 +62,7 @@ impl Default for CodeSpec {
             tool: None,
             functions: Vec::new(),
             direct: true,
+            only_in_code: Vec::new(),
             limits: None,
         }
     }
@@ -85,7 +92,8 @@ pub struct CodeLimitsSpec {
     /// Wall-clock time per program, its calls included, in ms. Default 30000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wall_ms: Option<u64>,
-    /// Characters of a program's result the model reads. Default 4000.
+    /// Characters of a program's result (and of its printed output) the
+    /// model reads. Default 2000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_chars: Option<usize>,
     /// Memory per program in MiB, enforced by worker-process sandboxes.
@@ -145,15 +153,22 @@ impl SessionSpec {
         let Some(code) = &self.code else {
             return Vec::new();
         };
-        if !code.functions.is_empty() {
-            return code.functions.clone();
+        let mut functions: Vec<String> = if code.functions.is_empty() {
+            let commits = self.commit_tools();
+            self.tools
+                .iter()
+                .filter(|t| !commits.contains(&t.name) && !t.background && t.scheduling.is_none())
+                .map(|t| t.name.clone())
+                .collect()
+        } else {
+            code.functions.clone()
+        };
+        for name in &code.only_in_code {
+            if !functions.contains(name) {
+                functions.push(name.clone());
+            }
         }
-        let commits = self.commit_tools();
-        self.tools
-            .iter()
-            .filter(|t| !commits.contains(&t.name) && !t.background && t.scheduling.is_none())
-            .map(|t| t.name.clone())
-            .collect()
+        functions
     }
 
     /// The spec's code tool, running programs in `sandbox` (in this process
@@ -165,6 +180,9 @@ impl SessionSpec {
             .direct(code.direct)
             .limits(code.limits.clone().unwrap_or_default().to_limits());
         for name in self.code_functions() {
+            if code.only_in_code.contains(&name) {
+                mode = mode.only_in_code(name.clone());
+            }
             mode = match self
                 .tools
                 .iter()
@@ -198,7 +216,7 @@ impl SessionSpec {
                 "code: the code tool's name '{tool}' is also a declared tool"
             ));
         }
-        for name in &code.functions {
+        for name in code.functions.iter().chain(&code.only_in_code) {
             if !self.tools.iter().any(|t| &t.name == name) && self.mcp.is_empty() {
                 errors.push(format!("code: function '{name}' is not a declared tool"));
             }
@@ -383,6 +401,25 @@ mod tests {
         doc["code"] = json!({ "tool": "book_table" });
         let (errors, _) = spec(doc).code_problems();
         assert!(errors[0].contains("'book_table' is also a declared tool"));
+    }
+
+    #[test]
+    fn a_long_history_can_be_reached_only_in_code() {
+        let mut doc = booking();
+        doc["code"] = json!({ "functions": ["check_availability"],
+                              "only_in_code": ["lookup_payment_history"] });
+        let spec = spec(doc);
+        assert_eq!(
+            spec.code_functions(),
+            ["check_availability", "lookup_payment_history"]
+        );
+        let mode = spec.compile_code_mode(None).unwrap();
+        assert!(mode.hides("lookup_payment_history"));
+        assert!(!mode.hides("check_availability"));
+        assert!(
+            spec.to_rust()
+                .contains(".only_in_code(\"lookup_payment_history\")")
+        );
     }
 
     #[test]

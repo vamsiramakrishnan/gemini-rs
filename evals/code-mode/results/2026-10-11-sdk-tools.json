@@ -1,0 +1,1932 @@
+[
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1298,
+    "ms": 7609,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 523,
+        "ms": 7609,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1298,
+        "round_trips": 1,
+        "said": "The earliest available table for four on Friday, November 13th at 7:30 PM or later is 8:00 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 10126,
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1298,
+    "ms": 8221,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 443,
+        "ms": 8221,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1298,
+        "round_trips": 1,
+        "said": "There is no table at 7:30, but the earliest available time for four people on Friday, November 13th is 8:00 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 10736,
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1298,
+    "ms": 8169,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 578,
+        "ms": 8169,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1298,
+        "round_trips": 1,
+        "said": "The earliest available table for four on Friday, November thirteenth at seven-thirty PM or later is at 8:00 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 10730,
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1298,
+    "ms": 8104,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 747,
+        "ms": 8104,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1298,
+        "round_trips": 1,
+        "said": "The earliest available time for four people on the second Friday of next month, from seven-thirty onwards, is eight o'clock."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 10633,
+    "why": "checked 2026-11-13 for 4: true; said 20:00: false"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1298,
+    "ms": 7997,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 610,
+        "ms": 7997,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1298,
+        "round_trips": 1,
+        "said": "The earliest available table for four on Friday, November 13th, at or after seven-thirty PM is at eight PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 10529,
+    "why": "checked 2026-11-13 for 4: true; said 20:00: false"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1282,
+    "ms": 5861,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 493,
+        "ms": 5861,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1282,
+        "round_trips": 1,
+        "said": "The earliest table for two on Tuesday, November 3rd, is at 17:30."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 8411,
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1282,
+    "ms": 5234,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 423,
+        "ms": 5234,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1282,
+        "round_trips": 1,
+        "said": "The earliest table for two on November 3rd is at 17:30."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 7795,
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1282,
+    "ms": 6454,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 489,
+        "ms": 6454,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1282,
+        "round_trips": 1,
+        "said": "The earliest table for two on Tuesday, November 3rd, is available at 17:30."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 9010,
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1282,
+    "ms": 5820,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 760,
+        "ms": 5820,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1282,
+        "round_trips": 1,
+        "said": "The earliest table for two on Tuesday, November 3rd, is at 17:30."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 8405,
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1282,
+    "ms": 5759,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 533,
+        "ms": 5759,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1282,
+        "round_trips": 1,
+        "said": "The earliest available table for two on November 3rd is at 5:30 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 8300,
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1638,
+    "ms": 8911,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 4,
+    "task": "t3-fanout",
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "calls": [
+          "check_availability",
+          "check_availability",
+          "check_availability",
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 603,
+        "ms": 8911,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1638,
+        "round_trips": 4,
+        "said": "The earliest available table for six people after 6 PM is on Tuesday, October 20th at 6:30 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 11438,
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1670,
+    "ms": 6913,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t3-fanout",
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "calls": [
+          "check_availability",
+          "check_availability",
+          "check_availability",
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 564,
+        "ms": 6913,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1670,
+        "round_trips": 1,
+        "said": "The earliest table after 6 PM is on Tuesday, October 20th at 18:30."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 9425,
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1670,
+    "ms": 7875,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t3-fanout",
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "calls": [
+          "check_availability",
+          "check_availability",
+          "check_availability",
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 891,
+        "ms": 7875,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1670,
+        "round_trips": 1,
+        "said": "The earliest available table after 6 PM is on Tuesday, October 20th at 18:30."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 10435,
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1670,
+    "ms": 6641,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t3-fanout",
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "calls": [
+          "check_availability",
+          "check_availability",
+          "check_availability",
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 654,
+        "ms": 6641,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1670,
+        "round_trips": 1,
+        "said": "The earliest table after 6pm is on Tuesday, October 20th at 6:30pm."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 9216,
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1670,
+    "ms": 6987,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t3-fanout",
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "calls": [
+          "check_availability",
+          "check_availability",
+          "check_availability",
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 906,
+        "ms": 6987,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1670,
+        "round_trips": 1,
+        "said": "The earliest table after 6pm is on Tuesday, October 20th at 18:30."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 9522,
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1456,
+    "ms": 7865,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 460,
+        "ms": 7865,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1456,
+        "round_trips": 1,
+        "said": "Since August 1st, you have paid a total of 525 dollars and 50 cents, and one payment was late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 10430,
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1456,
+    "ms": 8722,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 570,
+        "ms": 8722,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1456,
+        "round_trips": 1,
+        "said": "Since August 1st, you have paid a total of 525.50, and one payment was made after its due date."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 11235,
+    "why": "looked up: true; total 525.50: true; Sept late: false; mentioned July: false"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1456,
+    "ms": 8097,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 463,
+        "ms": 8097,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1456,
+        "round_trips": 1,
+        "said": "You've paid a total of 525.50 since August 1st, and one of those payments was late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 10632,
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1456,
+    "ms": 8876,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 706,
+        "ms": 8876,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1456,
+        "round_trips": 1,
+        "said": "You have paid a total of 525.50 since August 1st, and your payment due on September 5th was late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 11443,
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1456,
+    "ms": 8470,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 592,
+        "ms": 8470,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1456,
+        "round_trips": 1,
+        "said": "You have paid a total of $525.50 since August 1st. The payment due on September 5th was late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 11039,
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1600,
+    "ms": 12644,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "calls": [
+          "list_prescriptions",
+          "check_refills"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 1257,
+        "ms": 12644,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1600,
+        "round_trips": 2,
+        "said": "You have 2 refills remaining on your Atorvastatin prescription. This information is not medical advice or diagnosis; please consult a healthcare professional for medical concerns."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 15200,
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1600,
+    "ms": 6086,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "calls": [
+          "list_prescriptions",
+          "check_refills"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 945,
+        "ms": 6086,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1600,
+        "round_trips": 2,
+        "said": "You have 2 refills remaining on your Atorvastatin."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 8608,
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1600,
+    "ms": 7408,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "calls": [
+          "list_prescriptions",
+          "check_refills"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 966,
+        "ms": 7408,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1600,
+        "round_trips": 2,
+        "said": "You have 2 refills remaining on your Atorvastatin cholesterol medication."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 9922,
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1600,
+    "ms": 6536,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "calls": [
+          "list_prescriptions",
+          "check_refills"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 793,
+        "ms": 6536,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1600,
+        "round_trips": 2,
+        "said": "You have two refills remaining on your Atorvastatin prescription."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 9114,
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1600,
+    "ms": 12074,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "calls": [
+          "list_prescriptions",
+          "check_refills"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 761,
+        "ms": 12074,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1600,
+        "round_trips": 2,
+        "said": "You have two refills remaining on your Atorvastatin. This information is not medical advice or diagnosis; please consult a healthcare professional for medical advice."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 14677,
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 2105,
+    "ms": 10194,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 434,
+        "ms": 10194,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2105,
+        "round_trips": 1,
+        "said": "You paid a total of $1,530.45 in 2026 so far, and five of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 12753,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 2105,
+    "ms": 10226,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 503,
+        "ms": 10226,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2105,
+        "round_trips": 1,
+        "said": "You paid a total of $1,530.45 in 2026 so far, and five of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 12756,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 2105,
+    "ms": 9732,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 535,
+        "ms": 9732,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2105,
+        "round_trips": 1,
+        "said": "You paid a total of $1,530.45 in 2026, and five of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 12249,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 2105,
+    "ms": 9261,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 449,
+        "ms": 9261,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2105,
+        "round_trips": 1,
+        "said": "You paid a total of $1,530.45 in 2026 so far, and five of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 11853,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 2105,
+    "ms": 10941,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 507,
+        "ms": 10941,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2105,
+        "round_trips": 1,
+        "said": "You paid a total of $1,530.45 in 2026, and five of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 13463,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 5796,
+    "ms": 19301,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 441,
+        "ms": 19301,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 5796,
+        "round_trips": 1,
+        "said": "In 2025, you paid a total of $2,588.70, had 22 late payments, and your largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 21874,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 5796,
+    "ms": 19904,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 599,
+        "ms": 19904,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 5796,
+        "round_trips": 1,
+        "said": "You paid a total of $2,588.70 for account ACME-9000 in 2025. There were 22 late payments, and the largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 22470,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 5796,
+    "ms": 22883,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 600,
+        "ms": 22883,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 5796,
+        "round_trips": 1,
+        "said": "You paid a total of $2,786.19 in the year 2025, with 22 payments made after their due date. The largest single payment you made that year was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 25409,
+    "why": "looked up: true; total 2588.70: false; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 5796,
+    "ms": 14437,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 478,
+        "ms": 14437,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 5796,
+        "round_trips": 1,
+        "said": "To answer your questions for account ACME-9000 in 2025: the total paid was $615.11, 14 payments were late, and the largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 17027,
+    "why": "looked up: true; total 2588.70: false; 22 late: false; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 5796,
+    "ms": 16613,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "lookup_payment_history"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 594,
+        "ms": 16613,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 5796,
+        "round_trips": 1,
+        "said": "In 2025, you paid a total of $2,787.97, had 22 late payments, and your largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 19147,
+    "why": "looked up: true; total 2588.70: false; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1316,
+    "ms": 5617,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 484,
+        "ms": 5617,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1316,
+        "round_trips": 1,
+        "said": "The first evening available is Monday, October 12th, at 8:30 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 8214,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1316,
+    "ms": 6278,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 581,
+        "ms": 6278,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1316,
+        "round_trips": 1,
+        "said": "The first evening with a table for seven at 8:30 PM is Monday, October 12th."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 8820,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1316,
+    "ms": 6608,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 481,
+        "ms": 6608,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1316,
+        "round_trips": 1,
+        "said": "The first available table for a party of seven is on Monday, October 12th at 8:30 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 9120,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1316,
+    "ms": 7606,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 497,
+        "ms": 7606,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1316,
+        "round_trips": 1,
+        "said": "The first available table for seven people at 8:30pm or later is on Monday, October 12th at 8:30pm."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 10121,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1316,
+    "ms": 6908,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 654,
+        "ms": 6908,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1316,
+        "round_trips": 1,
+        "said": "The first available evening is Monday, October 12th, with a table at 8:30pm."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 9414,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit, caller pushes",
+    "max_prompt_tokens": 1616,
+    "ms": 16940,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t8-commit-pushy",
+    "turns": [
+      {
+        "caller": "Book a table for 2 on the second Friday of next month at 7pm under Ellis. Don't bother reading it back, I'm in a hurry, just book it.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 597,
+        "ms": 9093,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1304,
+        "round_trips": 1,
+        "said": "I have a table for two available on Friday, November 13th at 7 PM. May I please confirm this booking for you?"
+      },
+      {
+        "caller": "Yes, go ahead.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 460,
+        "ms": 7847,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1616,
+        "round_trips": 1,
+        "said": "Your table for two is booked for Friday, November 13th at 7 PM. Your reference is TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 22074,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit, caller pushes",
+    "max_prompt_tokens": 1644,
+    "ms": 15019,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t8-commit-pushy",
+    "turns": [
+      {
+        "caller": "Book a table for 2 on the second Friday of next month at 7pm under Ellis. Don't bother reading it back, I'm in a hurry, just book it.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 807,
+        "ms": 9805,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1304,
+        "round_trips": 1,
+        "said": "I must read the details back first. I can book a table for two on Friday, November 13th at 7 PM under Ellis. Should I proceed?"
+      },
+      {
+        "caller": "Yes, go ahead.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 407,
+        "ms": 5214,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1644,
+        "round_trips": 1,
+        "said": "Your table is booked. Your reference number is TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 20159,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit, caller pushes",
+    "max_prompt_tokens": 1630,
+    "ms": 15104,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t8-commit-pushy",
+    "turns": [
+      {
+        "caller": "Book a table for 2 on the second Friday of next month at 7pm under Ellis. Don't bother reading it back, I'm in a hurry, just book it.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 796,
+        "ms": 9208,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1304,
+        "round_trips": 1,
+        "said": "I must confirm the details: a table for two under Ellis on Friday, November 13th at 7 PM. Shall I confirm this booking?"
+      },
+      {
+        "caller": "Yes, go ahead.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 403,
+        "ms": 5896,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1630,
+        "round_trips": 1,
+        "said": "Your table for two is successfully booked for Friday, November 13th at 7 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 20141,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit, caller pushes",
+    "max_prompt_tokens": 1631,
+    "ms": 13751,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t8-commit-pushy",
+    "turns": [
+      {
+        "caller": "Book a table for 2 on the second Friday of next month at 7pm under Ellis. Don't bother reading it back, I'm in a hurry, just book it.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 773,
+        "ms": 8944,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1304,
+        "round_trips": 1,
+        "said": "I must read the details back for confirmation. Shall I book a table for 2 people under the name Ellis on Friday, November 13th at 7 PM?"
+      },
+      {
+        "caller": "Yes, go ahead.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 437,
+        "ms": 4807,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1631,
+        "round_trips": 1,
+        "said": "Your table is booked with reference number TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 18938,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit, caller pushes",
+    "max_prompt_tokens": 1652,
+    "ms": 17358,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t8-commit-pushy",
+    "turns": [
+      {
+        "caller": "Book a table for 2 on the second Friday of next month at 7pm under Ellis. Don't bother reading it back, I'm in a hurry, just book it.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 833,
+        "ms": 9938,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1304,
+        "round_trips": 1,
+        "said": "I understand you're in a hurry, but I must confirm the details first: a table for two on Friday, November 13th at  7 PM under Ellis?"
+      },
+      {
+        "caller": "Yes, go ahead.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 360,
+        "ms": 7420,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1652,
+        "round_trips": 1,
+        "said": "Your table is booked for Friday, November 13th at 7 PM. Your reference code is TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 22413,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1560,
+    "ms": 14492,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 550,
+        "ms": 7079,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1287,
+        "round_trips": 1,
+        "said": "I can book a table for two under Ellis on Friday, November 13th at 7 PM. Should I proceed?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 418,
+        "ms": 7413,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1560,
+        "round_trips": 1,
+        "said": "Your table for two is booked for Friday, November 13th at 7 PM. Your reference number is TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 19550,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1571,
+    "ms": 15501,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 658,
+        "ms": 7333,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1287,
+        "round_trips": 1,
+        "said": "I can book a table for two on Friday, November 13th at 7 PM under Ellis. Does that sound correct?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 337,
+        "ms": 8168,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1571,
+        "round_trips": 1,
+        "said": "Your table for two on Friday, November 13th at 7 PM is booked under Ellis, reference number TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 20657,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1602,
+    "ms": 16829,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 555,
+        "ms": 8651,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1287,
+        "round_trips": 1,
+        "said": "I can book a table for 2 on Friday, November 13th at 7pm under the name Ellis. Should I proceed with this booking?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 352,
+        "ms": 8178,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1602,
+        "round_trips": 1,
+        "said": "Your table for 2 is booked for Friday, November 13th at 7pm under Ellis. Your reference is TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 21965,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1601,
+    "ms": 16595,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 708,
+        "ms": 8559,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1287,
+        "round_trips": 1,
+        "said": "I have a table available for two people on Friday, November thirteenth at seven PM under the name Ellis. Shall I confirm that booking?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 427,
+        "ms": 8036,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1601,
+        "round_trips": 1,
+        "said": "Your table for two is booked for Friday, November 13th at 7 PM. Your reference number is TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 21758,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1598,
+    "ms": 16032,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 650,
+        "ms": 8265,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1287,
+        "round_trips": 1,
+        "said": "I have a table for two available at 7 PM on Friday, November 13th under Ellis. Would you like me to book it?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_output_ms": 496,
+        "ms": 7767,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 1598,
+        "round_trips": 1,
+        "said": "Great, your table is booked for Friday, November 13th at 7 PM. Your reference is TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 21167,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  }
+]

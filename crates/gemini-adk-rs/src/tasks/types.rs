@@ -336,6 +336,10 @@ fn empty_object() -> Value {
     Value::Object(serde_json::Map::new())
 }
 
+/// The longest skill name: its entry point, `start_{skill}`, must fit the
+/// Live API's 64-character function names.
+pub const MAX_SKILL_NAME: usize = 64 - "start_".len();
+
 /// Validate identity shared by compiled catalogs and authoring documents.
 pub fn validate_skill_identity(name: &str, version: &str) -> Result<(), TaskError> {
     if !valid_name(name) || version.trim().is_empty() {
@@ -343,6 +347,13 @@ pub fn validate_skill_identity(name: &str, version: &str) -> Result<(), TaskErro
             "skill names must be ASCII identifiers without '__', and versions must be nonempty"
                 .into(),
         ));
+    }
+    if name.len() > MAX_SKILL_NAME {
+        return Err(TaskError(format!(
+            "skill name '{name}' is {} characters; at most {MAX_SKILL_NAME} fit, so that \
+             start_{name} fits the 64-character function name limit",
+            name.len()
+        )));
     }
     Ok(())
 }

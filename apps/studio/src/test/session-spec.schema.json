@@ -231,7 +231,7 @@
           ]
         },
         "output_chars": {
-          "description": "Characters of a program's result the model reads. Default 4000.",
+          "description": "Characters of a program's result (and of its printed output) the model reads. Default 2000.",
           "format": "uint",
           "minimum": 0.0,
           "type": [
@@ -275,6 +275,13 @@
             }
           ],
           "description": "Bounds on each program."
+        },
+        "only_in_code": {
+          "description": "Tools a program can call that are declared only through the code tool, whatever `direct` says: those whose results the model should not read whole, such as a long history. Listed tools join `functions`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "tool": {
           "description": "The code tool's name. Default `run_code`.",

@@ -156,7 +156,23 @@ not have.
   them. The shipped wording tells it to call the function inside the program
   whenever the answer needs arithmetic, and to rely on the docstrings.
 
-<!-- SDK_RESULTS -->
+### Measured through the SDK
+
+The same ten tasks through `Live` sessions (five runs each, Gemini 3.8 Live;
+details in [code mode](../user-guide/code-mode.md#what-it-measured)):
+
+| Configuration | Right | 120 rows: right, reply, prompt tokens |
+|---|---|---|
+| Function calls only | 46/50 | 2/5, 19.3 s, 5,796 |
+| Code only | 49/50 | 5/5, 13.3 s, 4,225 |
+| Hybrid (default) | 50/50 | 5/5, 18.1 s, 9,782 |
+| Hybrid, history `only_in_code` | 48/50 | 5/5, 12.0 s, 1,959 |
+
+Spoken callers on the 120 rows waited 8.3 s for the first audio with
+function calls and 2.1 s with the history `only_in_code`. In a skill, 4 of 5
+runs were right, every lookup an operation of the skill's task. Live runs
+also found a panic on a malformed stub, fixed, and that a cut printout gets
+answered from as if whole, so an oversized one is now refused.
 
 ## Not covered yet
 
