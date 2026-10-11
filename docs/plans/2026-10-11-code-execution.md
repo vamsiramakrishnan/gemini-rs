@@ -1,6 +1,6 @@
 # Code execution in a voice agent: does it beat function calls?
 
-Status: experiment done; integration proposed. Date: 2026-10-11.
+Status: shipped as [code mode](../user-guide/code-mode.md) (PR #100). Date: 2026-10-11.
 Harness and raw results: [`evals/code-mode`](../../evals/code-mode/README.md).
 
 ## The question
@@ -126,35 +126,42 @@ sandbox can run author-written Python for:
 These are deterministic, testable offline, and add no model latency. This
 experiment did not measure them, since no model is involved.
 
-## How it would fit the SDK
+## What shipped
 
-- **A tool kind, not a mode.** A spec names the functions code mode exposes,
-  for example `{"code": {"functions": ["lookup_payment_history",
-  "check_availability"], "limits": {"calls": 20, "ms": 2000}}}`, and the
-  runtime declares `run_code` with Python stubs generated from those tools'
-  declarations. Under `ContextUpdate` steering, a stage that allows
-  `run_code` declares it, and one that does not leaves it out.
-- **Every call is a tool call.** Each function a program calls goes down the
-  existing path: flow admission, the decision gate, middleware, the
-  journal, `set_state` and `save_response_as`. Commit tools are left out of
-  the functions by default.
-- **What the model reads** is the program's final value; the journal keeps
-  each call and its full result.
-- **Packaging is the open decision.** Monty 1.1.0 declares Rust 1.96 but
-  needs a newer standard library (1.99 builds it), and the workspace's
-  floor is 1.93. The options:
-  - Raise the workspace's minimum Rust, which affects every user.
-  - Add a separate optional crate with its own minimum.
-  - Run Monty out of process (`monty-pool`, which also isolates a crash
-    inside the interpreter, as Monty's own docs recommend for untrusted
-    code) and depend on nothing at compile time.
-- The existing `code_executors::CodeExecutor` trait runs code and returns
-  its output, with no calls back into the host, so it does not fit code
-  mode as it stands.
+The design below was built as proposed, with two answers the experiment did
+not have.
+
+- **A tool kind, not a mode.** `CodeMode` (fluent `Live::code_mode`, spec
+  `code`, skill `code`) declares `run_code` with Python stubs generated from
+  the tools' declarations; `ToolSpec.returns` (or a mock's response) gives the
+  result shape. Under `ContextUpdate` steering it is declared while the flow
+  offers a function it exposes, and lists only those.
+- **Every call is a tool call.** A program's calls go down the session's
+  governed path one by one (phase tools, decision gate, flow gate with
+  extraction of the turn in progress, middleware, the tool, the flow
+  advance); in a skill each is a task invocation. Commits are left out by
+  default, and a skill refuses one outright.
+- **Packaging: raise the floor.** The workspace's minimum Rust is now 1.99,
+  and the in-process sandbox is a default feature. Raising the floor cost one
+  round of fixes for the lints 1.99's clippy adds, and a boxed error variant.
+- **Isolation: both, by choice.** Measured in-process, `'a' * 10**10` aborts
+  the process under a 4 GB address-space limit or allocates 10 GB and runs 37
+  s past a 2 s limit. So the in-process sandbox is for development and
+  trusted deployments, and `MontyPool` (feature `code-pool`) runs programs in
+  Monty worker processes with a memory cap, where the same program ends only
+  its worker.
+- **The description matters.** The wording first proposed ("for a single
+  lookup, call the tool directly") made Gemini 3.8 Live fetch 120 rows with a
+  direct call and paste them into a program, and print results to inspect
+  them. The shipped wording tells it to call the function inside the program
+  whenever the answer needs arithmetic, and to rely on the docstrings.
+
+<!-- SDK_RESULTS -->
 
 ## Not covered yet
 
 - Spoken callers: numbers heard by speech recognition, and the audio a
   caller waits through before the first action.
-- Code mode inside skills, where each skill would expose its own functions.
-- Author-written guards and projections, measured against the same tasks.
+- Code mode inside skills, measured live (it is built and tested offline).
+- Author-written guards and projections. The sandbox can run them; nothing
+  is built on it yet.

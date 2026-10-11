@@ -195,6 +195,123 @@ pub fn arguments(
     Ok(Value::Object(args))
 }
 
+/// `source` without its own stand-ins for the session's `functions`.
+///
+/// Shown Python stubs, a model sometimes copies them into its program
+/// (`def check_availability(date, party_size): pass`) or imports them
+/// (`from tools import check_availability`). Either shadows the real
+/// function, so every call returns `None` and the program fails far from the
+/// cause. A definition whose body does nothing (`pass`, `...`, a docstring)
+/// and an import of only these names are removed; any other definition or
+/// assignment of one of them is refused with the reason.
+pub fn without_redefinitions(source: &str, functions: &[String]) -> Result<String, String> {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut kept: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        if let Some(name) = defined_name(trimmed).filter(|n| functions.iter().any(|f| f == n)) {
+            // The signature may span lines; it ends at the line ending in ':'.
+            let mut end = i;
+            while end < lines.len() && !strip_comment(lines[end]).trim_end().ends_with(':') {
+                end += 1;
+            }
+            let mut body_end = end + 1;
+            while body_end < lines.len() {
+                let next = lines[body_end];
+                let next_indent = next.len() - next.trim_start().len();
+                if next.trim().is_empty() || next_indent > indent {
+                    body_end += 1;
+                } else {
+                    break;
+                }
+            }
+            let body = lines[(end + 1).min(lines.len())..body_end].join("\n");
+            if !does_nothing(&body) {
+                return Err(redefined(name));
+            }
+            i = body_end;
+            continue;
+        }
+        if let Some(imported) = imported_names(trimmed)
+            && imported.iter().all(|n| functions.iter().any(|f| f == n))
+        {
+            i += 1;
+            continue;
+        }
+        if let Some(name) = assigned_name(trimmed).filter(|n| functions.iter().any(|f| f == n)) {
+            return Err(redefined(name));
+        }
+        kept.push(line);
+        i += 1;
+    }
+    Ok(kept.join("\n"))
+}
+
+fn redefined(name: &str) -> String {
+    format!(
+        "The program defines '{name}', which is already defined: it calls the \
+         session's tool. Delete your definition and call {name}(...) directly."
+    )
+}
+
+/// The name in `def name(`.
+fn defined_name(line: &str) -> Option<&str> {
+    let rest = line
+        .strip_prefix("def ")
+        .or_else(|| line.strip_prefix("async def "))?;
+    let name = rest.split('(').next()?.trim();
+    is_identifier(name).then_some(name)
+}
+
+/// The names in `from module import a, b as c` (the local names).
+fn imported_names(line: &str) -> Option<Vec<&str>> {
+    let rest = line.strip_prefix("from ")?;
+    let (_, names) = rest.split_once(" import ")?;
+    let names = names.trim().trim_start_matches('(').trim_end_matches(')');
+    Some(
+        names
+            .split(',')
+            .map(|n| n.split(" as ").last().unwrap_or(n).trim())
+            .filter(|n| !n.is_empty())
+            .collect(),
+    )
+}
+
+/// The name in `name = ...` (not `==`).
+fn assigned_name(line: &str) -> Option<&str> {
+    let (name, rest) = line.split_once('=')?;
+    if rest.starts_with('=') {
+        return None;
+    }
+    let name = name.trim();
+    is_identifier(name).then_some(name)
+}
+
+fn strip_comment(line: &str) -> &str {
+    line.split('#').next().unwrap_or(line)
+}
+
+/// Whether a function body does nothing: only `pass`, `...`, `return`,
+/// `return None`, docstrings and comments.
+fn does_nothing(body: &str) -> bool {
+    let mut text = body.to_string();
+    for quote in ["\"\"\"", "\'\'\'"] {
+        while let Some(start) = text.find(quote) {
+            let Some(len) = text[start + 3..].find(quote) else {
+                return false;
+            };
+            text.replace_range(start..start + 3 + len + 3, "");
+        }
+    }
+    text.lines()
+        .map(|l| strip_comment(l).trim())
+        .filter(|l| !l.is_empty())
+        .all(|l| matches!(l, "pass" | "..." | "return" | "return None"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,5 +400,37 @@ mod tests {
             behavior: None,
         };
         assert!(python_stub(&declaration, None).starts_with("def lookup(**kwargs) -> dict:"));
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn a_copied_stub_or_import_is_removed() {
+        let source = "import json\nfrom tools import check_availability\n\
+                      def check_availability(date: str,\n        party_size: int) -> dict:\n    \
+                      \"\"\"Open table times.\"\"\"\n    pass  # defined by the system\n\n\
+                      times = check_availability('2026-10-12', 4)\ntimes";
+        let cleaned = without_redefinitions(source, &names(&["check_availability"])).unwrap();
+        assert_eq!(
+            cleaned,
+            "import json\ntimes = check_availability('2026-10-12', 4)\ntimes"
+        );
+    }
+
+    #[test]
+    fn a_real_redefinition_is_refused() {
+        let wraps = "def check_availability(date, party_size):\n    return {'times': []}\n";
+        let err = without_redefinitions(wraps, &names(&["check_availability"])).unwrap_err();
+        assert!(err.contains("Delete your definition"), "{err}");
+        let mock = "check_availability = lambda d, p: {}\n";
+        assert!(without_redefinitions(mock, &names(&["check_availability"])).is_err());
+        // Other definitions and comparisons stay.
+        let fine = "def helper(x):\n    return x\nok = 1 == 1\nhelper(2)";
+        assert_eq!(
+            without_redefinitions(fine, &names(&["check_availability"])).unwrap(),
+            fine
+        );
     }
 }

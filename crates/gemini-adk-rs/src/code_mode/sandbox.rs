@@ -67,6 +67,11 @@ pub struct Unavailable;
 
 struct Ended;
 
+/// An execution that has already ended.
+pub(super) fn ended() -> Box<dyn Execution> {
+    Box::new(Ended)
+}
+
 #[async_trait]
 impl Execution for Ended {
     async fn resume(&mut self, _answer: Result<Value, String>) -> Suspension {

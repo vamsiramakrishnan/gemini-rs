@@ -43,7 +43,7 @@ def regrade(r):
         return calls_ok and any(s in text for s in spoken_times("17:30"))
     if task in ("t7-aggregate-large", "t9-aggregate-120"):
         nums = {"5": "five", "22": "twenty-two"}
-        fixed = text.replace(",", "")
+        fixed = re.sub(r"(\d+) dollars and (\d+) cents", r"\1.\2", text.replace(",", ""))
         for k, v in nums.items():
             fixed = fixed.replace(v, k)
         total = "1530.45" if task.startswith("t7") else "2588.70"

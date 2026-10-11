@@ -69,7 +69,7 @@ pub use monty::InProcess;
 #[cfg(feature = "code-pool")]
 pub use pool::MontyPool;
 pub use sandbox::{CodeSandbox, Execution, Suspension, Unavailable};
-pub use stubs::{arguments, parameters, python_stub};
+pub use stubs::{arguments, parameters, python_stub, without_redefinitions};
 
 /// The default name of the code tool.
 pub const DEFAULT_TOOL: &str = "run_code";
@@ -315,7 +315,10 @@ impl CodeMode {
                  rely on it rather than printing results to look at them. End the \
                  program with an expression holding only the values you need to \
                  answer. The functions are already defined: call them directly; \
-                 never import, define or mock them. A call the conversation does \
+                 never import, define or mock them. Keep judgments of meaning out \
+                 of the program: when a choice depends on what something is (which \
+                 medication treats a condition), return the candidates and decide \
+                 yourself. date.weekday() counts Monday as 0. A call the conversation does \
                  not allow yet raises RuntimeError with the reason: tell the \
                  caller what is needed instead of retrying. The program can \
                  import datetime, math, json and re.\n\n{}",
@@ -411,7 +414,10 @@ impl CodeMode {
             .filter(|d| self.exposes(&d.name))
             .cloned()
             .collect();
-        let (execution, first) = self.sandbox.start(program, &names, &self.limits).await;
+        let (execution, first) = match without_redefinitions(program, &names) {
+            Ok(source) => self.sandbox.start(&source, &names, &self.limits).await,
+            Err(reason) => (sandbox::ended(), Suspension::failed(reason)),
+        };
         let mut program = Program {
             mode: self.clone(),
             execution,
