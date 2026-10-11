@@ -1,0 +1,20 @@
+[package]
+name = "python-vs-rust"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "The same Live voice agent in Python (google-genai) and Rust (gemini-rs), under load against a local stand-in"
+
+# Outside the workspace: a load harness, not part of CI. Nothing here dials a
+# real model; every run talks to a local stand-in.
+[workspace]
+
+[dependencies]
+gemini-genai-rs = { path = "../../crates/gemini-genai-rs", features = ["live", "tls-native"] }
+gemini-adk-rs = { path = "../../crates/gemini-adk-rs" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+async-trait = "0.1"
+serde_json = "1"
+
+[profile.release]
+debug = false
