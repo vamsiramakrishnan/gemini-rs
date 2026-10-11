@@ -323,7 +323,9 @@ impl Live {
         if let Some(timeout) = self.soft_turn_timeout {
             builder = builder.soft_turn_timeout(timeout);
         }
-        builder = builder.steering_mode(self.steering_mode);
+        if let Some(mode) = self.steering_mode {
+            builder = builder.steering_mode(mode);
+        }
         builder = builder.context_delivery(self.context_delivery);
         builder = builder.delivery(self.delivery);
         if let Some(redactor) = self.redactor {

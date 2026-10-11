@@ -364,6 +364,10 @@ pub(crate) struct ControlPlaneConfig {
     /// [`SteeringMode::ContextUpdate`] on a model that accepts it. `None`
     /// otherwise: then tools are declared once, at connect.
     pub tool_scope: Option<Arc<super::tool_scope::ToolScope>>,
+    /// Every task tool declaration and the names declared now, in a task
+    /// session on a model that accepts `contextUpdate`. `None` otherwise:
+    /// then every skill's tools are declared at connect.
+    pub task_scope: Option<Arc<super::tool_scope::ToolScope>>,
     /// Shared pending context buffer for deferred delivery (None when Immediate).
     /// Must be the same Arc given to the DeferredWriter so the control lane
     /// can push context and the DeferredWriter can drain it.
@@ -448,6 +452,7 @@ impl Default for ControlPlaneConfig {
             session_id: None,
             tool_advisory: true,
             tool_scope: None,
+            task_scope: None,
             pending_context: None,
             middleware: Arc::new(crate::middleware::MiddlewareChain::new()),
             flow: None,

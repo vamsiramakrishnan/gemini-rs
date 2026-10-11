@@ -64,17 +64,28 @@ async fn task_catalog_and_qualified_tools_reach_the_provider_setup() {
         .collect();
     assert_eq!(
         names,
-        ["task_control", "billing__lookup", "billing__adjust"]
+        [
+            "task_control",
+            "start_billing",
+            "start_faq",
+            "billing__lookup",
+            "billing__adjust"
+        ]
     );
-    assert_eq!(declarations[1]["behavior"], "NON_BLOCKING");
+    // Each skill's entry point takes its inputs as typed parameters.
+    let start = &declarations[1]["parameters"];
+    assert_eq!(start["properties"]["invoice"]["type"], "string");
+    assert_eq!(start["required"], json!(["invoice"]));
+    assert!(start.get("additionalProperties").is_none());
+    assert_eq!(declarations[3]["behavior"], "NON_BLOCKING");
     assert!(
-        declarations[2]["description"]
+        declarations[4]["description"]
             .as_str()
             .unwrap()
             .contains("creates an approval proposal")
     );
     assert_eq!(
-        declarations[2]["parameters"]["properties"]["request_id"]["type"],
+        declarations[4]["parameters"]["properties"]["request_id"]["type"],
         "string"
     );
     let instruction = setup["systemInstruction"]["parts"]

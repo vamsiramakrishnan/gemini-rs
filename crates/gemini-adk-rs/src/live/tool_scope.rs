@@ -34,6 +34,9 @@ pub(crate) struct ToolScope {
     base_instruction: Option<String>,
     /// The function names the model has declared now, sorted.
     declared: Mutex<Vec<String>>,
+    /// The system instruction the model has now, when [`sync`](Self::sync)
+    /// manages it (task sessions). Starts as the connect-time instruction.
+    instruction: Mutex<Option<String>>,
 }
 
 impl ToolScope {
@@ -46,6 +49,7 @@ impl ToolScope {
     ) -> Self {
         Self {
             catalog,
+            instruction: Mutex::new(base_instruction.clone()),
             base_instruction,
             declared: Mutex::new(declared.iter().cloned().collect()),
         }
@@ -81,9 +85,45 @@ impl ToolScope {
         Some(self.tools_for(names))
     }
 
+    /// The connect-time system instruction.
+    pub(crate) fn base_instruction(&self) -> Option<&str> {
+        self.base_instruction.as_deref()
+    }
+
     /// The function names declared now.
     pub(crate) fn declared(&self) -> Vec<String> {
         self.declared.lock().clone()
+    }
+
+    /// Record `names` and `instruction` as what the model has, and return the
+    /// update that brings it there: only the fields that changed, `None` when
+    /// neither did. Each update invalidates the server's prefix cache, so
+    /// nothing is sent for an unchanged list or instruction.
+    pub(crate) fn sync(
+        &self,
+        names: &BTreeSet<String>,
+        instruction: Option<String>,
+    ) -> Option<ContextUpdate> {
+        let tools = self.redeclare(names);
+        let instruction = instruction.filter(|next| {
+            let mut current = self.instruction.lock();
+            if current.as_deref() == Some(next.as_str()) {
+                return false;
+            }
+            *current = Some(next.clone());
+            true
+        });
+        if tools.is_none() && instruction.is_none() {
+            return None;
+        }
+        let mut update = ContextUpdate::new();
+        if let Some(tools) = tools {
+            update = update.tools(tools);
+        }
+        if let Some(instruction) = instruction {
+            update = update.system_instruction(instruction);
+        }
+        Some(update)
     }
 
     /// The system instruction for a phase: the connect-time instruction with

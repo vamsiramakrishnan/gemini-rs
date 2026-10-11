@@ -709,7 +709,7 @@ impl Live {
     ///   and the declared tools, so the model is offered only the current
     ///   phase's and step's tools. Falls back to `Hybrid` on other models.
     pub fn steering_mode(mut self, mode: SteeringMode) -> Self {
-        self.steering_mode = mode;
+        self.steering_mode = Some(mode);
         self
     }
 

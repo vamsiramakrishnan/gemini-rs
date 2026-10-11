@@ -9,7 +9,9 @@ use gemini_genai_rs::session::SessionWriter;
 use serde_json::{Value, json};
 use tokio::sync::{broadcast, mpsc};
 
+use crate::live::tool_scope::{DECLARED_TOOLS_KEY, ToolScope, compose_instruction};
 use crate::live::{LiveEvent, processor::ControlEvent, task_tools};
+use crate::state::State;
 use crate::tasks::{
     InvocationCompletion, OperationId, OwnedInvocation, TaskCommand, TaskEffect, TaskId,
     TaskObservation, TaskRuntime, TaskSessionSnapshot,
@@ -17,8 +19,16 @@ use crate::tasks::{
 
 use super::task_transcript::{TaskTranscript, foreground};
 
+/// The context turn sent when no task is foreground.
+const NO_FOREGROUND: &str = "No task is foreground. Ask what the caller needs, then start or resume an installed skill with task_control.";
+
 #[derive(Default)]
 pub(super) struct TaskLane {
+    /// Every task tool declaration and what is declared now, on a model that
+    /// accepts `contextUpdate`. `None`: every skill's tools stay declared.
+    scope: Option<Arc<ToolScope>>,
+    /// The session state, where the declared names are published.
+    state: State,
     calls: HashMap<OperationId, FunctionCall>,
     last_instruction: Option<String>,
     last_status: Option<Value>,
@@ -27,6 +37,63 @@ pub(super) struct TaskLane {
 }
 
 impl TaskLane {
+    pub(super) fn new(scope: Option<Arc<ToolScope>>, state: State) -> Self {
+        Self {
+            scope,
+            state,
+            ..Self::default()
+        }
+    }
+
+    /// Bring what the model has declared in line with the foreground task:
+    /// `task_control` and every skill's `start_{skill}`, the tools the
+    /// foreground skill offers now, and any
+    /// tool whose call still waits for its response; and the system
+    /// instruction with the foreground skill's brief after the connect-time
+    /// instruction. Call it before a tool response: updates are processed in
+    /// order with the rest of the input, so the model reads the response with
+    /// the tools it makes available. Does nothing without a scope.
+    async fn sync_context(&self, runtime: &TaskRuntime, writer: &Arc<dyn SessionWriter>) {
+        let Some(scope) = &self.scope else {
+            return;
+        };
+        let mut names = task_tools::entry_names(runtime);
+        if let Some((skill, tools)) = runtime.foreground_offer() {
+            names.extend(tools.iter().map(|tool| format!("{skill}__{tool}")));
+        }
+        // Withdrawing a tool whose call is still open would leave its
+        // response answering a function the model no longer has.
+        names.extend(self.calls.values().map(|call| call.name.clone()));
+        let brief = runtime.foreground_brief().unwrap_or_default();
+        let instruction = compose_instruction(scope.base_instruction(), &brief);
+        if let Some(update) = scope.sync(&names, Some(instruction)) {
+            if let Err(error) = writer.update_context(update).await {
+                tracing::warn!(%error, "re-declaring the task tools failed");
+            }
+            let _ = self
+                .state
+                .session()
+                .set(DECLARED_TOOLS_KEY, scope.declared());
+        }
+    }
+
+    /// The task context sent as a context turn: under a scope only what
+    /// changes as the task runs, its brief riding the system instruction;
+    /// otherwise the whole foreground instruction.
+    fn task_context(&self, runtime: &TaskRuntime) -> String {
+        if self.scope.is_some() {
+            match runtime.foreground_context() {
+                Some(context) if context.is_empty() => "No values or results yet.".into(),
+                Some(context) => context,
+                None => NO_FOREGROUND.into(),
+            }
+        } else {
+            runtime
+                .foreground_instruction()
+                .unwrap_or_else(|| NO_FOREGROUND.into())
+        }
+    }
+
     pub(super) fn check_settled_command(
         &self,
         command: &TaskCommand,
@@ -164,8 +231,11 @@ impl TaskLane {
         completion_tx: &mpsc::WeakSender<ControlEvent>,
     ) {
         for call in calls {
-            let is_control = call.name == task_tools::CONTROL_TOOL;
-            let command = if is_control {
+            let start = task_tools::start_command(&call.name, call.args.clone(), runtime);
+            let is_control = call.name == task_tools::CONTROL_TOOL || start.is_some();
+            let command = if let Some(start) = start {
+                Ok(start)
+            } else if is_control {
                 task_tools::model_command(call.args.clone())
             } else {
                 let snapshot = runtime.snapshot();
@@ -229,7 +299,7 @@ impl TaskLane {
                             json!({"status":"completion_requested", "task":snapshot.foreground,
                                 "instruction":"Finish the current response. Completion will be checked after this turn's extraction and memory work settles; it has not completed yet."})
                         } else {
-                            model_view(runtime, &snapshot)
+                            model_view(runtime, &snapshot, self.scope.is_some())
                         }
                     } else {
                         let pending = snapshot
@@ -250,12 +320,13 @@ impl TaskLane {
                             json!({"operation":operation,"status":status,"task":snapshot.foreground})
                         } else {
                             // Idempotent retries may resolve from a stored receipt without new work.
-                            json!({"status":"settled", "context":model_view(runtime, &snapshot)})
+                            json!({"status":"settled", "context":model_view(runtime, &snapshot, self.scope.is_some())})
                         }
                     }
                 }
             };
             let scheduling = (!is_control).then_some(FunctionResponseScheduling::WhenIdle);
+            self.sync_context(runtime, writer).await;
             if let Err(error) = writer
                 .send_tool_response(vec![FunctionResponse {
                     name: call.name,
@@ -278,6 +349,7 @@ impl TaskLane {
     ) {
         let delivery = runtime.complete(completion);
         let Some(call) = self.calls.remove(&delivery.operation_id) else {
+            self.sync_context(runtime, writer).await;
             return;
         };
         let response = if delivery.foreground && !delivery.stale {
@@ -300,6 +372,10 @@ impl TaskLane {
         } else {
             FunctionResponseScheduling::Silent
         });
+        // The result may have advanced the task's flow: declare what it
+        // offers now, before the model reads the result. The completed call
+        // is no longer open, so its tool may go.
+        self.sync_context(runtime, writer).await;
         if let Err(error) = writer
             .send_tool_response(vec![FunctionResponse {
                 name: call.name,
@@ -385,9 +461,10 @@ impl TaskLane {
         if let Some(cache) = cache {
             *cache.lock() = snapshot.clone();
         }
-        let instruction = runtime.foreground_instruction().unwrap_or_else(|| {
-            "No task is foreground. Ask what the caller needs, then start or resume an installed skill with task_control.".into()
-        });
+        // A turn, a service result or a trusted command may have moved the
+        // foreground task or its flow.
+        self.sync_context(runtime, writer).await;
+        let instruction = self.task_context(runtime);
         if self.last_instruction.as_ref() != Some(&instruction) {
             match writer
                 .send_client_content(
@@ -419,7 +496,10 @@ impl TaskLane {
     }
 }
 
-fn model_view(runtime: &TaskRuntime, snapshot: &TaskSessionSnapshot) -> Value {
+/// The tasks as the model reads them in a `task_control` response. `scoped`:
+/// the foreground skill's brief is in the system instruction, so only its
+/// changing context is repeated here.
+fn model_view(runtime: &TaskRuntime, snapshot: &TaskSessionSnapshot, scoped: bool) -> Value {
     let tasks: Vec<_> = snapshot
         .tasks
         .iter()
@@ -429,5 +509,364 @@ fn model_view(runtime: &TaskRuntime, snapshot: &TaskSessionSnapshot) -> Value {
             })
         })
         .collect();
-    json!({"foreground":snapshot.foreground,"tasks":tasks,"instruction":runtime.foreground_instruction()})
+    let instruction = if scoped {
+        runtime.foreground_context()
+    } else {
+        runtime.foreground_instruction()
+    };
+    json!({"foreground":snapshot.foreground,"tasks":tasks,"instruction":instruction})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tasks::two_skill_runtime;
+    use async_trait::async_trait;
+    use gemini_genai_rs::prelude::{ContextUpdate, Part};
+    use gemini_genai_rs::session::SessionError;
+    use parking_lot::Mutex;
+
+    /// What the lane sent, in order.
+    #[derive(Debug, Clone, PartialEq)]
+    enum Sent {
+        Update {
+            tools: Option<Vec<String>>,
+            instruction: Option<String>,
+        },
+        Response(String),
+        Context(String),
+    }
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<Sent>>);
+
+    impl Recorder {
+        fn take(&self) -> Vec<Sent> {
+            std::mem::take(&mut *self.0.lock())
+        }
+    }
+
+    #[async_trait]
+    impl SessionWriter for Recorder {
+        async fn send_audio(&self, _: bytes::Bytes) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_text(&self, _: String) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn send_tool_response(
+            &self,
+            responses: Vec<FunctionResponse>,
+        ) -> Result<(), SessionError> {
+            let mut sent = self.0.lock();
+            sent.extend(responses.into_iter().map(|r| Sent::Response(r.name)));
+            Ok(())
+        }
+        async fn send_client_content(
+            &self,
+            turns: Vec<Content>,
+            _: bool,
+        ) -> Result<(), SessionError> {
+            for turn in turns {
+                for part in turn.parts {
+                    if let Part::Text { text } = part {
+                        self.0.lock().push(Sent::Context(text));
+                    }
+                }
+            }
+            Ok(())
+        }
+        async fn send_video(&self, _: bytes::Bytes) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn update_instruction(&self, _: String) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn update_context(&self, update: ContextUpdate) -> Result<(), SessionError> {
+            let tools = update.tools.map(|tools| {
+                tools
+                    .iter()
+                    .filter_map(|t| t.function_declarations.as_ref())
+                    .flatten()
+                    .map(|d| d.name.clone())
+                    .collect()
+            });
+            let instruction = update.system_instruction.map(|c| {
+                c.parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        Part::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect()
+            });
+            self.0.lock().push(Sent::Update { tools, instruction });
+            Ok(())
+        }
+        async fn signal_activity_start(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn signal_activity_end(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+        async fn disconnect(&self) -> Result<(), SessionError> {
+            Ok(())
+        }
+    }
+
+    struct Harness {
+        runtime: TaskRuntime,
+        lane: TaskLane,
+        writer: Arc<Recorder>,
+        completions: mpsc::Receiver<ControlEvent>,
+        completion_tx: mpsc::Sender<ControlEvent>,
+    }
+
+    impl Harness {
+        fn new(scoped: bool) -> Self {
+            let runtime = two_skill_runtime();
+            let scope = scoped.then(|| {
+                Arc::new(ToolScope::new(
+                    task_tools::declarations(&runtime),
+                    Some("Base.".into()),
+                    &task_tools::entry_names(&runtime),
+                ))
+            });
+            let (completion_tx, completions) = mpsc::channel(8);
+            Self {
+                runtime,
+                lane: TaskLane::new(scope, State::new()),
+                writer: Arc::new(Recorder::default()),
+                completions,
+                completion_tx,
+            }
+        }
+
+        async fn call(&mut self, name: &str, args: Value) {
+            let writer: Arc<dyn SessionWriter> = self.writer.clone();
+            let call = FunctionCall {
+                name: name.into(),
+                args,
+                id: Some(format!("call-{name}")),
+            };
+            self.lane
+                .calls(
+                    vec![call],
+                    &mut self.runtime,
+                    &writer,
+                    &self.completion_tx.downgrade(),
+                )
+                .await;
+        }
+
+        /// Deliver the next tool completion, as the control lane does.
+        async fn complete_next(&mut self) {
+            let writer: Arc<dyn SessionWriter> = self.writer.clone();
+            match self.completions.recv().await {
+                Some(ControlEvent::TaskCompleted(completion)) => {
+                    self.lane
+                        .complete(completion, &mut self.runtime, &writer)
+                        .await;
+                }
+                _ => panic!("expected a task completion"),
+            }
+        }
+
+        async fn publish(&mut self) {
+            let writer: Arc<dyn SessionWriter> = self.writer.clone();
+            let (event_tx, _) = broadcast::channel(8);
+            self.lane
+                .publish(
+                    &mut self.runtime,
+                    &None,
+                    &writer,
+                    &self.completion_tx.downgrade(),
+                    &event_tx,
+                )
+                .await;
+        }
+    }
+
+    fn tools(names: &[&str]) -> Vec<String> {
+        names.iter().map(ToString::to_string).collect()
+    }
+
+    #[tokio::test]
+    async fn starting_a_task_declares_its_offered_tools_before_the_response() {
+        let mut h = Harness::new(true);
+        h.call("task_control", json!({"action":"start","skill":"billing"}))
+            .await;
+        let sent = h.writer.take();
+        let Sent::Update { tools, instruction } = &sent[0] else {
+            panic!("the update goes first: {sent:?}");
+        };
+        // The flow offers `verify` only; `faq__answer` stays undeclared.
+        // Declarations keep the catalog's order.
+        assert_eq!(
+            tools,
+            &Some(self::tools(&[
+                "task_control",
+                "start_billing",
+                "start_faq",
+                "billing__verify"
+            ]))
+        );
+        let instruction = instruction.as_deref().unwrap();
+        assert!(instruction.starts_with("Base.\n\nTask task-1 / skill billing@1.0.0"));
+        assert!(instruction.ends_with("You handle billing."));
+        assert_eq!(sent[1], Sent::Response("task_control".into()));
+    }
+
+    #[tokio::test]
+    async fn a_result_that_advances_the_flow_redeclares_before_the_model_reads_it() {
+        let mut h = Harness::new(true);
+        h.call("task_control", json!({"action":"start","skill":"billing"}))
+            .await;
+        h.call("billing__verify", json!({})).await;
+        h.writer.take();
+        h.complete_next().await;
+        let sent = h.writer.take();
+        assert_eq!(
+            sent,
+            vec![
+                Sent::Update {
+                    tools: Some(tools(&[
+                        "task_control",
+                        "start_billing",
+                        "start_faq",
+                        "billing__pay"
+                    ])),
+                    instruction: None,
+                },
+                Sent::Response("billing__verify".into()),
+            ],
+            "the instruction is unchanged, so only the tools go out"
+        );
+    }
+
+    #[tokio::test]
+    async fn switching_tasks_keeps_a_tool_whose_call_is_still_open() {
+        let mut h = Harness::new(true);
+        h.call("task_control", json!({"action":"start","skill":"billing"}))
+            .await;
+        h.call("billing__verify", json!({})).await;
+        h.call("task_control", json!({"action":"start","skill":"faq"}))
+            .await;
+        let declared: Vec<_> = h
+            .writer
+            .take()
+            .into_iter()
+            .filter_map(|s| match s {
+                Sent::Update { tools: Some(t), .. } => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            declared.last().unwrap(),
+            &[
+                "task_control",
+                "start_billing",
+                "start_faq",
+                "billing__verify",
+                "faq__answer"
+            ],
+            "billing's verify call has not been answered yet"
+        );
+        // Once its response is delivered, it goes.
+        h.complete_next().await;
+        let last = h
+            .writer
+            .take()
+            .into_iter()
+            .find_map(|s| match s {
+                Sent::Update { tools: Some(t), .. } => Some(t),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            last,
+            ["task_control", "start_billing", "start_faq", "faq__answer"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_typed_start_starts_the_skill_with_its_arguments_as_input() {
+        let mut h = Harness::new(true);
+        h.call("start_billing", json!({"account": "A-1"})).await;
+        let snapshot = h.runtime.snapshot();
+        let task = &snapshot.tasks[0];
+        assert_eq!(task.skill.name, "billing");
+        assert_eq!(snapshot.foreground.as_ref(), Some(&task.id));
+        let sent = h.writer.take();
+        assert!(
+            matches!(&sent[0], Sent::Update { tools: Some(t), .. } if t.contains(&"billing__verify".to_string()))
+        );
+        assert_eq!(sent[1], Sent::Response("start_billing".into()));
+
+        // `parent_task` names the parent; it is not part of the input.
+        h.call(
+            "start_faq",
+            json!({"parent_task": task.id.0, "question": "fees?"}),
+        )
+        .await;
+        let snapshot = h.runtime.snapshot();
+        let child = snapshot
+            .tasks
+            .iter()
+            .find(|t| t.skill.name == "faq")
+            .unwrap();
+        assert_eq!(child.parent.as_ref(), Some(&task.id));
+    }
+
+    #[tokio::test]
+    async fn completing_the_task_withdraws_its_tools_and_brief() {
+        let mut h = Harness::new(true);
+        h.call("task_control", json!({"action":"start","skill":"faq"}))
+            .await;
+        h.writer.take();
+        h.call("task_control", json!({"action":"complete","task":"task-1"}))
+            .await;
+        let sent = h.writer.take();
+        assert_eq!(
+            sent[0],
+            Sent::Update {
+                tools: Some(tools(&["task_control", "start_billing", "start_faq"])),
+                instruction: Some("Base.".into()),
+            }
+        );
+        assert_eq!(sent[1], Sent::Response("task_control".into()));
+    }
+
+    #[tokio::test]
+    async fn the_context_turn_carries_only_what_changes_under_a_scope() {
+        let mut scoped = Harness::new(true);
+        scoped
+            .call("task_control", json!({"action":"start","skill":"billing"}))
+            .await;
+        scoped.publish().await;
+        let context = scoped
+            .writer
+            .take()
+            .into_iter()
+            .find_map(|s| match s {
+                Sent::Context(text) => Some(text),
+                _ => None,
+            })
+            .unwrap();
+        assert!(!context.contains("You handle billing."), "{context}");
+
+        // Without a scope nothing is re-declared and the whole instruction
+        // rides the context turn, as before.
+        let mut plain = Harness::new(false);
+        plain
+            .call("task_control", json!({"action":"start","skill":"billing"}))
+            .await;
+        plain.publish().await;
+        let sent = plain.writer.take();
+        assert!(!sent.iter().any(|s| matches!(s, Sent::Update { .. })));
+        assert!(
+            sent.iter()
+                .any(|s| matches!(s, Sent::Context(text) if text.contains("You handle billing.")))
+        );
+    }
 }

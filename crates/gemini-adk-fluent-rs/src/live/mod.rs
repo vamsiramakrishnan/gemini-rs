@@ -178,7 +178,8 @@ pub struct Live {
     pub(crate) warm_up_llms: Vec<Arc<dyn BaseLlm>>,
     // Control plane configuration.
     pub(crate) soft_turn_timeout: Option<Duration>,
-    pub(crate) steering_mode: SteeringMode,
+    /// `None` until set, so a task session can steer by its foreground task.
+    pub(crate) steering_mode: Option<SteeringMode>,
     pub(crate) context_delivery: ContextDelivery,
     pub(crate) delivery: gemini_adk_rs::live::DeliveryConfig,
     pub(crate) redactor: Option<gemini_adk_rs::live::redaction::TranscriptRedactor>,
@@ -307,7 +308,7 @@ impl Live {
             deferred_tools: Vec::new(),
             warm_up_llms: Vec::new(),
             soft_turn_timeout: None,
-            steering_mode: SteeringMode::default(),
+            steering_mode: None,
             context_delivery: ContextDelivery::default(),
             delivery: gemini_adk_rs::live::DeliveryConfig::default(),
             redactor: None,

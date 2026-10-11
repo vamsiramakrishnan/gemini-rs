@@ -71,7 +71,8 @@ pub(in crate::live) async fn run_control_lane(
     // Persists across tool-call events so inline and (later) background
     // completions dedupe by call_id.
     let mut tool_gate = ToolGate::new();
-    let mut task_lane = super::task_handler::TaskLane::default();
+    let mut task_lane =
+        super::task_handler::TaskLane::new(control_plane.task_scope.clone(), state.clone());
 
     // Accumulated transcript text for the current turn, used to synthesize the
     // `is_final = true` transcript callbacks at the turn boundary.

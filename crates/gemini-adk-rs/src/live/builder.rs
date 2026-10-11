@@ -57,6 +57,8 @@ pub struct LiveSessionBuilder {
     // Control plane configuration
     soft_turn_timeout: Option<std::time::Duration>,
     steering_mode: SteeringMode,
+    /// Whether `steering_mode` was set, rather than left at its default.
+    steering_set: bool,
     context_delivery: ContextDelivery,
     delivery: super::processor::DeliveryConfig,
     repair_config: Option<RepairConfig>,
@@ -91,6 +93,7 @@ impl LiveSessionBuilder {
             execution_modes: HashMap::new(),
             soft_turn_timeout: None,
             steering_mode: SteeringMode::default(),
+            steering_set: false,
             context_delivery: ContextDelivery::default(),
             delivery: super::processor::DeliveryConfig::default(),
             repair_config: None,
@@ -275,8 +278,13 @@ impl LiveSessionBuilder {
     }
 
     /// Set the steering mode for how the phase machine delivers instructions.
+    ///
+    /// A task session (see [`tasks`](Self::tasks)) on a model that accepts
+    /// `contextUpdate` declares only the foreground skill's tools unless this
+    /// sets a mode other than [`SteeringMode::ContextUpdate`].
     pub fn steering_mode(mut self, mode: SteeringMode) -> Self {
         self.steering_mode = mode;
+        self.steering_set = true;
         self
     }
 
@@ -571,10 +579,34 @@ impl LiveSessionBuilder {
             None
         };
 
+        // A task session steers by the foreground task, not by phases: on a
+        // model that accepts `contextUpdate` it declares `task_control` and
+        // each skill's typed `start_{skill}` at connect, and the task lane
+        // re-declares the foreground skill's tools as tasks start, finish and
+        // advance.
+        let task_scope = match &self.tasks {
+            Some(tasks)
+                if config.supports_context_update()
+                    && (!self.steering_set
+                        || self.steering_mode == SteeringMode::ContextUpdate) =>
+            {
+                let declared = super::task_tools::entry_names(tasks);
+                let scope = ToolScope::new(
+                    std::mem::take(&mut config.tools),
+                    base_instruction.clone(),
+                    &declared,
+                );
+                config.tools = scope.tools_for(&declared);
+                Some(Arc::new(scope))
+            }
+            _ => None,
+        };
+
         Ok(SessionPlan {
             config: Some(config),
             base_instruction,
             tool_scope,
+            task_scope,
             callbacks: self.callbacks,
             dispatcher: self.dispatcher,
             extractors: self.extractors,
@@ -651,6 +683,9 @@ pub(crate) struct SessionPlan {
     base_instruction: Option<String>,
     /// Every tool declaration, under `ContextUpdate` steering.
     tool_scope: Option<Arc<ToolScope>>,
+    /// Every task tool declaration, in a task session on a model that
+    /// accepts `contextUpdate`.
+    task_scope: Option<Arc<ToolScope>>,
     callbacks: EventCallbacks,
     dispatcher: Option<Arc<ToolDispatcher>>,
     extractors: Vec<Arc<dyn TurnExtractor>>,
@@ -753,7 +788,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
     }
 
     // What the setup message declares, for the application and Studio to read.
-    if let Some(scope) = &plan.tool_scope {
+    if let Some(scope) = plan.tool_scope.as_ref().or(plan.task_scope.as_ref()) {
         let _ = state
             .session()
             .set(super::tool_scope::DECLARED_TOOLS_KEY, scope.declared());
@@ -781,6 +816,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         session_id: plan.session_id,
         tool_advisory: plan.tool_advisory,
         tool_scope: plan.tool_scope,
+        task_scope: plan.task_scope,
         base_instruction: plan.base_instruction,
         pending_context: None, // set after PendingContext is created below
         middleware: {
@@ -1194,6 +1230,67 @@ mod tests {
             plan.base_instruction.as_deref(),
             Some("You are a bank agent.")
         );
+    }
+
+    #[test]
+    fn a_task_session_declares_only_task_control_where_context_update_is_accepted() {
+        use gemini_genai_rs::prelude::ModelId;
+        let session = |model, steering: Option<SteeringMode>| {
+            let mut builder = LiveSessionBuilder::new(
+                SessionConfig::new("test-key")
+                    .model(model)
+                    .system_instruction("You are a bank agent."),
+            )
+            .tasks(crate::tasks::two_skill_runtime());
+            if let Some(mode) = steering {
+                builder = builder.steering_mode(mode);
+            }
+            builder.into_plan().expect("plan derivation should succeed")
+        };
+
+        let plan = session(ModelId::LIVE_3_8, None);
+        let config = plan.config.as_ref().unwrap();
+        // `task_control` and each skill's typed entry point.
+        assert_eq!(
+            declared(config),
+            vec!["task_control", "start_billing", "start_faq"]
+        );
+        let scope = plan.task_scope.as_ref().expect("a task scope on 3.8");
+        assert_eq!(
+            scope.declared(),
+            vec!["start_billing", "start_faq", "task_control"]
+        );
+        assert!(
+            instruction_text(config).contains("Installed skills"),
+            "the catalog stays in the instruction"
+        );
+        assert!(
+            plan.tool_scope.is_none(),
+            "phases and flows are not involved"
+        );
+
+        let plan = session(ModelId::LIVE_3_8, Some(SteeringMode::ContextUpdate));
+        assert!(plan.task_scope.is_some());
+
+        // A model without `contextUpdate`, or a steering mode chosen against
+        // it, keeps every skill's tools declared.
+        for plan in [
+            session(ModelId::FLASH_2_5_NATIVE_AUDIO_LATEST, None),
+            session(ModelId::LIVE_3_8, Some(SteeringMode::Hybrid)),
+        ] {
+            assert!(plan.task_scope.is_none());
+            assert_eq!(
+                declared(plan.config.as_ref().unwrap()),
+                vec![
+                    "task_control",
+                    "start_billing",
+                    "start_faq",
+                    "billing__verify",
+                    "billing__pay",
+                    "faq__answer"
+                ]
+            );
+        }
     }
 
     #[test]
