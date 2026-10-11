@@ -313,21 +313,28 @@ async fn call(socket: WebSocket, shared: App) {
         calls: 0,
     };
     let outcome = script.run().await;
-    match outcome {
+    // Whether the reader has been awaited to its end already: a JoinHandle
+    // must not be polled again once it has returned.
+    let reader_done = match outcome {
         Ok(()) => {
             let mut s = shared.stats.lock();
             s.calls_hung_up += 1;
             s.call_secs.push(start.elapsed().as_secs_f32());
+            false
         }
         Err(reason) => {
             *shared.stats.lock().failures.entry(reason).or_default() += 1;
             // Hang up, and count what the client sent before it noticed.
             let _ = sink.send(Message::Close(None)).await;
-            let _ = tokio::time::timeout(Duration::from_secs(2), &mut reader).await;
+            tokio::time::timeout(Duration::from_secs(2), &mut reader)
+                .await
+                .is_ok()
         }
+    };
+    if !reader_done {
+        reader.abort();
+        let _ = reader.await;
     }
-    reader.abort();
-    let _ = reader.await;
     let heard = std::mem::take(&mut *heard.lock());
     let mut s = shared.stats.lock();
     s.mic_ms += heard.ms;
