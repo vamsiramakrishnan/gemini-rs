@@ -262,11 +262,12 @@ impl SkillSpec {
                         if !self.tools.iter().any(|t| {
                             t.tool.name == *tool
                                 && matches!(t.effect, TaskToolEffect::Commit { .. })
-                        }) => {
-                            errors.push(format!(
-                                "commit policy '{tool}' needs a commit effect declaration"
-                            ));
-                        }
+                        }) =>
+                    {
+                        errors.push(format!(
+                            "commit policy '{tool}' needs a commit effect declaration"
+                        ));
+                    }
                     _ => {}
                 }
             }

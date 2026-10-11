@@ -574,7 +574,9 @@ fn decode(payload: &str) -> Option<Vec<f32>> {
     }
     Some(
         bytes
-            .as_chunks::<2>().0.iter()
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| from_f16(u16::from_le_bytes([pair[0], pair[1]])))
             .collect(),
     )
@@ -603,7 +605,9 @@ fn from_hex(hex: &str) -> Option<Vec<f32>> {
     }
     let bytes: Option<Vec<u8>> = hex
         .as_bytes()
-        .as_chunks::<2>().0.iter()
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let hi = (pair[0] as char).to_digit(16)?;
             let lo = (pair[1] as char).to_digit(16)?;
@@ -612,7 +616,9 @@ fn from_hex(hex: &str) -> Option<Vec<f32>> {
         .collect();
     Some(
         bytes?
-            .as_chunks::<4>().0.iter()
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
             .collect(),
     )
