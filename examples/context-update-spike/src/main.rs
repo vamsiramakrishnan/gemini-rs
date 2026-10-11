@@ -31,6 +31,7 @@
 //! | `resume` | After a resume whose setup declares the old tools, which tools are in effect? |
 //! | `resume_lost_update` | When an update is lost with the connection and the resume's setup declares the updated tools, which tools are in effect, with and without the update re-sent after the resumed setup? |
 //! | `token_cost` | How do prompt and cached token counts move when the tool list shrinks? |
+//! | `discovery` | How should a tool the caller turns out to need reach the model: declared beforehand, pushed after the caller's turn ends (0, 300 and 800 ms later), or pulled by the model through a `load_capability` call answered after an update? The model starts with only an unrelated tool, so no call is pending when a late update arrives. |
 
 use std::time::{Duration, Instant};
 
@@ -44,7 +45,7 @@ use serde_json::{Value, json};
 
 const TURN_TIMEOUT: Duration = Duration::from_secs(30);
 
-const ALL_PROBES: [&str; 7] = [
+const ALL_PROBES: [&str; 8] = [
     "replace_tools",
     "replace_instruction",
     "before_tool_response",
@@ -52,6 +53,7 @@ const ALL_PROBES: [&str; 7] = [
     "resume",
     "resume_lost_update",
     "token_cost",
+    "discovery",
 ];
 
 // ---------------------------------------------------------------------------
@@ -79,6 +81,10 @@ struct Turn {
     usage: Option<UsageMetadata>,
     closed: Option<String>,
     timed_out: bool,
+    /// When the first text, audio or call of the turn arrived.
+    first_output: Option<Instant>,
+    /// When each call arrived, by name.
+    call_times: Vec<(String, Instant)>,
 }
 
 impl Turn {
@@ -257,6 +263,17 @@ impl Wire {
             match JsonCodec.decode_message(&bytes) {
                 Ok(ServerMessage::ServerContent(sc)) => {
                     let content = sc.server_content;
+                    let speaks = content
+                        .model_turn
+                        .as_ref()
+                        .is_some_and(|t| !t.parts.is_empty())
+                        || content
+                            .output_transcription
+                            .as_ref()
+                            .is_some_and(|t| t.text.as_deref().is_some_and(|x| !x.is_empty()));
+                    if speaks && turn.first_output.is_none() {
+                        turn.first_output = Some(Instant::now());
+                    }
                     for part in content.model_turn.iter().flat_map(|t| &t.parts) {
                         match part {
                             Part::Text { text } => turn.text.push_str(text),
@@ -273,7 +290,14 @@ impl Wire {
                     let in_progress = content.interaction_status.as_deref() == Some("IN_PROGRESS");
                     turn.turn_complete |= content.turn_complete.unwrap_or(false) && !in_progress;
                 }
-                Ok(ServerMessage::ToolCall(tc)) => turn.calls.extend(tc.tool_call.function_calls),
+                Ok(ServerMessage::ToolCall(tc)) => {
+                    let now = Instant::now();
+                    turn.first_output.get_or_insert(now);
+                    for call in &tc.tool_call.function_calls {
+                        turn.call_times.push((call.name.clone(), now));
+                    }
+                    turn.calls.extend(tc.tool_call.function_calls);
+                }
                 Ok(ServerMessage::SessionResumptionUpdate(update)) => {
                     if let Some(handle) = update.session_resumption_update.new_handle {
                         self.resume_handle = Some(handle);
@@ -960,6 +984,208 @@ async fn token_cost(base: &SessionConfig) -> Result<Finding, String> {
     Ok(f)
 }
 
+/// How a tool the caller turns out to need reaches the model.
+#[derive(Clone, Copy, Debug)]
+enum Delivery {
+    /// Declared before the caller speaks: a perfect prediction.
+    Preloaded,
+    /// Declared this long after the caller's turn ends, as a decision made at
+    /// the turn boundary would declare it.
+    Late(u64),
+    /// The model asks for it with `load_capability`; the update goes out
+    /// before that call's response.
+    Pull,
+    /// Never declared.
+    Never,
+}
+
+impl Delivery {
+    fn label(self) -> String {
+        match self {
+            Self::Preloaded => "preloaded".into(),
+            Self::Late(ms) => format!("late_{ms}ms"),
+            Self::Pull => "pull".into(),
+            Self::Never => "never".into(),
+        }
+    }
+}
+
+fn load_capability() -> FunctionDeclaration {
+    FunctionDeclaration {
+        name: "load_capability".into(),
+        description: "Load the tools of a capability before using them.".into(),
+        parameters: Some(json!({
+            "type": "object",
+            "properties": { "capability": { "type": "string", "enum": ["account_servicing", "travel"] } },
+            "required": ["capability"],
+        })),
+        behavior: None,
+    }
+}
+
+/// One caller question under one delivery: whether the reply to that turn
+/// used the tool, and when.
+async fn discovery_run(base: &SessionConfig, delivery: Delivery) -> Result<Value, String> {
+    let question = "What's the balance on account 42?";
+    let (instruction, initial) = match delivery {
+        Delivery::Pull => (
+            "You are a terse bank assistant. Capabilities you can load: account_servicing \
+             (balances, transactions) and travel (weather, local time). When a request needs \
+             a capability whose tools you do not have, call load_capability first, then use \
+             its tools. Never invent tool results.",
+            vec![load_capability()],
+        ),
+        // Only an unrelated tool, so the model's first move is speech rather
+        // than a call whose pending response would let a late update in.
+        _ => (
+            "You are a terse bank assistant. Use a tool whenever one fits the request. If no \
+             tool you have can answer, say so. Never invent tool results.",
+            vec![get_weather()],
+        ),
+    };
+    let config = base
+        .clone()
+        .system_instruction(instruction)
+        .add_tool(Tool::functions(initial));
+    let mut w = Wire::open(config).await?;
+    let with_balance = ContextUpdate::new().tools(tools(vec![get_weather(), get_balance()]));
+    if matches!(delivery, Delivery::Preloaded) {
+        w.update(&with_balance, Shape::Wrapped).await?;
+    }
+    let asked = Instant::now();
+    w.say(question).await?;
+    let mut turn = Turn::default();
+    if let Delivery::Late(ms) = delivery {
+        // Frames that arrive meanwhile wait in the socket and are read below
+        // as part of the same turn.
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        w.update(&with_balance, Shape::Wrapped).await?;
+    }
+    let mut answered = 0;
+    let deadline = Instant::now() + TURN_TIMEOUT;
+    let mut mark = (turn.audio_frames, turn.text.len());
+    loop {
+        if turn.closed.is_some() {
+            break;
+        }
+        let pending = answered;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            turn.timed_out = true;
+            break;
+        }
+        w.read(&mut turn, remaining, |t| t.calls.len() > pending)
+            .await;
+        if turn.closed.is_some() || turn.timed_out {
+            break;
+        }
+        if turn.calls.len() > answered {
+            for call in &turn.calls[answered..] {
+                if call.name == "load_capability" {
+                    w.update(&with_balance, Shape::Wrapped).await?;
+                    w.respond(
+                        call,
+                        json!({ "status": "ok", "loaded": "account_servicing", "tools": ["get_balance"] }),
+                    )
+                    .await?;
+                } else {
+                    w.respond(call, scripted(call)).await?;
+                }
+            }
+            answered = turn.calls.len();
+            mark = (turn.audio_frames, turn.text.len());
+            turn.turn_complete = false;
+            continue;
+        }
+        if answered > 0 && (turn.audio_frames, turn.text.len()) == mark {
+            turn.turn_complete = false;
+            continue;
+        }
+        break;
+    }
+    let since = |t: Instant| t.duration_since(asked).as_millis() as u64;
+    let balance_at = turn
+        .call_times
+        .iter()
+        .find(|(name, _)| name == "get_balance")
+        .map(|(_, t)| since(*t));
+    // What the model had said before it called get_balance, if anything.
+    let said_first = turn
+        .text
+        .split_whitespace()
+        .take(16)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let data = json!({
+        "delivery": delivery.label(),
+        "used_tool": balance_at.is_some(),
+        "tool_ms": balance_at,
+        "first_output_ms": turn.first_output.map(since),
+        "calls": turn.call_names(),
+        "said": said_first,
+        "closed": turn.closed,
+        "timed_out": turn.timed_out,
+    });
+    let _ = w.close().await;
+    Ok(data)
+}
+
+async fn discovery(base: &SessionConfig) -> Result<Finding, String> {
+    let runs: usize = std::env::var("DISCOVERY_RUNS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(4);
+    let deliveries = [
+        Delivery::Preloaded,
+        Delivery::Late(0),
+        Delivery::Late(300),
+        Delivery::Late(800),
+        Delivery::Pull,
+        Delivery::Never,
+    ];
+    let mut rows = Vec::new();
+    let mut summary = Vec::new();
+    for delivery in deliveries {
+        let mut used = 0;
+        let mut times = Vec::new();
+        let mut firsts = Vec::new();
+        for _ in 0..runs {
+            match discovery_run(base, delivery).await {
+                Ok(row) => {
+                    if row["used_tool"] == true {
+                        used += 1;
+                    }
+                    if let Some(ms) = row["tool_ms"].as_u64() {
+                        times.push(ms);
+                    }
+                    if let Some(ms) = row["first_output_ms"].as_u64() {
+                        firsts.push(ms);
+                    }
+                    rows.push(row);
+                }
+                Err(e) => rows.push(json!({ "delivery": delivery.label(), "error": e })),
+            }
+        }
+        times.sort_unstable();
+        firsts.sort_unstable();
+        let median = |v: &[u64]| v.get(v.len() / 2).copied();
+        let line = format!(
+            "{}: used get_balance in {used}/{runs}, tool call at p50 {:?} ms, first output at p50 {:?} ms",
+            delivery.label(),
+            median(&times),
+            median(&firsts)
+        );
+        println!("    {line}");
+        summary.push(line);
+    }
+    Ok(Finding::new(
+        "discovery",
+        "measured",
+        summary.join("; "),
+        json!({ "runs": rows }),
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -1030,6 +1256,7 @@ async fn main() {
             "resume" => resume(&base).await,
             "resume_lost_update" => resume_lost_update(&base).await,
             "token_cost" => token_cost(&base).await,
+            "discovery" => discovery(&base).await,
             _ => unreachable!(),
         };
         let finding = result.unwrap_or_else(|e| Finding::new(probe, "error", e, json!({})));

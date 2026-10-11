@@ -22,11 +22,13 @@
 
 pub mod authoring;
 mod codegen;
+mod decisions;
 pub mod project;
 mod simulate;
 mod skills;
 pub mod store;
 
+pub use decisions::{BooleanCriteriaSpec, DecisionKind, DecisionSpec};
 pub use project::{ProjectFile, ProjectLanguage, ProjectOptions, SdkSource};
 pub use store::{BundleRef, BundleStore, BundleVersion, StoreError, open_store};
 
@@ -269,6 +271,49 @@ pub struct ExtractSpec {
     /// Field-promotion rules into bare state keys.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub promote: Vec<PromoteSpec>,
+    /// The text model this entry runs on, such as `gemini-3.5-flash-lite`.
+    /// Overrides `models.extraction`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The thinking budget this entry's requests send. Overrides
+    /// `models.extraction_thinking_budget`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
+}
+
+/// The extraction model `adk spec check` suggests pinning, with
+/// [`RECOMMENDED_EXTRACTION_THINKING_BUDGET`]. On the labelled pharmacy turn
+/// it was correct in 60 of 60 rounds at 0.67 s median and 1.2 s at most, where
+/// the rolling `gemini-flash-latest` default took 6.7 s at the median and up
+/// to 62 s (`tests/extraction_latency.rs`). Without thinking it follows an
+/// instruction literally: say what counts, not "leave it out until".
+pub const RECOMMENDED_EXTRACTION_MODEL: &str = "gemini-3.5-flash-lite";
+
+/// The thinking budget pinned with [`RECOMMENDED_EXTRACTION_MODEL`], which
+/// rejects 0 and does not think below about 1024.
+pub const RECOMMENDED_EXTRACTION_THINKING_BUDGET: u32 =
+    gemini_adk_rs::live::extractor::FALLBACK_THINKING_BUDGET;
+
+/// What validation says when extraction names no model.
+const UNPINNED_EXTRACTION_WARNING: &str = "extraction names no model, so it runs on the host \
+     default (gemini-flash-latest, a rolling alias whose model and latency change under you, \
+     unless GEMINI_TEXT_MODEL is set); every turn waits for it: set models.extraction";
+
+/// The models a spec runs on, by role.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ModelsSpec {
+    /// The text model `extract` entries run on, such as
+    /// `gemini-3.5-flash-lite`, unless an entry names its own. Name one: the
+    /// host default is the rolling `gemini-flash-latest` alias, whose model
+    /// (and latency) changes under you, and every turn waits for extraction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extraction: Option<String>,
+    /// The thinking budget extraction requests send. The default, 0, keeps
+    /// thinking off; a model that rejects 0 (`gemini-3.5-flash-lite` needs
+    /// at least 1) is retried at 64, then with no budget. Set 64 for such a
+    /// model to skip the rejected first request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extraction_thinking_budget: Option<u32>,
 }
 
 fn default_window() -> usize {
@@ -814,6 +859,15 @@ pub struct SessionSpec {
     /// Out-of-band extraction pipelines.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extract: Vec<ExtractSpec>,
+    /// The models the spec runs on, by role.
+    #[serde(default, skip_serializing_if = "is_default_models")]
+    pub models: ModelsSpec,
+    /// Questions a decision model (such as Jev) answers about the
+    /// conversation, by id. Guards name them with the `decided` atom, and the
+    /// runtime asks the ones the flow can act on at each decision point.
+    /// Requires [`SpecResources::decision_model`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub decisions: BTreeMap<String, DecisionSpec>,
     /// Declared state keys — the session's data dictionary.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub state: BTreeMap<String, StateFieldSpec>,
@@ -1016,8 +1070,19 @@ pub const MEMORY_TOOL_NAMES: [&str; 2] = ["recall_context", "manage_memory"];
 /// bindings.
 #[derive(Default, Clone)]
 pub struct SpecResources {
-    /// The OOB model backing `extract` entries. Required when any are present.
+    /// The OOB model backing `extract` entries that name no model (neither
+    /// their own `model` nor `models.extraction`). Required when any do.
     pub extraction_llm: Option<Arc<dyn BaseLlm>>,
+    /// Resolves the model names the spec writes (`models.extraction`, an
+    /// extract entry's `model`) to models. A name it does not resolve that
+    /// starts with `gemini` runs on [`GeminiLlm`](gemini_adk_rs::llm::GeminiLlm);
+    /// register a prefix here to run another provider, or `""` to send every
+    /// name to one model (a mock, in offline tests).
+    pub models: Option<Arc<gemini_adk_rs::llm::LlmRegistry>>,
+    /// The decision model answering the spec's `decisions`, such as
+    /// `GatewayDecisionModel` (Jev on Vercel AI Gateway). Required when any
+    /// are declared.
+    pub decision_model: Option<Arc<dyn gemini_adk_rs::decision::DecisionModel>>,
     /// The memory engine honoring the spec's `memory` section. Required when
     /// that section is present.
     pub memory: Option<Arc<dyn MemoryBinding>>,
@@ -1044,7 +1109,75 @@ impl SpecResources {
     }
 }
 
+fn is_default_models(models: &ModelsSpec) -> bool {
+    *models == ModelsSpec::default()
+}
+
+/// Resolve a named model: the host's registry first, then Gemini for
+/// `gemini-*` names. One client per name.
+fn resolve_model(
+    name: &str,
+    resources: &SpecResources,
+    cache: &mut BTreeMap<String, Arc<dyn BaseLlm>>,
+) -> Result<Arc<dyn BaseLlm>, String> {
+    if let Some(llm) = cache.get(name) {
+        return Ok(llm.clone());
+    }
+    let llm = match resources.models.as_ref().and_then(|r| r.resolve(name)) {
+        Some(llm) => llm,
+        None if name.starts_with("gemini") || name.starts_with("models/gemini") => Arc::new(
+            gemini_adk_rs::llm::GeminiLlm::try_new(gemini_adk_rs::llm::GeminiLlmParams {
+                model: Some(name.to_string()),
+                ..Default::default()
+            })
+            .map_err(|e| format!("model '{name}': {e}"))?,
+        )
+            as Arc<dyn BaseLlm>,
+        None => {
+            return Err(format!(
+                "model '{name}': nothing resolves it; register it in SpecResources.models"
+            ));
+        }
+    };
+    cache.insert(name.to_string(), llm.clone());
+    Ok(llm)
+}
+
+/// The model an extract entry runs on: its own `model`, then the spec's
+/// `models.extraction`, then the host's `extraction_llm`.
+pub(crate) fn extraction_llm_for(
+    entry: &ExtractSpec,
+    default: Option<&str>,
+    resources: &SpecResources,
+    cache: &mut BTreeMap<String, Arc<dyn BaseLlm>>,
+) -> Result<Arc<dyn BaseLlm>, String> {
+    match entry.model.as_deref().or(default) {
+        Some(name) => resolve_model(name, resources, cache)
+            .map_err(|e| format!("extract '{}': {e}", entry.name)),
+        None => resources.extraction_llm.clone().ok_or_else(|| {
+            format!(
+                "extract '{}' names no model and SpecResources.extraction_llm is not set; \
+                 set models.extraction",
+                entry.name
+            )
+        }),
+    }
+}
+
 impl SessionSpec {
+    /// Whether some extraction (the spec's or a skill's `extract` entries)
+    /// names no model, so it runs on the host's `extraction_llm`.
+    pub fn uses_default_extraction_model(&self) -> bool {
+        let unnamed = |entries: &[ExtractSpec], default: Option<&str>| {
+            default.is_none() && entries.iter().any(|e| e.model.is_none())
+        };
+        unnamed(&self.extract, self.models.extraction.as_deref())
+            || self
+                .skills
+                .iter()
+                .any(|skill| unnamed(&skill.extract, self.models.extraction.as_deref()))
+    }
+
     /// Whether root or task definitions need an out-of-band extraction model.
     pub fn requires_extraction(&self) -> bool {
         !self.extract.is_empty()
@@ -1157,6 +1290,7 @@ impl SessionSpec {
                 keys.insert(p.target().to_string());
             }
         }
+        keys.extend(self.decisions.values().filter_map(|d| d.writes.clone()));
         for p in &self.phases {
             for eff in &p.on_enter {
                 if let EffectSpec::Set(map) = eff {
@@ -1270,11 +1404,17 @@ impl SessionSpec {
             Ok(compiled) => compiled,
             Err(e) => return failed(format!("conversation: {e}")),
         };
+        let bank: BTreeMap<String, gemini_adk_rs::decision::Decision> = self
+            .decisions
+            .iter()
+            .map(|(id, d)| (id.clone(), d.compile()))
+            .collect();
         let mut reports = Vec::with_capacity(self.scenarios.len());
         for scenario in &self.scenarios {
-            let result = scenario
-                .run(&compiled, gemini_adk_rs::flow::Enforcement::Enforce)
-                .await;
+            let sim =
+                crate::simulation::Sim::new(&compiled, gemini_adk_rs::flow::Enforcement::Enforce)
+                    .with_decisions(bank.clone());
+            let result = scenario.run_in(sim).await;
             reports.push(ScenarioReport {
                 name: scenario.name.clone(),
                 passed: result.is_ok(),
@@ -1386,6 +1526,7 @@ impl SessionSpec {
                 || !self.tools.is_empty()
                 || !self.mcp.is_empty()
                 || !self.extract.is_empty()
+                || !self.decisions.is_empty()
                 || !self.computed.is_empty()
                 || !self.watch.is_empty()
                 || !self.patterns.is_empty()
@@ -1421,6 +1562,9 @@ impl SessionSpec {
                     validation
                         .warnings
                         .into_iter()
+                        // The session reports unpinned extraction once, with
+                        // its own `models.extraction` taken into account.
+                        .filter(|warning| warning != UNPINNED_EXTRACTION_WARNING)
                         .map(|warning| format!("skill '{}': {warning}", skill.name)),
                 );
             }
@@ -1829,6 +1973,35 @@ impl SessionSpec {
             }
         }
 
+        // Extraction models.
+        if self.uses_default_extraction_model() {
+            warnings.push(UNPINNED_EXTRACTION_WARNING.into());
+        }
+        for (place, name) in self
+            .extract
+            .iter()
+            .filter_map(|e| {
+                e.model
+                    .as_deref()
+                    .map(|m| (format!("extract '{}'", e.name), m))
+            })
+            .chain(
+                self.models
+                    .extraction
+                    .as_deref()
+                    .map(|m| ("models.extraction".into(), m)),
+            )
+        {
+            if name.trim().is_empty() {
+                errors.push(format!("{place}: model is empty"));
+            }
+        }
+
+        // Decisions.
+        let (decision_errors, decision_warnings) = self.decision_problems();
+        errors.extend(decision_errors);
+        warnings.extend(decision_warnings);
+
         SpecValidation {
             valid: errors.is_empty(),
             errors,
@@ -1985,13 +2158,26 @@ impl SessionSpec {
                 validation.errors.join("; ")
             ));
         }
-        if self.requires_extraction() && resources.extraction_llm.is_none() {
+        if self.requires_extraction()
+            && self.uses_default_extraction_model()
+            && resources.extraction_llm.is_none()
+        {
             return Err(
-                "spec declares extraction but SpecResources.extraction_llm is not set".into(),
+                "spec declares extraction that names no model, and SpecResources.extraction_llm \
+                 is not set; set models.extraction"
+                    .into(),
             );
         }
         if self.requires_memory() && resources.memory.is_none() {
             return Err("spec declares memory but SpecResources.memory is not set".into());
+        }
+        if !self.decisions.is_empty() && resources.decision_model.is_none() {
+            return Err(
+                "spec declares decisions but SpecResources.decision_model is not set \
+                 (for Jev on Vercel AI Gateway: GatewayDecisionModel::from_env(), which reads \
+                 AI_GATEWAY_API_KEY)"
+                    .into(),
+            );
         }
         if let Some(name) = resources.tools.keys().find(|name| {
             !self.tools.iter().any(|t| &&t.name == name)
@@ -2100,11 +2286,17 @@ impl SessionSpec {
             live = apply_runtime(live, runtime);
         }
 
-        // Extraction.
-        if let Some(llm) = &resources.extraction_llm {
-            for e in &self.extract {
-                live = live.extractor(Arc::new(compile_extractor(e, llm.clone())));
-            }
+        // Extraction, each entry on its model.
+        let mut models = BTreeMap::new();
+        for e in &self.extract {
+            let llm =
+                extraction_llm_for(e, self.models.extraction.as_deref(), resources, &mut models)?;
+            live = live.extractor(Arc::new(compile_extractor(e, llm, &self.models)));
+        }
+        if let Some(model) = &resources.decision_model
+            && !self.decisions.is_empty()
+        {
+            live = live.decisions(self.compile_decisions(model.clone()));
         }
 
         // Phases.
@@ -2207,12 +2399,16 @@ impl SessionSpec {
     }
 }
 
-/// Shared extractor lowering for session and task-owned services.
-fn compile_extractor(e: &ExtractSpec, llm: Arc<dyn BaseLlm>) -> LlmExtractor {
-    let extractor = LlmExtractor::new(e.name.clone(), llm, e.instruction.clone(), e.window)
+/// Shared extractor lowering for session and task-owned services. `models`
+/// is the session's, for the thinking budget an entry does not set.
+fn compile_extractor(e: &ExtractSpec, llm: Arc<dyn BaseLlm>, models: &ModelsSpec) -> LlmExtractor {
+    let mut extractor = LlmExtractor::new(e.name.clone(), llm, e.instruction.clone(), e.window)
         .with_schema(e.schema.clone())
         .with_min_words(3)
         .with_trigger(e.trigger.to_trigger());
+    if let Some(budget) = e.thinking_budget.or(models.extraction_thinking_budget) {
+        extractor = extractor.with_thinking_budget(Some(budget));
+    }
     if e.promote.is_empty() {
         extractor
     } else {
@@ -3753,6 +3949,117 @@ done
             mcp_value(json!({ "content": [{ "type": "text", "text": "done" }] })),
             json!({ "output": "done" })
         );
+    }
+
+    #[test]
+    fn extraction_runs_on_the_model_the_spec_names() {
+        use gemini_adk_rs::llm::{LlmRegistry, MockLlm};
+        let mut spec = collections_spec();
+        let mut second = spec.extract[0].clone();
+        second.name = "second".into();
+        spec.extract.push(second);
+        spec.models.extraction = Some("fast-lite".into());
+        spec.extract[0].model = Some("fast-full".into());
+        assert!(!spec.uses_default_extraction_model());
+        assert!(
+            spec.validate()
+                .warnings
+                .iter()
+                .all(|w| !w.contains("models.extraction")),
+            "{:?}",
+            spec.validate().warnings
+        );
+
+        let mut registry = LlmRegistry::new();
+        registry.register("fast", |name| {
+            Arc::new(MockLlm::text("{}").with_model_id(name)) as Arc<dyn BaseLlm>
+        });
+        let resources = SpecResources {
+            models: Some(Arc::new(registry)),
+            ..SpecResources::default()
+        };
+        let mut cache = BTreeMap::new();
+        let ids: Vec<String> = spec
+            .extract
+            .iter()
+            .map(|e| {
+                extraction_llm_for(e, spec.models.extraction.as_deref(), &resources, &mut cache)
+                    .unwrap()
+                    .model_id()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(ids[0], "fast-full", "an entry's model wins");
+        assert!(ids[1..].iter().all(|id| id == "fast-lite"), "{ids:?}");
+        assert_eq!(cache.len(), 2, "one model per name");
+
+        // Named models need no extraction_llm.
+        spec.apply(Live::builder(), &State::new(), &resources)
+            .expect("applies on the named models");
+    }
+
+    #[tokio::test]
+    async fn an_entry_or_the_spec_sets_the_thinking_budget() {
+        use gemini_adk_rs::live::TurnExtractor;
+        use gemini_adk_rs::llm::{LlmResponse, MockLlm};
+        let budgets = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let seen = budgets.clone();
+        let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm::from_fn(move |req| {
+            seen.lock().push(req.thinking_budget);
+            Ok(LlmResponse::from_text("{}"))
+        }));
+        let window = [gemini_adk_rs::live::TranscriptTurn {
+            turn_number: 0,
+            user: "I need a refill of my lisinopril.".into(),
+            model: String::new(),
+            tool_calls: Vec::new(),
+            timestamp: std::time::Instant::now(),
+        }];
+        let entry = collections_spec().extract[0].clone();
+        let models = ModelsSpec {
+            extraction: None,
+            extraction_thinking_budget: Some(64),
+        };
+        let mut own = entry.clone();
+        own.thinking_budget = Some(8);
+        for (e, m) in [
+            (&entry, &models),
+            (&own, &models),
+            (&entry, &ModelsSpec::default()),
+        ] {
+            compile_extractor(e, llm.clone(), m)
+                .extract(&window)
+                .await
+                .unwrap();
+        }
+        assert_eq!(*budgets.lock(), [Some(64), Some(8), Some(0)]);
+    }
+
+    #[test]
+    fn unnamed_extraction_warns_and_an_unknown_model_fails() {
+        let unnamed = collections_spec();
+        assert!(unnamed.uses_default_extraction_model());
+        assert!(
+            unnamed
+                .validate()
+                .warnings
+                .iter()
+                .any(|w| w.contains("set models.extraction")),
+            "{:?}",
+            unnamed.validate().warnings
+        );
+
+        let mut unknown = collections_spec();
+        unknown.models.extraction = Some("gemma-decide".into());
+        let err = unknown
+            .apply(Live::builder(), &State::new(), &SpecResources::default())
+            .err()
+            .expect("nothing resolves gemma-decide");
+        assert!(err.contains("register it in SpecResources.models"), "{err}");
+
+        let mut empty = collections_spec();
+        empty.models.extraction = Some(" ".into());
+        assert!(!empty.validate().valid);
     }
 
     #[test]

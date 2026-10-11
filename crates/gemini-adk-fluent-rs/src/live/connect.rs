@@ -291,6 +291,9 @@ impl Live {
             builder = builder.greeting(greeting);
         }
         builder = builder.callbacks(self.callbacks);
+        if let Some(decisions) = self.decisions {
+            builder = builder.decisions(decisions);
+        }
         for ext in self.extractors {
             builder = builder.extractor(ext);
         }
@@ -320,7 +323,9 @@ impl Live {
         if let Some(timeout) = self.soft_turn_timeout {
             builder = builder.soft_turn_timeout(timeout);
         }
-        builder = builder.steering_mode(self.steering_mode);
+        if let Some(mode) = self.steering_mode {
+            builder = builder.steering_mode(mode);
+        }
         builder = builder.context_delivery(self.context_delivery);
         builder = builder.delivery(self.delivery);
         if let Some(redactor) = self.redactor {

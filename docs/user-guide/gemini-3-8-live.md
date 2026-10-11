@@ -120,6 +120,13 @@ again after the resumed setup. Shrinking the declarations
 from twelve tools to one cut the prompt from about 1,650 to about 700 tokens
 per turn. Extended Thinking reported no such drop.
 
+An update does not change a reply the model is already forming. With
+`--only discovery` (five runs each), a tool declared before the question was
+used in that turn's reply 5 of 5 times; declared 0, 300 or 800 ms after it,
+with no call pending, 0 of 5 each. A pending call is the exception: declared
+before the response to a `load_capability` call the model made, the tool was
+used 5 of 5 times, at about 800 ms instead of 340 ms.
+
 To have each phase or flow step declare its own tools, set
 `SteeringMode::ContextUpdate` and let the runtime send these updates; see
 [steering modes](steering-modes.md#contextupdate-gemini-38-live).

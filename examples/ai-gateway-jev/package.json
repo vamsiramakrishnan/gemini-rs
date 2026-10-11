@@ -1,0 +1,12 @@
+{
+  "name": "@gemini-rs/ai-gateway-jev",
+  "private": true,
+  "type": "module",
+  "description": "AI SDK check of TypeSafe's Jev decision model through Vercel AI Gateway",
+  "scripts": {
+    "decide": "node --env-file-if-exists=../../.env.local decide.mjs"
+  },
+  "dependencies": {
+    "ai": "^7.0.137"
+  }
+}

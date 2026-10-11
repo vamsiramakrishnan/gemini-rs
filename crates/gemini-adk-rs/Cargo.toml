@@ -64,6 +64,8 @@ gemini-llm = ["gemini-genai-rs/http", "gemini-genai-rs/generate"]
 # Pulls the optional reqwest HTTP client; enabled transitively by the
 # REST-backed feature areas below.
 http = ["dep:reqwest"]
+# Decision models (TypeSafe AI's Jev) through Vercel AI Gateway's /v1/evaluate.
+ai-gateway = ["http"]
 gcs-artifacts = ["http"]
 # No-op since 2.0, kept so existing manifests keep resolving; tracing is
 # always compiled (the facade is already unconditional in L0 and L2).

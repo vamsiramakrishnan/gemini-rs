@@ -36,6 +36,7 @@
 - [Per-Tool Policies](./user-guide/tool-policies.md)
 - [Model Context Protocol (MCP) Tools](./user-guide/mcp-tools.md)
 - [Extraction Pipeline](./user-guide/extraction.md)
+- [Decision Models (Jev)](./user-guide/decisions.md)
 
 # Composition & Patterns
 

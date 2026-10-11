@@ -340,6 +340,15 @@ pub fn catalog() -> Catalog {
                 json!({ "done": "collect" }),
             ),
             entry(
+                "decided",
+                "A decision model's answer to a question in `decisions`, about the \
+                 caller's latest words: a question id (yes, picked, or scored), or \
+                 {question: true | false | option | {\"at_least\": n} | {\"at_most\": n}}. \
+                 Asked by the runtime when the flow can act on it; an earlier answer \
+                 does not count.",
+                json!({ "decided": { "next_step": "book" } }),
+            ),
+            entry(
                 "all",
                 "Every guard holds.",
                 json!({ "all": [{ "is_set": "slot" }, { "is_true": "user_confirmed" }] }),
@@ -482,7 +491,7 @@ const QUESTION_RULES: [(&str, &str); 10] = [
     ),
 ];
 
-const DIAGNOSTIC_CODES: [(&str, &str); 7] = [
+const DIAGNOSTIC_CODES: [(&str, &str); 8] = [
     ("invalid_json", "The text is not JSON."),
     ("not_an_object", "The document is not a JSON object."),
     (
@@ -500,6 +509,10 @@ const DIAGNOSTIC_CODES: [(&str, &str); 7] = [
     (
         "unwritten_key",
         "A guard reads a state key that nothing writes, so it can never become true.",
+    ),
+    (
+        "unpinned_extraction_model",
+        "Extraction names no model, so it runs on the host default, a rolling alias whose model and latency change; every turn waits for it.",
     ),
     (
         "validation",
@@ -617,6 +630,7 @@ pub fn check(doc: &Value) -> CheckReport {
 
     // Messages the structured checks already report with a path.
     let mut covered = Vec::new();
+    unpinned_extraction_model(doc, &spec, &mut diagnostics, &mut covered);
     if spec.conversation.is_some() {
         unknown_tools(doc, &spec, &mut diagnostics, &mut covered);
         unwritten_keys(doc, &spec, &mut diagnostics, &mut covered);
@@ -642,6 +656,54 @@ pub fn check(doc: &Value) -> CheckReport {
         ));
     }
     CheckReport::new(diagnostics)
+}
+
+/// Extraction that names no model runs on the host's rolling default; the
+/// fix pins `models.extraction`.
+fn unpinned_extraction_model(
+    doc: &Value,
+    spec: &SessionSpec,
+    out: &mut Vec<Diagnostic>,
+    covered: &mut Vec<String>,
+) {
+    if !spec.uses_default_extraction_model() {
+        return;
+    }
+    let patch = pin_extraction_model(doc);
+    out.push(diagnostic(
+        Severity::Warning,
+        "unpinned_extraction_model",
+        Some("/models/extraction".into()),
+        "extraction names no model, so it runs on the host default (gemini-flash-latest, a \
+         rolling alias whose model and latency change under you, unless GEMINI_TEXT_MODEL is \
+         set); every turn waits for it",
+        Some(Fix {
+            description: format!("Run extraction on {}", super::RECOMMENDED_EXTRACTION_MODEL),
+            patch,
+        }),
+    ));
+    covered.push("extraction names no model".into());
+}
+
+/// Ops that pin the recommended extraction model and its thinking budget,
+/// keeping whatever `models` already sets.
+fn pin_extraction_model(doc: &Value) -> Vec<PatchOp> {
+    let model = json!(super::RECOMMENDED_EXTRACTION_MODEL);
+    let budget = json!(super::RECOMMENDED_EXTRACTION_THINKING_BUDGET);
+    if !doc.get("models").is_some_and(Value::is_object) {
+        return vec![add(
+            "/models",
+            json!({ "extraction": model, "extraction_thinking_budget": budget }),
+        )];
+    }
+    let mut ops = Vec::new();
+    if doc.pointer("/models/extraction").is_none() {
+        ops.push(add("/models/extraction", model));
+        if doc.pointer("/models/extraction_thinking_budget").is_none() {
+            ops.push(add("/models/extraction_thinking_budget", budget));
+        }
+    }
+    ops
 }
 
 /// [`check`] the text of a spec file. Text that is not JSON gets an
@@ -684,6 +746,17 @@ fn unknown_fields(doc: &Value, out: &mut Vec<Diagnostic>) {
     unknown_in(doc, "", &top, out);
     for (i, t) in array(doc, "/tools") {
         unknown_in(t, &format!("/tools/{i}"), &tool, out);
+    }
+    let mut decision = schema_fields(&schema, Some("DecisionSpec"));
+    // The question type's own fields are flattened in.
+    decision.extend(["type", "instructions", "criteria"].map(String::from));
+    for (id, d) in doc
+        .get("decisions")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
+        unknown_in(d, &format!("/decisions/{}", escape(id)), &decision, out);
     }
     let Some(conv) = doc.get("conversation").filter(|c| c.is_object()) else {
         return;
@@ -1150,18 +1223,23 @@ fn signal_ops(doc: &Value, key: &str, description: &str) -> Vec<PatchOp> {
             };
             vec![schema_op, append(doc, &format!("{base}/promote"), promote)]
         }
-        None => vec![append(
-            doc,
-            "/extract",
-            json!({
-                "name": SIGNALS_EXTRACTOR,
-                "instruction": "Read the latest turns of the conversation. Set a field to true \
-                                only when the caller clearly said so in their own words. \
-                                Otherwise leave it out.",
-                "schema": { "type": "object", "properties": { field: property } },
-                "promote": [promote]
-            }),
-        )],
+        None => {
+            let mut ops = vec![append(
+                doc,
+                "/extract",
+                json!({
+                    "name": SIGNALS_EXTRACTOR,
+                    "instruction": "Read the latest turns of the conversation. Set a field to true \
+                                    only when the caller clearly said so in their own words. \
+                                    Otherwise leave it out.",
+                    "schema": { "type": "object", "properties": { field: property } },
+                    "promote": [promote]
+                }),
+            )];
+            // New extraction names its model.
+            ops.extend(pin_extraction_model(doc));
+            ops
+        }
     }
 }
 
@@ -2027,6 +2105,7 @@ mod tests {
                 "require": ["done"],
                 "policies": [{ "kind": "safety_handoff", "intents": ["human_agent"] }]
             },
+            "models": { "extraction": "gemini-3.5-flash-lite", "extraction_thinking_budget": 64 },
             "extract": [{
                 "name": "caller_signals",
                 "instruction": "Signals.",

@@ -24,7 +24,7 @@ impl SessionSpec {
         if !self.skills.is_empty() {
             let document = serde_json::to_string_pretty(self).expect("session specs serialize");
             let mut resources = String::from("    let resources = SpecResources {\n");
-            if self.requires_extraction() {
+            if self.requires_extraction() && self.uses_default_extraction_model() {
                 resources.push_str(
                     "        extraction_llm: Some(std::sync::Arc::new(GeminiLlm::from_env()?)),\n",
                 );
@@ -69,6 +69,12 @@ impl SessionSpec {
                  ExtractionTrigger, FieldPromotion, LlmExtractor,\n};\n",
             );
         }
+        if !self.decisions.is_empty() {
+            out.push_str(
+                "use gemini_adk_fluent_rs::gemini_adk_rs::decision::{\n    \
+                 Decision, Decisions, GatewayDecisionModel, Question,\n};\n",
+            );
+        }
         if !self.computed.is_empty() {
             out.push_str("use gemini_adk_fluent_rs::gemini_adk_rs::expr::Expr;\n");
         }
@@ -101,6 +107,7 @@ impl SessionSpec {
             out.push_str("use gemini_memory_rs::runtime::LiveMemoryExt;\n");
         }
         let needs_arc = !self.extract.is_empty()
+            || !self.decisions.is_empty()
             || self.memory.is_some()
             || self
                 .runtime
@@ -247,7 +254,10 @@ impl SessionSpec {
             out.push_str(&gen_runtime(runtime));
         }
         for extract in &self.extract {
-            out.push_str(&gen_extract(extract));
+            out.push_str(&gen_extract(extract, &self.models));
+        }
+        if !self.decisions.is_empty() {
+            out.push_str(&gen_decisions(self));
         }
         for phase in &self.phases {
             out.push_str(&gen_phase(phase));
@@ -309,6 +319,9 @@ impl SessionSpec {
                 .any(|skill| skill.tools.iter().any(|tool| tool.tool.http.is_some()))
         {
             feature_names.push("http-tools");
+        }
+        if !self.decisions.is_empty() {
+            feature_names.push("ai-gateway");
         }
         let features = format!(
             ", features = [{}]",
@@ -497,6 +510,17 @@ fn gen_pred(pred: &Pred) -> String {
         Pred::Captured(fields) => format!("Guard::captured({})", str_array(fields)),
         Pred::CalledOk(tool) => format!("Guard::called_ok({})", rust_str(tool)),
         Pred::Done(step) => format!("Guard::done({})", rust_str(step)),
+        Pred::Decided(d) => {
+            use gemini_adk_rs::flow::Expect;
+            let q = rust_str(&d.question);
+            match &d.expect {
+                Expect::Yes => format!("Guard::decided({q})"),
+                Expect::No => format!("Guard::decided_no({q})"),
+                Expect::Is(o) => format!("Guard::decided_is({q}, {})", rust_str(o)),
+                Expect::AtLeast(x) => format!("Guard::decided_at_least({q}, {x:?})"),
+                Expect::AtMost(x) => format!("Guard::decided_at_most({q}, {x:?})"),
+            }
+        }
         Pred::All(preds) => format!(
             "Guard::all([{}])",
             preds.iter().map(gen_pred).collect::<Vec<_>>().join(", ")
@@ -509,13 +533,24 @@ fn gen_pred(pred: &Pred) -> String {
     }
 }
 
-fn gen_extract(extract: &super::ExtractSpec) -> String {
+fn gen_extract(extract: &super::ExtractSpec, models: &super::ModelsSpec) -> String {
+    let default_model = models.extraction.as_deref();
     let mut out = String::new();
     out.push_str("        .extractor(Arc::new(\n");
+    // The entry's model, else the spec's `models.extraction`, else the
+    // environment's (GEMINI_TEXT_MODEL, or gemini-flash-latest).
+    let llm = match extract.model.as_deref().or(default_model) {
+        Some(model) => format!(
+            "Arc::new(GeminiLlm::new(gemini_adk_fluent_rs::gemini_adk_rs::llm::GeminiLlmParams {{\n                    \
+             model: Some({}.into()),\n                    ..Default::default()\n                }}))",
+            rust_str(model)
+        ),
+        None => "Arc::new(GeminiLlm::new(Default::default()))".to_string(),
+    };
     let _ = writeln!(
         out,
         "            LlmExtractor::new(\n                {}.to_string(),\n                \
-         Arc::new(GeminiLlm::new(Default::default())),\n                {}.to_string(),\n                {},\n            )",
+         {llm},\n                {}.to_string(),\n                {},\n            )",
         rust_str(&extract.name),
         rust_str(&extract.instruction),
         extract.window
@@ -525,6 +560,12 @@ fn gen_extract(extract: &super::ExtractSpec) -> String {
         "            .with_schema(json!({}))",
         compact(&extract.schema)
     );
+    if let Some(budget) = extract
+        .thinking_budget
+        .or(models.extraction_thinking_budget)
+    {
+        let _ = writeln!(out, "            .with_thinking_budget(Some({budget}))");
+    }
     let trigger = match extract.trigger {
         TriggerSpec::EveryTurn => "EveryTurn",
         TriggerSpec::AfterToolCall => "AfterToolCall",
@@ -553,6 +594,56 @@ fn gen_extract(extract: &super::ExtractSpec) -> String {
         out.push_str("            ])\n");
     }
     out.push_str("        ))\n");
+    out
+}
+
+fn gen_decisions(spec: &SessionSpec) -> String {
+    let mut out = String::new();
+    out.push_str(
+        "        .decisions(\n            Decisions::new(Arc::new(GatewayDecisionModel::from_env()?))\n",
+    );
+    for (id, d) in &spec.decisions {
+        let kind = serde_json::to_value(&d.kind).unwrap_or_default();
+        let _ = write!(
+            out,
+            "                .question(\n                    {},\n                    Decision::new(serde_json::from_value::<Question>(json!({}))?)",
+            rust_str(id),
+            compact(&kind)
+        );
+        if let Some(path) = &d.options_from {
+            let _ = write!(
+                out,
+                "\n                        .options_from({})",
+                rust_str(path)
+            );
+        }
+        if let Some(none) = &d.none {
+            let _ = write!(
+                out,
+                "\n                        .or_none({})",
+                rust_str(none)
+            );
+        }
+        if let Some(t) = d.at_least {
+            let _ = write!(out, "\n                        .at_least({t:?})");
+        }
+        if let Some(key) = &d.writes {
+            let _ = write!(out, "\n                        .writes({})", rust_str(key));
+        }
+        out.push_str(",\n                )\n");
+    }
+    let standing: Vec<String> = spec
+        .decided_atoms()
+        .into_iter()
+        .filter(|(_, _, standing)| *standing)
+        .map(|(_, d, _)| rust_str(&d.question))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if !standing.is_empty() {
+        let _ = writeln!(out, "                .standing([{}])", standing.join(", "));
+    }
+    out.push_str("        )\n");
     out
 }
 
@@ -1187,5 +1278,72 @@ mod tests {
         assert!(code.contains("spec.apply(Live::builder()"));
         assert!(code.contains("submit_adjustment"));
         assert!(code.contains("task_scenarios"));
+    }
+
+    #[test]
+    fn extraction_is_generated_on_the_model_the_spec_names() {
+        let mut named = spec();
+        named.models.extraction = Some("gemini-3.5-flash-lite".into());
+        named.models.extraction_thinking_budget = Some(64);
+        let code = named.to_rust();
+        assert!(
+            code.contains("model: Some(\"gemini-3.5-flash-lite\".into())"),
+            "{code}"
+        );
+        assert!(code.contains(".with_thinking_budget(Some(64))"), "{code}");
+        assert!(
+            !code.contains("GeminiLlm::new(Default::default())"),
+            "{code}"
+        );
+
+        let unnamed = spec().to_rust();
+        assert!(unnamed.contains("GeminiLlm::new(Default::default())"));
+    }
+
+    #[test]
+    fn decisions_lower_to_a_bank_and_decided_guards() {
+        let spec = SessionSpec::from_value(json!({
+            "name": "booking",
+            "instruction": "Book tables.",
+            "tools": [{ "name": "book" }],
+            "decisions": {
+                "confirmed": { "type": "boolean", "instructions": "Agreed?", "at_least": 0.9 },
+                "picked": { "type": "choice", "instructions": "Which time?",
+                            "options_from": "availability.options", "none": "not yet",
+                            "writes": "slot" },
+                "anger": { "type": "score", "instructions": "How angry?",
+                           "criteria": ["calm", "upset", "angry"] }
+            },
+            "flow": { "steps": [
+                { "id": "confirm", "allow": ["book"], "done": { "called_ok": "book" } },
+                { "id": "end", "after": [{ "step": "confirm", "when": { "decided": { "anger": { "at_most": 1 } } } }],
+                  "terminal": true }
+            ], "constraints": [{ "never_until": { "tool": "book", "until": { "decided": "confirmed" } } }] },
+            "phases": [{ "name": "main", "transitions": [{ "to": "calm", "when": { "decided": { "anger": { "at_least": 2 } } } }] },
+                       { "name": "calm" }],
+            "initial_phase": "main"
+        }))
+        .expect("valid spec");
+        let code = spec.to_rust();
+        assert!(code.contains("use gemini_adk_fluent_rs::gemini_adk_rs::decision::{"));
+        assert!(code.contains("Decisions::new(Arc::new(GatewayDecisionModel::from_env()?))"));
+        assert!(code.contains(".at_least(0.9)"), "{code}");
+        assert!(code.contains(".options_from(\"availability.options\")"));
+        assert!(code.contains(".or_none(\"not yet\")"));
+        assert!(code.contains(".writes(\"slot\")"));
+        assert!(code.contains(".standing([\"anger\"])"), "{code}");
+        assert!(code.contains("Guard::decided(\"confirmed\")"), "{code}");
+        assert!(
+            code.contains("Guard::decided_at_most(\"anger\", 1.0)"),
+            "{code}"
+        );
+        assert!(
+            code.contains("Guard::decided_at_least(\"anger\", 2.0)"),
+            "{code}"
+        );
+        assert!(
+            spec.to_cargo_toml().contains("\"ai-gateway\""),
+            "the decision model needs the ai-gateway feature"
+        );
     }
 }

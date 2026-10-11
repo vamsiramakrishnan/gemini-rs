@@ -129,6 +129,38 @@ On a model without `contextUpdate` (Gemini 2.5 Live), the session logs a
 warning at connect and steers as `Hybrid`, declaring every tool. In a
 `SessionSpec`, set `"runtime": {"steering": "context_update"}`.
 
+A session of skills (see [skills and tasks](skills-and-tasks.md#what-the-model-is-offered))
+steers by its foreground task instead, and uses `contextUpdate` whenever the
+model accepts it, unless another steering mode is set.
+
+#### What a flow offers
+
+An update changes the tools the model has from the next thing it reads. It
+does not reach back into a reply already being formed: measured on Gemini
+3.8 Live with `examples/context-update-spike` (`--only discovery`, five runs
+each), a tool declared before the caller's question was used in that turn's
+reply 5 of 5 times; declared 0, 300 or 800 ms after the question, 0 of 5
+each. Declared before the response to a call the model made for it, it was
+used 5 of 5 times, about 450 ms later than a tool declared ahead. So a
+transition decided at the turn boundary, after the caller's words, comes too
+late to give the model the next step's tools in that turn.
+
+The flow therefore offers what the caller's next words could open, and the
+gate decides each call when it is made:
+
+| Offered | Admitted when |
+|---|---|
+| The active steps' tools | Their `never(..).until(..)` guards (a stage's `commit`) hold |
+| A commit tool before its guard holds | The gate asks the guard's questions about the turn in progress |
+| The tools of a step one decision away: what stands between it and active is a `decided` atom in its gate, an incoming edge, or the `done` guard of the active step it follows | The gate asks those questions about the turn in progress and relatches; the call goes through only if the step opened |
+| The first steps' tools of a digression whose trigger is a `decision` | The gate asks the trigger's questions and enters the digression first |
+
+"One decision away" is three-valued: every `decided` atom is unknown, since
+its question is asked again about each turn, and everything else is
+evaluated as it stands (`Guard::possible`, `FlowMonitor::frontier_steps`). A
+step behind an extracted flag (`is_true`) is not offered ahead: the flag is
+set at the turn boundary. A call no decision governs waits for none.
+
 **When to use:** Gemini 3.8 Live sessions whose phases or flow steps use
 different tools, where the model should not see tools it may not call yet.
 

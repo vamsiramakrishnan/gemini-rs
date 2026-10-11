@@ -299,18 +299,21 @@ impl SkillSpec {
 
     /// Compile independent activation governance and invocation-local tool bindings.
     pub fn compile(&self, resources: &SpecResources) -> Result<CompiledSkill, String> {
-        self.compile_mode(resources, false)
+        self.compile_mode(resources, false, &super::ModelsSpec::default())
     }
 
+    /// `models` is the session's, for extract entries that name no model or
+    /// thinking budget.
     pub(super) fn compile_mode(
         &self,
         resources: &SpecResources,
         offline: bool,
+        models: &super::ModelsSpec,
     ) -> Result<CompiledSkill, String> {
         self.validate_with_http_support(!offline)
             .map_err(|e| e.join("; "))?;
         let definition = self.definition();
-        let services = self.compile_services(resources, offline)?;
+        let services = self.compile_services(resources, offline, models)?;
         let memory_enabled = self.memory.is_some();
         let flow_factory: Option<gemini_adk_rs::tasks::FlowFactory> =
             if let Some(conversation) = &self.conversation {
@@ -470,6 +473,7 @@ impl SkillSpec {
         &self,
         resources: &SpecResources,
         offline: bool,
+        models: &super::ModelsSpec,
     ) -> Result<Option<TaskServicesFactory>, String> {
         if self.extract.is_empty()
             && self.computed.is_empty()
@@ -479,20 +483,27 @@ impl SkillSpec {
         {
             return Ok(None);
         }
-        let llm = if self.extract.is_empty() {
-            None
-        } else if offline {
+        // Each extract entry's model, resolved once.
+        let llms: Vec<Arc<dyn gemini_adk_rs::llm::BaseLlm>> = if offline {
             // Controlled replay substitutes provider outputs after normal due selection.
             // This empty script makes any accidental provider call fail.
-            Some(Arc::new(gemini_adk_rs::llm::MockLlm::script([]))
-                as Arc<dyn gemini_adk_rs::llm::BaseLlm>)
+            let mock: Arc<dyn gemini_adk_rs::llm::BaseLlm> =
+                Arc::new(gemini_adk_rs::llm::MockLlm::script([]));
+            self.extract.iter().map(|_| mock.clone()).collect()
         } else {
-            Some(
-                resources
-                    .extraction_llm
-                    .clone()
-                    .ok_or("task extraction requires SpecResources.extraction_llm")?,
-            )
+            let mut cache = std::collections::BTreeMap::new();
+            self.extract
+                .iter()
+                .map(|e| {
+                    super::extraction_llm_for(
+                        e,
+                        models.extraction.as_deref(),
+                        resources,
+                        &mut cache,
+                    )
+                    .map_err(|err| format!("task {err}"))
+                })
+                .collect::<Result<_, _>>()?
         };
         let memory = self
             .memory
@@ -513,21 +524,21 @@ impl SkillSpec {
             })
             .transpose()?;
         let skill = self.clone();
+        let models = models.clone();
         let factory: TaskServicesFactory = Arc::new(move || {
             let mut services = TaskServices {
                 memory: memory.clone(),
                 ..Default::default()
             };
-            if let Some(llm) = &llm {
-                services.extractors = skill
-                    .extract
-                    .iter()
-                    .map(|e| {
-                        Arc::new(super::compile_extractor(e, llm.clone()))
-                            as Arc<dyn gemini_adk_rs::live::extractor::TurnExtractor>
-                    })
-                    .collect();
-            }
+            services.extractors = skill
+                .extract
+                .iter()
+                .zip(&llms)
+                .map(|(e, llm)| {
+                    Arc::new(super::compile_extractor(e, llm.clone(), &models))
+                        as Arc<dyn gemini_adk_rs::live::extractor::TurnExtractor>
+                })
+                .collect();
             for spec in &skill.computed {
                 let expression = spec.from.clone();
                 services
@@ -1050,7 +1061,7 @@ impl SessionSpec {
         let skills = self
             .skills
             .iter()
-            .map(|skill| skill.compile_mode(resources, offline))
+            .map(|skill| skill.compile_mode(resources, offline, &self.models))
             .collect::<Result<Vec<_>, _>>()?;
         gemini_adk_rs::tasks::TaskRuntime::new(skills).map_err(|e| e.to_string())
     }
@@ -1103,7 +1114,7 @@ impl SessionSpec {
             }
             compiled.push(
                 skill
-                    .compile_mode(&bindings, true)
+                    .compile_mode(&bindings, true, &super::ModelsSpec::default())
                     .map_err(|error| vec![error])?,
             );
         }

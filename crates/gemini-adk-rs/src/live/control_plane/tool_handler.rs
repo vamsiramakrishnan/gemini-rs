@@ -58,12 +58,57 @@ pub(in crate::live) async fn handle_tool_calls(
     extractors: &[Arc<dyn TurnExtractor>],
     middleware: &Arc<crate::middleware::MiddlewareChain>,
     flow: &Option<crate::flow::SharedFlowStack>,
+    decisions: &Option<Arc<crate::decision::Decisions>>,
     tool_scope: &Option<Arc<crate::live::tool_scope::ToolScope>>,
     tool_gate: &mut ToolGate,
     completion_tx: &tokio::sync::mpsc::WeakSender<crate::live::processor::ControlEvent>,
     barge_in: &CancellationToken,
     event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
 ) {
+    // Decision point: answer the questions that decide whether these calls
+    // are admitted, about the caller's latest words including the turn in
+    // progress. A commit guarded on the caller's yes then sees this turn's
+    // yes, and a digression the answers trigger opens first, so a transfer
+    // the model makes in the same breath counts inside it. A call no
+    // decision governs asks nothing and does not wait.
+    if let (Some(decisions), Some(stack)) = (decisions, flow) {
+        let turns = transcript_buffer
+            .snapshot_window_with_current(decisions.history_len())
+            .turns()
+            .to_vec();
+        let tools: Vec<String> = calls.iter().map(|c| c.name.clone()).collect();
+        let turn_before = state.get_raw(crate::flow::DECISION_TURN_KEY);
+        let round = super::decisions::decision_round(
+            decisions,
+            flow,
+            super::decisions::DecisionPoint::ToolGate(&tools),
+            &turns,
+            state,
+        )
+        .await;
+        // New answers, or a new caller turn that retired the old ones.
+        if round.is_some() || state.get_raw(crate::flow::DECISION_TURN_KEY) != turn_before {
+            let mut stack = stack.lock();
+            stack.on_decisions(state);
+            let active: Vec<String> = stack
+                .active_steps(state)
+                .iter()
+                .map(|s| s.id.clone())
+                .collect();
+            if state.get::<Vec<String>>("flow:active").as_ref() != Some(&active) {
+                let _ = state.set("flow:active", active);
+            }
+            let overlay = stack.active_overlay().map(str::to_string);
+            if state
+                .get::<Option<String>>(crate::flow::OVERLAY_STATE_KEY)
+                .flatten()
+                != overlay
+            {
+                let _ = state.set(crate::flow::OVERLAY_STATE_KEY, overlay);
+            }
+        }
+    }
+
     // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list
     let (allowed_calls, rejected_responses) = if let Some(pm) = phase_machine {
         let active_tools = {
@@ -713,6 +758,7 @@ mod tests {
             &[],
             &Arc::new(MiddlewareChain::new()),
             &flow,
+            &None,
             &scope,
             &mut ToolGate::new(),
             &ctrl_tx.downgrade(),
@@ -766,6 +812,7 @@ mod tests {
             &None,
             &[],
             &middleware,
+            &None,
             &None,
             &None,
             &mut ToolGate::new(),
@@ -931,6 +978,7 @@ mod tests {
                 &middleware,
                 &flow,
                 &None,
+                &None,
                 &mut gate,
                 &ctrl_tx.downgrade(),
                 &barge_in,
@@ -1007,6 +1055,7 @@ mod tests {
             &middleware,
             &None,
             &None,
+            &None,
             &mut ToolGate::new(),
             &ctrl_tx.downgrade(),
             &barge_in,
@@ -1076,6 +1125,7 @@ mod tests {
             &[],
             &middleware,
             &flow,
+            &None,
             &None,
             &mut gate,
             &ctrl_tx.downgrade(),
@@ -1188,6 +1238,7 @@ mod tests {
             extractors,
             &Arc::new(MiddlewareChain::new()),
             flow,
+            &None,
             &None,
             &mut ToolGate::new(),
             &ctrl_tx.downgrade(),
@@ -1340,6 +1391,237 @@ mod tests {
         assert!(
             reader.seen.lock().unwrap().is_empty(),
             "a tool the step does not offer is refused without extraction"
+        );
+    }
+
+    /// A decision model that says yes to every question when the caller's
+    /// latest words contain `yes_when`, and no otherwise.
+    fn listening_for(yes_when: &'static str) -> Arc<crate::decision::Decisions> {
+        use crate::decision::{Answer, Decision, Decisions, MockDecisionModel, Question};
+        let model = Arc::new(MockDecisionModel::new(move |req| {
+            let last = req.state["conversation"]
+                .as_array()
+                .and_then(|c| c.iter().rev().find_map(|e| e["caller"].as_str()))
+                .unwrap_or_default()
+                .to_lowercase();
+            let p = if last.contains(yes_when) { 0.97 } else { 0.05 };
+            Ok(req
+                .questions
+                .keys()
+                .map(|k| (k.clone(), Answer::boolean(p)))
+                .collect())
+        }));
+        Arc::new(
+            Decisions::new(model)
+                .question("confirmed", Decision::new(Question::boolean("Agreed?")))
+                .question(
+                    "wants_person",
+                    Decision::new(Question::boolean("Asked for a person?")),
+                ),
+        )
+    }
+
+    async fn call_with_decisions(
+        tool: &'static str,
+        transcript: &mut TranscriptBuffer,
+        state: &State,
+        flow: &Option<crate::flow::SharedFlowStack>,
+        decisions: &Arc<crate::decision::Decisions>,
+        runs: Arc<AtomicUsize>,
+    ) {
+        let t = SimpleTool::new(tool, "a tool", None, move |_| {
+            let runs = runs.clone();
+            async move {
+                runs.fetch_add(1, Ordering::SeqCst);
+                Ok(json!({ "ok": true }))
+            }
+        });
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register_function(Arc::new(t));
+        let writer: Arc<dyn SessionWriter> = Arc::new(NoopWriter);
+        let (tx, _rx) = tokio::sync::broadcast::channel(64);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel::<ControlEvent>(8);
+        handle_tool_calls(
+            vec![FunctionCall {
+                name: tool.into(),
+                args: json!({}),
+                id: Some("c1".into()),
+            }],
+            &EventCallbacks::default(),
+            &Some(Arc::new(dispatcher)),
+            &writer,
+            state,
+            &None,
+            transcript,
+            &std::collections::HashMap::new(),
+            &None,
+            &[],
+            &Arc::new(MiddlewareChain::new()),
+            flow,
+            &Some(decisions.clone()),
+            &None,
+            &mut ToolGate::new(),
+            &ctrl_tx.downgrade(),
+            &CancellationToken::new(),
+            &tx,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_decided_commit_reads_the_caller_turn_in_progress() {
+        let flow_def = Flow::new()
+            .step("confirm")
+            .commit("charge", Guard::decided("confirmed"))
+            .done(Guard::called_ok("charge"))
+            .build()
+            .expect("valid");
+        let flow = Some(
+            FlowMonitor::new(flow_def, Enforcement::Enforce)
+                .into_stack()
+                .into_shared(),
+        );
+        let decisions = listening_for("yes");
+        let state = State::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+
+        let mut transcript = TranscriptBuffer::new();
+        transcript.push_output("Shall I charge the card?");
+        transcript.end_turn();
+        transcript.push_input("Hmm, let me think.");
+        call_with_decisions(
+            "charge",
+            &mut transcript,
+            &state,
+            &flow,
+            &decisions,
+            runs.clone(),
+        )
+        .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 0, "no yes: refused");
+
+        transcript.end_turn();
+        transcript.push_input("Yes, go ahead.");
+        call_with_decisions(
+            "charge",
+            &mut transcript,
+            &state,
+            &flow,
+            &decisions,
+            runs.clone(),
+        )
+        .await;
+        assert_eq!(
+            runs.load(Ordering::SeqCst),
+            1,
+            "the yes in this turn admits it"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_call_no_decision_governs_does_not_wait_for_one() {
+        use crate::decision::{Answer, Decision, Decisions, MockDecisionModel, Question};
+        let flow_def = Flow::new()
+            .step("confirm")
+            .commit("charge", Guard::decided("confirmed"))
+            .done(Guard::called_ok("charge"))
+            .build()
+            .expect("valid");
+        let flow = Some(
+            FlowMonitor::new(flow_def, Enforcement::Enforce)
+                .into_stack()
+                .into_shared(),
+        );
+        let model = Arc::new(MockDecisionModel::new(|_| {
+            Ok([("confirmed".to_string(), Answer::boolean(0.97))].into())
+        }));
+        let decisions = Arc::new(
+            Decisions::new(model.clone())
+                .question("confirmed", Decision::new(Question::boolean("Agreed?"))),
+        );
+        let state = State::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let mut transcript = TranscriptBuffer::new();
+        transcript.push_input("Yes, go ahead.");
+        call_with_decisions(
+            "lookup",
+            &mut transcript,
+            &state,
+            &flow,
+            &decisions,
+            runs.clone(),
+        )
+        .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert!(
+            model.requests().is_empty(),
+            "lookup asked the decision model"
+        );
+
+        call_with_decisions(
+            "charge",
+            &mut transcript,
+            &state,
+            &flow,
+            &decisions,
+            runs.clone(),
+        )
+        .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 2);
+        assert_eq!(model.requests().len(), 1, "charge waits for its yes");
+    }
+
+    #[tokio::test]
+    async fn decided_answers_open_a_digression_before_the_call_is_admitted() {
+        let main = Flow::new()
+            .step("collect")
+            .done(Guard::is_true("never"))
+            .build()
+            .expect("valid");
+        let handoff = Flow::new()
+            .step("transfer")
+            .allow(["transfer"])
+            .done(Guard::called_ok("transfer"))
+            .build()
+            .expect("valid")
+            .compile()
+            .expect("compiles");
+        let stack = FlowMonitor::new(main, Enforcement::Enforce)
+            .into_stack()
+            .with_overlay(crate::flow::Overlay::new(
+                "handoff",
+                Guard::decided("wants_person"),
+                handoff,
+                crate::flow::Resume::Terminate,
+            ));
+        let flow = Some(stack.into_shared());
+        let decisions = listening_for("person");
+        let state = State::new();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let mut transcript = TranscriptBuffer::new();
+        transcript.push_input("Can I talk to a real person?");
+        call_with_decisions(
+            "transfer",
+            &mut transcript,
+            &state,
+            &flow,
+            &decisions,
+            runs.clone(),
+        )
+        .await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        let stack = flow.as_ref().unwrap();
+        assert_eq!(stack.lock().active_overlay(), Some("handoff"));
+        assert_eq!(
+            state.get::<Option<String>>("flow:overlay"),
+            Some(Some("handoff".into()))
+        );
+        // The transfer counted inside the digression: two turns close it.
+        stack.lock().on_turn(&state);
+        stack.lock().on_turn(&state);
+        assert!(
+            stack.lock().is_terminated(),
+            "one transfer completes the handoff"
         );
     }
 }
