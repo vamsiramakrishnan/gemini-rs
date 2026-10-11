@@ -222,7 +222,7 @@ async fn run(model: &str) -> Value {
         .map(|op| op.tool.clone())
         .collect();
     let (total, returned) = truth();
-    let said = answer.replace(',', "").replace('$', "");
+    let said = answer.replace([',', '$'], "");
     let words: Vec<&str> = said
         .split(|c: char| !c.is_ascii_alphanumeric() && c != '.')
         .map(|w| w.trim_end_matches('.'))
