@@ -640,6 +640,9 @@ fn scenarios() -> Vec<Scenario> {
             expect: vec![
                 NeverRan("submit_refill"),
                 Ran("request_pharmacist_callback", 1, 1),
+                // Agreeing to the callback the flow offers is not asking to
+                // be transferred.
+                NeverRan("handoff_to_staff"),
             ],
         },
     ]
@@ -837,6 +840,16 @@ fn jev_arm(fixture: &str, mut doc: Value) -> Value {
                     question["criteria"] = json!({
                         "true": "the caller said yes to the details the agent read back, in their own words",
                         "false": "nothing was read back yet, or they hesitated, changed a detail, asked something, or only picked an option",
+                    });
+                }
+                // Without criteria, "Yes, please have the pharmacist call me
+                // back" scored 0.90 as asking for a person, and the call was
+                // transferred after the callback was booked; with them, 0.14,
+                // while "Can I talk to the pharmacist right now?" scored 0.94.
+                if field == "intent_human_agent" {
+                    question["criteria"] = json!({
+                        "true": "they asked to be put through to a person, a pharmacist or staff now, or accepted a transfer",
+                        "false": "anything else, including asking for or agreeing to a callback, thanking, or saying goodbye",
                     });
                 }
                 decisions.insert(field.clone(), question);

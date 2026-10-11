@@ -382,6 +382,23 @@ thinking budget of 64 (see [extraction](extraction.md#choosing-the-extraction-mo
   right. Please submit it." scored 0.84, under the 0.85 bar: unsure, so
   `submit_refill` was refused three times and the call ended unsubmitted.
   Lower `at_least` only where a wrong yes is cheap.
+- **A callback is not a transfer.** "Yes, please have the pharmacist call
+  me back" read as asking for a person in 11 of 12 runs across both arms,
+  and in one the call was transferred after the callback was booked. The
+  extractor's field said "asked to speak to a person or a pharmacist", and
+  Jev scored the callback 0.90 against it. Saying what is not a transfer
+  fixed both: the extractor was right in 20 of 20 offline (0 before), and
+  Jev, given true/false criteria, scored the callback 0.14 and "Can I talk
+  to the pharmacist right now?" 0.94. The scenario now also expects that
+  `handoff_to_staff` never runs, and it did not in any of the 20 runs since.
+- **A check must be about what is committed.** In two spoken runs the model
+  called `check_refills` on Lisinopril before the caller named a
+  medication, and when the caller asked for Atorvastatin, which has no
+  refills, `submit_refill` was admitted on the stale "refillable" result.
+  Guards read state, not the call's arguments, so the fixture now requires
+  the medication before the check (`{"captured": ["medication"]}`). A guard
+  that binds a commit's arguments to the checked values would close the
+  general case.
 - **An unspecified confirmation reads a pick as a yes.** Before the
   confirmation question had criteria, one run booked on "Seven o'clock is
   perfect", said before any read-back. With criteria it stays unsure, as in
@@ -391,10 +408,6 @@ Still failing or ambiguous in both arms, and not about who decides:
 
 - **dental-happy.** The caller's lines are fixed and drift from what the
   agent asks, so the booking is never confirmed.
-- **pharmacy-no-refills.** "Please have the pharmacist call me back" reads
-  as asking for a person in most runs of both arms (11 of the last 12), so
-  the handoff digression opens after the callback is booked. The fixture's
-  trigger should exclude the callback the flow itself offers.
 
 Two harness faults hid earlier numbers. The spoken caller stopped sending
 audio after each line's trailing silence, so 38 of 78 spoken turns waited

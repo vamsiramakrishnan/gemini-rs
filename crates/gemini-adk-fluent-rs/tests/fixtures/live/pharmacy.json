@@ -155,6 +155,11 @@
                 "called_ok": "list_prescriptions"
               },
               {
+                "captured": [
+                  "medication"
+                ]
+              },
+              {
                 "not": {
                   "any": [
                     {
@@ -609,7 +614,7 @@
       "schema": {
         "properties": {
           "intent_human_agent": {
-            "description": "The caller asked to speak to a person or a pharmacist, or accepted an offer to be transferred to the pharmacy team.",
+            "description": "The caller asked to be transferred now to a person, a pharmacist or the pharmacy team, or accepted an offer to be transferred. Asking for or agreeing to a pharmacist calling them back later is not a transfer: false.",
             "type": "boolean"
           },
           "refill_confirmed": {
