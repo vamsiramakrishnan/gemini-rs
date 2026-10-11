@@ -304,6 +304,7 @@ dependencies = [
  "gemini-genai-rs",
  "monty",
  "monty-types",
+ "reqwest",
  "serde_json",
  "tokio",
 ]

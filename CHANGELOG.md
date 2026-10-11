@@ -20,9 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the program. The tool is declared with Python stubs generated from the
   tools' declarations (`ToolSpec.returns`, or a mock's response, gives the
   result shape); under `ContextUpdate` steering it lists only the functions
-  the flow offers. Commits are left out by default. Limits bound calls,
-  interpreter time, wall time, output and (in worker processes) memory. See
-  [code mode](docs/user-guide/code-mode.md).
+  the flow offers. Commits are left out by default, and `only_in_code`
+  keeps a long-result tool out of direct reach. A stub the model copies into
+  its program is removed so it cannot shadow the real function. Limits bound
+  calls, interpreter time, wall time, output and (in worker processes)
+  memory. See [code mode](docs/user-guide/code-mode.md).
 - **Two sandboxes.** `InProcess` (feature `code-mode`, on by default) runs
   Monty on a blocking thread; it cannot bound memory, and `'a' * 10**10` can
   abort the process. `MontyPool` (feature `code-pool`) runs programs in Monty
