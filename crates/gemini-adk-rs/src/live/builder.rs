@@ -69,6 +69,7 @@ pub struct LiveSessionBuilder {
     middleware: Vec<Arc<dyn crate::middleware::Middleware>>,
     flow: Option<crate::flow::FlowStack>,
     decisions: Option<Arc<crate::decision::Decisions>>,
+    code_mode: Option<Arc<crate::code_mode::CodeMode>>,
     tasks: Option<crate::tasks::TaskRuntime>,
     redactor: Option<Arc<super::redaction::TranscriptRedactor>>,
     clock: Option<crate::clock::SharedClock>,
@@ -104,6 +105,7 @@ impl LiveSessionBuilder {
             middleware: Vec::new(),
             flow: None,
             decisions: None,
+            code_mode: None,
             tasks: None,
             redactor: None,
             clock: None,
@@ -204,6 +206,14 @@ impl LiveSessionBuilder {
     /// Set a greeting prompt sent on connect to trigger the model to speak first.
     pub fn greeting(mut self, prompt: impl Into<String>) -> Self {
         self.greeting = Some(prompt.into());
+        self
+    }
+
+    /// Give the model a code tool: it runs a short Python program whose
+    /// functions are the session's tools, each call down the same governed
+    /// path as a direct call. See [`code_mode`](crate::code_mode).
+    pub fn code_mode(mut self, code: crate::code_mode::CodeMode) -> Self {
+        self.code_mode = Some(Arc::new(code));
         self
     }
 
@@ -475,6 +485,36 @@ impl LiveSessionBuilder {
         if let Some(ref pm) = self.phase_machine {
             pm.validate()?;
         }
+        if let Some(code) = &self.code_mode {
+            if self.tasks.is_some() {
+                return Err(AgentError::Config(
+                    "a task session cannot have a session-wide code tool".into(),
+                ));
+            }
+            let known: Vec<&str> = self
+                .dispatcher
+                .as_ref()
+                .map(|d| d.names().collect())
+                .unwrap_or_default();
+            let missing: Vec<&str> = code
+                .function_list()
+                .iter()
+                .map(|f| f.name.as_str())
+                .filter(|name| !known.contains(name))
+                .collect();
+            if !missing.is_empty() {
+                return Err(AgentError::Config(format!(
+                    "the code tool exposes {} but the session has no tool of that name",
+                    missing.join(", ")
+                )));
+            }
+            if known.contains(&code.tool()) {
+                return Err(AgentError::Config(format!(
+                    "the code tool's name '{}' is also a tool of the session",
+                    code.tool()
+                )));
+            }
+        }
         if let Some(ref computed) = self.computed {
             computed.validate()?;
         }
@@ -562,7 +602,8 @@ impl LiveSessionBuilder {
                 std::mem::take(&mut config.tools),
                 base_instruction.clone(),
                 &admitted,
-            );
+            )
+            .with_code(self.code_mode.clone());
             config.tools = scope.tools_for(&admitted);
             if let Some(phase) = phase {
                 let instruction = scope.instruction_for(
@@ -576,6 +617,11 @@ impl LiveSessionBuilder {
             }
             Some(Arc::new(scope))
         } else {
+            // Declared once, at connect: the code tool lists every function
+            // it exposes.
+            if let Some(code) = &self.code_mode {
+                config.tools = tool_scope::with_code(std::mem::take(&mut config.tools), code);
+            }
             None
         };
 
@@ -607,6 +653,7 @@ impl LiveSessionBuilder {
             base_instruction,
             tool_scope,
             task_scope,
+            code_mode: self.code_mode,
             callbacks: self.callbacks,
             dispatcher: self.dispatcher,
             extractors: self.extractors,
@@ -686,6 +733,8 @@ pub(crate) struct SessionPlan {
     /// Every task tool declaration, in a task session on a model that
     /// accepts `contextUpdate`.
     task_scope: Option<Arc<ToolScope>>,
+    /// The session's code tool.
+    code_mode: Option<Arc<crate::code_mode::CodeMode>>,
     callbacks: EventCallbacks,
     dispatcher: Option<Arc<ToolDispatcher>>,
     extractors: Vec<Arc<dyn TurnExtractor>>,
@@ -817,6 +866,7 @@ pub(crate) fn build_runtime(plan: SessionPlan, session: SessionHandle) -> Sessio
         tool_advisory: plan.tool_advisory,
         tool_scope: plan.tool_scope,
         task_scope: plan.task_scope,
+        code_mode: plan.code_mode,
         base_instruction: plan.base_instruction,
         pending_context: None, // set after PendingContext is created below
         middleware: {
@@ -1205,6 +1255,55 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    fn lookup_dispatcher() -> ToolDispatcher {
+        let mut dispatcher = ToolDispatcher::new();
+        for name in ["lookup", "book"] {
+            dispatcher.register_function(Arc::new(crate::tool::SimpleTool::new(
+                name,
+                format!("{name} tool"),
+                None,
+                |_| async { Ok(serde_json::json!({})) },
+            )));
+        }
+        dispatcher
+    }
+
+    #[test]
+    fn a_code_tool_is_declared_at_setup_beside_the_tools() {
+        let plan = LiveSessionBuilder::new(SessionConfig::new("test-key"))
+            .dispatcher(lookup_dispatcher())
+            .code_mode(crate::code_mode::CodeMode::new().function("lookup"))
+            .into_plan()
+            .expect("plan");
+        let mut names = declared(plan.config.as_ref().unwrap());
+        names.sort();
+        assert_eq!(names, vec!["book", "lookup", "run_code"]);
+        assert!(plan.code_mode.is_some());
+    }
+
+    #[test]
+    fn a_code_tool_must_expose_tools_the_session_has() {
+        let err = LiveSessionBuilder::new(SessionConfig::new("test-key"))
+            .dispatcher(lookup_dispatcher())
+            .code_mode(crate::code_mode::CodeMode::new().function("refund"))
+            .into_plan()
+            .err()
+            .expect("an unknown function is refused");
+        assert!(err.to_string().contains("refund"), "{err}");
+
+        let err = LiveSessionBuilder::new(SessionConfig::new("test-key"))
+            .dispatcher(lookup_dispatcher())
+            .code_mode(
+                crate::code_mode::CodeMode::new()
+                    .function("lookup")
+                    .tool_name("book"),
+            )
+            .into_plan()
+            .err()
+            .expect("a name clash is refused");
+        assert!(err.to_string().contains("'book'"), "{err}");
     }
 
     #[test]

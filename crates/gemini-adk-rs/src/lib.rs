@@ -76,6 +76,7 @@ pub mod artifacts;
 pub mod auth;
 pub mod clock;
 pub mod code_executors;
+pub mod code_mode;
 pub mod confirmation;
 pub mod context;
 pub mod credentials;

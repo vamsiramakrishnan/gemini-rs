@@ -368,6 +368,9 @@ pub(crate) struct ControlPlaneConfig {
     /// session on a model that accepts `contextUpdate`. `None` otherwise:
     /// then every skill's tools are declared at connect.
     pub task_scope: Option<Arc<super::tool_scope::ToolScope>>,
+    /// The session's code tool: the runtime runs its programs, each call
+    /// down the governed path. `None` without code mode.
+    pub code_mode: Option<Arc<crate::code_mode::CodeMode>>,
     /// Shared pending context buffer for deferred delivery (None when Immediate).
     /// Must be the same Arc given to the DeferredWriter so the control lane
     /// can push context and the DeferredWriter can drain it.
@@ -453,6 +456,7 @@ impl Default for ControlPlaneConfig {
             tool_advisory: true,
             tool_scope: None,
             task_scope: None,
+            code_mode: None,
             pending_context: None,
             middleware: Arc::new(crate::middleware::MiddlewareChain::new()),
             flow: None,

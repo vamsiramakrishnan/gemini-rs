@@ -47,6 +47,10 @@ sqlx = { version = "0.8", default-features = false, optional = true }
 # Optional: only compiled when an `http`-pulling feature is enabled.
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart"], optional = true }
 base64 = "0.22"
+# Code mode: Monty, a Python interpreter in Rust, runs the model's programs.
+monty = { version = "=1.1.0", optional = true }
+monty-types = { version = "=1.1.0", optional = true }
+monty-pool = { version = "=1.1.0", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -59,8 +63,13 @@ proptest = "1"
 # Pick the other TLS backend with `--no-default-features --features
 # tls-rustls,gemini-llm`; the two are mutually exclusive by construction (each
 # selects its own reqwest and tungstenite backend and nothing else selects one).
-default = ["tls-native", "gemini-llm"]
+default = ["tls-native", "gemini-llm", "code-mode"]
 gemini-llm = ["gemini-genai-rs/http", "gemini-genai-rs/generate"]
+# Code mode's in-process sandbox (Monty on a blocking thread).
+code-mode = ["dep:monty", "dep:monty-types"]
+# Code mode in Monty worker processes: crash isolation, a memory cap and hard
+# deadlines. Needs the `monty` worker binary (`cargo install monty-runtime`).
+code-pool = ["code-mode", "dep:monty-pool"]
 # Pulls the optional reqwest HTTP client; enabled transitively by the
 # REST-backed feature areas below.
 http = ["dep:reqwest"]

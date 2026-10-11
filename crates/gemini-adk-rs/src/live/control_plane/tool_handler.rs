@@ -1,12 +1,15 @@
-//! Tool call handling — phase filtering, dispatch, background tools.
+//! Tool call handling — phase filtering, dispatch, background tools, and
+//! code-mode programs.
 
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-use gemini_genai_rs::prelude::FunctionResponse;
+use gemini_genai_rs::prelude::{FunctionCall, FunctionDeclaration, FunctionResponse};
 use gemini_genai_rs::session::SessionWriter;
+use serde_json::Value;
 
+use crate::code_mode::CodeMode;
 use crate::state::State;
 use crate::tool::ToolDispatcher;
 
@@ -38,6 +41,14 @@ use super::tool_gate::ToolGate;
 /// Remaining inline calls in the same batch short-circuit to cancelled as
 /// well (the token stays cancelled until the control lane processes the
 /// interruption and re-arms it).
+///
+/// # Code mode
+///
+/// A call to the [`CodeMode`] tool runs its program, and every call the
+/// program makes goes down the same path as a direct call: the phase's tool
+/// list, the decision gate, the flow gate, middleware and the tool, with the
+/// flow advanced on its result. A refused call raises `RuntimeError` in the
+/// program. The user's `on_tool_call` override does not see these calls.
 #[allow(
     clippy::too_many_arguments,
     reason = "tool-lifecycle stage entry point: each parameter is one control-plane subsystem (dispatcher, gate, middleware, transcript)"
@@ -60,91 +71,81 @@ pub(in crate::live) async fn handle_tool_calls(
     flow: &Option<crate::flow::SharedFlowStack>,
     decisions: &Option<Arc<crate::decision::Decisions>>,
     tool_scope: &Option<Arc<crate::live::tool_scope::ToolScope>>,
+    code_mode: &Option<Arc<CodeMode>>,
     tool_gate: &mut ToolGate,
     completion_tx: &tokio::sync::mpsc::WeakSender<crate::live::processor::ControlEvent>,
     barge_in: &CancellationToken,
     event_tx: &tokio::sync::broadcast::Sender<LiveEvent>,
 ) {
+    let path = CallPath {
+        callbacks,
+        state,
+        extractors,
+        middleware,
+        flow,
+        decisions,
+        barge_in,
+        event_tx,
+    };
+
     // Decision point: answer the questions that decide whether these calls
     // are admitted, about the caller's latest words including the turn in
     // progress. A commit guarded on the caller's yes then sees this turn's
     // yes, and a digression the answers trigger opens first, so a transfer
     // the model makes in the same breath counts inside it. A call no
     // decision governs asks nothing and does not wait.
-    if let (Some(decisions), Some(stack)) = (decisions, flow) {
-        let turns = transcript_buffer
-            .snapshot_window_with_current(decisions.history_len())
-            .turns()
-            .to_vec();
-        let tools: Vec<String> = calls.iter().map(|c| c.name.clone()).collect();
-        let turn_before = state.get_raw(crate::flow::DECISION_TURN_KEY);
-        let round = super::decisions::decision_round(
-            decisions,
-            flow,
-            super::decisions::DecisionPoint::ToolGate(&tools),
-            &turns,
-            state,
-        )
-        .await;
-        // New answers, or a new caller turn that retired the old ones.
-        if round.is_some() || state.get_raw(crate::flow::DECISION_TURN_KEY) != turn_before {
-            let mut stack = stack.lock();
-            stack.on_decisions(state);
-            let active: Vec<String> = stack
-                .active_steps(state)
-                .iter()
-                .map(|s| s.id.clone())
-                .collect();
-            if state.get::<Vec<String>>("flow:active").as_ref() != Some(&active) {
-                let _ = state.set("flow:active", active);
-            }
-            let overlay = stack.active_overlay().map(str::to_string);
-            if state
-                .get::<Option<String>>(crate::flow::OVERLAY_STATE_KEY)
-                .flatten()
-                != overlay
-            {
-                let _ = state.set(crate::flow::OVERLAY_STATE_KEY, overlay);
-            }
+    let tools: Vec<String> = calls.iter().map(|c| c.name.clone()).collect();
+    path.decide(&tools, transcript_buffer).await;
+
+    // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list.
+    // The code tool is in the phase when a function it exposes is.
+    let phase_tools = match phase_machine {
+        Some(pm) => pm
+            .lock()
+            .await
+            .active_tools()
+            .map(<[std::string::String]>::to_vec),
+        None => None,
+    };
+    let in_phase = |name: &str| {
+        phase_tools.as_ref().is_none_or(|tools| {
+            tools.iter().any(|t| t == name)
+                || code_mode.as_ref().is_some_and(|code| {
+                    code.tool() == name && tools.iter().any(|t| code.exposes(t))
+                })
+        })
+    };
+    let mut allowed_calls = Vec::new();
+    let mut rejected_responses = Vec::new();
+    for call in calls {
+        if in_phase(&call.name) {
+            allowed_calls.push(call);
+        } else {
+            rejected_responses.push(FunctionResponse {
+                name: call.name.clone(),
+                response: serde_json::json!({
+                    "error": format!(
+                        "Tool '{}' is not available in the current conversation phase.",
+                        call.name
+                    )
+                }),
+                id: call.id.clone(),
+                scheduling: None,
+            });
         }
     }
 
-    // 0. Phase-scoped tool filtering: reject calls not in phase's allowed list
-    let (allowed_calls, rejected_responses) = if let Some(pm) = phase_machine {
-        let active_tools = {
-            let pm_guard = pm.lock().await;
-            pm_guard.active_tools().map(<[std::string::String]>::to_vec)
-        };
-        if let Some(active_tools) = active_tools {
-            let mut allowed = Vec::new();
-            let mut rejected = Vec::new();
-            for call in calls {
-                if active_tools.iter().any(|t| t == &call.name) {
-                    allowed.push(call);
-                } else {
-                    rejected.push(FunctionResponse {
-                        name: call.name.clone(),
-                        response: serde_json::json!({
-                            "error": format!(
-                                "Tool '{}' is not available in the current conversation phase.",
-                                call.name
-                            )
-                        }),
-                        id: call.id.clone(),
-                        scheduling: None,
-                    });
-                }
-            }
-            (allowed, rejected)
-        } else {
-            (calls, Vec::new())
-        }
-    } else {
-        (calls, Vec::new())
-    };
+    // Programs for the code tool are run by the runtime, after the direct
+    // calls of this batch.
+    let (code_calls, allowed_calls): (Vec<FunctionCall>, Vec<FunctionCall>) =
+        allowed_calls.into_iter().partition(|call| {
+            code_mode
+                .as_ref()
+                .is_some_and(|code| code.tool() == call.name)
+        });
 
     // 1. Check user callback for override (receives State)
-    let responses = if allowed_calls.is_empty() && !rejected_responses.is_empty() {
+    let responses = if allowed_calls.is_empty() {
         Some(rejected_responses.clone())
     } else if let Some(cb) = &callbacks.on_tool_call {
         let mut result = cb(allowed_calls.clone(), state.clone()).await;
@@ -161,7 +162,7 @@ pub(in crate::live) async fn handle_tool_calls(
     let mut cancelled_calls: Vec<String> = Vec::new();
 
     // 2. If no override, auto-dispatch via ToolDispatcher (split standard vs background)
-    let (responses, background_spawns) = match responses {
+    let (mut responses, background_spawns) = match responses {
         Some(r) => (r, Vec::new()),
         None => {
             let mut results: Vec<FunctionResponse> = rejected_responses;
@@ -174,78 +175,14 @@ pub(in crate::live) async fn handle_tool_calls(
                 for call in &allowed_calls {
                     // Flow governance gate: deny inadmissible tools (out-of-order,
                     // once-violated, gated) in Enforce mode; record in Observe.
-                    // Lock scope is the synchronous admissibility check only.
-                    if let Some(mon) = flow {
-                        let decide = || {
-                            let mon = mon.lock();
-                            match mon.admits_tool(&call.name, state) {
-                                Err(reason) if mon.mode() == crate::flow::Enforcement::Enforce => {
-                                    Some(reason)
-                                }
-                                _ => None,
-                            }
-                        };
-                        let mut denial = decide();
-                        // Refused only because a guard has not held yet: if
-                        // extractors write the keys it reads, extract the
-                        // turn in progress and decide again. The caller's
-                        // yes is otherwise extracted after the model has
-                        // answered, one turn too late.
-                        if denial.is_some() {
-                            let blocking = {
-                                let mon = mon.lock();
-                                if mon.offers_tool(&call.name, state) {
-                                    mon.blocking_keys(&call.name, state)
-                                } else {
-                                    std::collections::BTreeSet::new()
-                                }
-                            };
-                            // Only extractors that run on every turn: one
-                            // configured for another moment (after tools, on a
-                            // phase change, at generation complete) keeps it.
-                            let writers: Vec<Arc<dyn TurnExtractor>> = extractors
-                                .iter()
-                                .filter(|e| {
-                                    e.trigger()
-                                        == crate::live::extractor::ExtractionTrigger::EveryTurn
-                                })
-                                .filter(|e| blocking.iter().any(|k| e.may_write(k)))
-                                .cloned()
-                                .collect();
-                            if !writers.is_empty() {
-                                refresh_extractors(
-                                    &writers,
-                                    transcript_buffer,
-                                    state,
-                                    callbacks,
-                                    event_tx,
-                                )
-                                .await;
-                                denial = decide();
-                            }
-                        }
-                        if let Some(reason) = denial {
-                            tracing::info!(tool = %call.name, %reason, "tool denied by the flow gate");
-                            let _ = state.set(
-                                crate::flow::TOOL_DENIED_KEY,
-                                serde_json::json!({
-                                    "tool": call.name,
-                                    "id": call.id,
-                                    "reason": reason,
-                                }),
-                            );
-                            results.push(FunctionResponse {
-                                name: call.name.clone(),
-                                response: serde_json::json!({ "error": reason }),
-                                id: call.id.clone(),
-                                scheduling: None,
-                            });
-                            continue;
-                        }
-                        let _ = state.set(
-                            crate::flow::TOOL_CALL_KEY,
-                            serde_json::json!({ "tool": call.name, "id": call.id }),
-                        );
+                    if let Err(reason) = path.admit(call, transcript_buffer).await {
+                        results.push(FunctionResponse {
+                            name: call.name.clone(),
+                            response: serde_json::json!({ "error": reason }),
+                            id: call.id.clone(),
+                            scheduling: None,
+                        });
+                        continue;
                     }
                     let mode = execution_modes.get(&call.name);
                     match mode {
@@ -277,104 +214,17 @@ pub(in crate::live) async fn handle_tool_calls(
                             // path. `Guard::resolved(..)` / `captured([..])` still work for
                             // gating on the delivered result; `called_ok(..)` now works too.
                         }
-                        _ => {
-                            // Standard: execute inline, wrapped in middleware hooks.
-                            // A `before_tool` error vetoes execution (e.g. guardrails).
-                            if let Err(e) = middleware.run_before_tool(call).await {
-                                tracing::info!(tool = %call.name, error = %e, "tool vetoed by middleware");
-                                results.push(FunctionResponse {
-                                    name: call.name.clone(),
-                                    response: serde_json::json!({"error": e.to_string()}),
-                                    id: call.id.clone(),
-                                    scheduling: None,
-                                });
-                                continue;
-                            }
-                            // Race the tool against the barge-in signal so an
-                            // interruption is never stuck behind a slow tool.
-                            // `biased` makes an already-cancelled token win
-                            // without polling the tool future at all.
-                            let started = std::time::Instant::now();
-                            let filler_after = state
-                                .get::<crate::flow::VoiceTiming>(crate::flow::VOICE_TIMING_KEY)
-                                .and_then(|t| t.filler_after_ms)
-                                .map(std::time::Duration::from_millis);
-                            let mut tool_ctx = crate::tool::ToolContext::new(state.clone())
-                                .with_cancel(barge_in.clone());
-                            if let Some(id) = &call.id {
-                                tool_ctx = tool_ctx.with_call_id(id.clone());
-                            }
-                            let run = with_filler_cue(
-                                disp.call_function_in(&call.name, call.args.clone(), tool_ctx),
-                                filler_after,
-                                || {
-                                    let _ = event_tx.send(LiveEvent::FillerCue {
-                                        tool: call.name.clone(),
-                                        elapsed_ms: started.elapsed().as_millis() as u64,
-                                    });
-                                },
-                            );
-                            let dispatched = tokio::select! {
-                                biased;
-                                _ = barge_in.cancelled() => None,
-                                result = run => Some(result),
-                            };
-                            let Some(call_result) = dispatched else {
-                                // Cancelled: the tool future was dropped at its
-                                // current await point. No response, no gate
-                                // advance — the model's turn was interrupted.
-                                tracing::debug!(
-                                    tool = %call.name,
-                                    duration_ms = started.elapsed().as_millis() as u64,
-                                    "tool cancelled by barge-in"
-                                );
+                        _ => match path.run_inline(disp, call, tool_gate).await {
+                            Ran::Cancelled => {
                                 cancelled_calls.push(call.id.clone().unwrap_or_default());
-                                continue;
-                            };
-                            let duration_ms = started.elapsed().as_millis() as u64;
-                            gemini_genai_rs::telemetry::metrics::record_tool_call(
-                                &call.name,
-                                duration_ms as f64,
-                            );
-                            match call_result {
-                                Ok(result) => {
-                                    tracing::info!(tool = %call.name, duration_ms, "tool call");
-                                    let _ = middleware.run_after_tool(call, &result).await;
-                                    // Inline completion advances the governed flow
-                                    // through the single shared gate (#7).
-                                    tool_gate.observe_completion(
-                                        call.id.as_deref().unwrap_or(""),
-                                        &call.name,
-                                        true,
-                                        flow,
-                                        state,
-                                    );
-                                    results.push(FunctionResponse {
-                                        name: call.name.clone(),
-                                        response: result,
-                                        id: call.id.clone(),
-                                        scheduling: None,
-                                    });
-                                }
-                                Err(e) => {
-                                    tracing::warn!(tool = %call.name, duration_ms, error = %e, "tool call failed");
-                                    let _ = middleware.run_on_tool_error(call, &e).await;
-                                    tool_gate.observe_completion(
-                                        call.id.as_deref().unwrap_or(""),
-                                        &call.name,
-                                        false,
-                                        flow,
-                                        state,
-                                    );
-                                    results.push(FunctionResponse {
-                                        name: call.name.clone(),
-                                        response: serde_json::json!({"error": e.to_string()}),
-                                        id: call.id.clone(),
-                                        scheduling: None,
-                                    });
-                                }
                             }
-                        }
+                            ran => results.push(FunctionResponse {
+                                name: call.name.clone(),
+                                response: ran.response(),
+                                id: call.id.clone(),
+                                scheduling: None,
+                            }),
+                        },
                     }
                 }
             } else if results.is_empty() {
@@ -383,6 +233,37 @@ pub(in crate::live) async fn handle_tool_calls(
             (results, bg_spawns)
         }
     };
+
+    // 2b. Run each program, its calls down the same governed path.
+    if let Some(code) = code_mode {
+        for call in &code_calls {
+            let response = match dispatcher {
+                Some(disp) => {
+                    path.run_program(
+                        code,
+                        disp,
+                        call,
+                        phase_tools.as_deref(),
+                        transcript_buffer,
+                        tool_gate,
+                    )
+                    .await
+                }
+                None => Some(serde_json::json!({
+                    "error": "this session has no tools for a program to call"
+                })),
+            };
+            match response {
+                Some(response) => responses.push(FunctionResponse {
+                    name: call.name.clone(),
+                    response,
+                    id: call.id.clone(),
+                    scheduling: None,
+                }),
+                None => cancelled_calls.push(call.id.clone().unwrap_or_default()),
+            }
+        }
+    }
 
     // Surface barge-in cancellations. No response is sent for a cancelled
     // call and the governed-flow gate was not advanced for it.
@@ -403,6 +284,7 @@ pub(in crate::live) async fn handle_tool_calls(
     for resp in &responses {
         let args = allowed_calls
             .iter()
+            .chain(&code_calls)
             .find(|c| c.name == resp.name)
             .map(|c| &c.args)
             .unwrap_or(&serde_json::Value::Null);
@@ -556,6 +438,320 @@ async fn with_filler_cue<F: std::future::Future>(
     run.await
 }
 
+/// What running one call inline came to.
+enum Ran {
+    /// The tool ran and returned this.
+    Ok(Value),
+    /// The tool ran and failed.
+    Failed(String),
+    /// A middleware refused the call before it ran.
+    Vetoed(String),
+    /// A barge-in dropped the call; nothing is sent for it.
+    Cancelled,
+}
+
+impl Ran {
+    /// The function response the model reads.
+    fn response(self) -> Value {
+        match self {
+            Self::Ok(value) => value,
+            Self::Failed(e) | Self::Vetoed(e) => serde_json::json!({ "error": e }),
+            Self::Cancelled => Value::Null,
+        }
+    }
+}
+
+/// The subsystems a single call runs through, shared by direct calls and the
+/// calls a program makes.
+struct CallPath<'a> {
+    callbacks: &'a EventCallbacks,
+    state: &'a State,
+    extractors: &'a [Arc<dyn TurnExtractor>],
+    middleware: &'a Arc<crate::middleware::MiddlewareChain>,
+    flow: &'a Option<crate::flow::SharedFlowStack>,
+    decisions: &'a Option<Arc<crate::decision::Decisions>>,
+    barge_in: &'a CancellationToken,
+    event_tx: &'a tokio::sync::broadcast::Sender<LiveEvent>,
+}
+
+impl CallPath<'_> {
+    /// Ask the decision questions that govern `tools` about the turn in
+    /// progress, and relatch the flow on new answers.
+    async fn decide(&self, tools: &[String], transcript_buffer: &mut TranscriptBuffer) {
+        let (Some(decisions), Some(stack)) = (self.decisions, self.flow) else {
+            return;
+        };
+        let state = self.state;
+        let turns = transcript_buffer
+            .snapshot_window_with_current(decisions.history_len())
+            .turns()
+            .to_vec();
+        let turn_before = state.get_raw(crate::flow::DECISION_TURN_KEY);
+        let round = super::decisions::decision_round(
+            decisions,
+            self.flow,
+            super::decisions::DecisionPoint::ToolGate(tools),
+            &turns,
+            state,
+        )
+        .await;
+        // New answers, or a new caller turn that retired the old ones.
+        if round.is_some() || state.get_raw(crate::flow::DECISION_TURN_KEY) != turn_before {
+            let mut stack = stack.lock();
+            stack.on_decisions(state);
+            let active: Vec<String> = stack
+                .active_steps(state)
+                .iter()
+                .map(|s| s.id.clone())
+                .collect();
+            if state.get::<Vec<String>>("flow:active").as_ref() != Some(&active) {
+                let _ = state.set("flow:active", active);
+            }
+            let overlay = stack.active_overlay().map(str::to_string);
+            if state
+                .get::<Option<String>>(crate::flow::OVERLAY_STATE_KEY)
+                .flatten()
+                != overlay
+            {
+                let _ = state.set(crate::flow::OVERLAY_STATE_KEY, overlay);
+            }
+        }
+    }
+
+    /// The flow gate: `Err` with the reason when an enforcing flow refuses
+    /// `call` (out of order, once spent, guarded). A refusal only because a
+    /// guard has not held yet first extracts the turn in progress and asks
+    /// again. Lock scope is the synchronous admissibility check only.
+    async fn admit(
+        &self,
+        call: &FunctionCall,
+        transcript_buffer: &mut TranscriptBuffer,
+    ) -> Result<(), String> {
+        let Some(mon) = self.flow else {
+            return Ok(());
+        };
+        let state = self.state;
+        let decide = || {
+            let mon = mon.lock();
+            match mon.admits_tool(&call.name, state) {
+                Err(reason) if mon.mode() == crate::flow::Enforcement::Enforce => Some(reason),
+                _ => None,
+            }
+        };
+        let mut denial = decide();
+        // Refused only because a guard has not held yet: if extractors write
+        // the keys it reads, extract the turn in progress and decide again.
+        // The caller's yes is otherwise extracted after the model has
+        // answered, one turn too late.
+        if denial.is_some() {
+            let blocking = {
+                let mon = mon.lock();
+                if mon.offers_tool(&call.name, state) {
+                    mon.blocking_keys(&call.name, state)
+                } else {
+                    std::collections::BTreeSet::new()
+                }
+            };
+            // Only extractors that run on every turn: one configured for
+            // another moment (after tools, on a phase change, at generation
+            // complete) keeps it.
+            let writers: Vec<Arc<dyn TurnExtractor>> = self
+                .extractors
+                .iter()
+                .filter(|e| e.trigger() == ExtractionTrigger::EveryTurn)
+                .filter(|e| blocking.iter().any(|k| e.may_write(k)))
+                .cloned()
+                .collect();
+            if !writers.is_empty() {
+                refresh_extractors(
+                    &writers,
+                    transcript_buffer,
+                    state,
+                    self.callbacks,
+                    self.event_tx,
+                )
+                .await;
+                denial = decide();
+            }
+        }
+        if let Some(reason) = denial {
+            tracing::info!(tool = %call.name, %reason, "tool denied by the flow gate");
+            let _ = state.set(
+                crate::flow::TOOL_DENIED_KEY,
+                serde_json::json!({
+                    "tool": call.name,
+                    "id": call.id,
+                    "reason": reason,
+                }),
+            );
+            return Err(reason);
+        }
+        let _ = state.set(
+            crate::flow::TOOL_CALL_KEY,
+            serde_json::json!({ "tool": call.name, "id": call.id }),
+        );
+        Ok(())
+    }
+
+    /// Run `call` inline, wrapped in middleware hooks, raced against the
+    /// barge-in signal, and advance the flow on its outcome. A `before_tool`
+    /// error vetoes execution (e.g. guardrails).
+    async fn run_inline(
+        &self,
+        dispatcher: &ToolDispatcher,
+        call: &FunctionCall,
+        tool_gate: &mut ToolGate,
+    ) -> Ran {
+        let state = self.state;
+        if let Err(e) = self.middleware.run_before_tool(call).await {
+            tracing::info!(tool = %call.name, error = %e, "tool vetoed by middleware");
+            return Ran::Vetoed(e.to_string());
+        }
+        // Race the tool against the barge-in signal so an interruption is
+        // never stuck behind a slow tool. `biased` makes an already-cancelled
+        // token win without polling the tool future at all.
+        let started = std::time::Instant::now();
+        let filler_after = state
+            .get::<crate::flow::VoiceTiming>(crate::flow::VOICE_TIMING_KEY)
+            .and_then(|t| t.filler_after_ms)
+            .map(std::time::Duration::from_millis);
+        let mut tool_ctx =
+            crate::tool::ToolContext::new(state.clone()).with_cancel(self.barge_in.clone());
+        if let Some(id) = &call.id {
+            tool_ctx = tool_ctx.with_call_id(id.clone());
+        }
+        let run = with_filler_cue(
+            dispatcher.call_function_in(&call.name, call.args.clone(), tool_ctx),
+            filler_after,
+            || {
+                let _ = self.event_tx.send(LiveEvent::FillerCue {
+                    tool: call.name.clone(),
+                    elapsed_ms: started.elapsed().as_millis() as u64,
+                });
+            },
+        );
+        let dispatched = tokio::select! {
+            biased;
+            _ = self.barge_in.cancelled() => None,
+            result = run => Some(result),
+        };
+        let Some(call_result) = dispatched else {
+            // Cancelled: the tool future was dropped at its current await
+            // point. No response, no gate advance — the model's turn was
+            // interrupted.
+            tracing::debug!(
+                tool = %call.name,
+                duration_ms = started.elapsed().as_millis() as u64,
+                "tool cancelled by barge-in"
+            );
+            return Ran::Cancelled;
+        };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        gemini_genai_rs::telemetry::metrics::record_tool_call(&call.name, duration_ms as f64);
+        let id = call.id.as_deref().unwrap_or("");
+        match call_result {
+            Ok(result) => {
+                tracing::info!(tool = %call.name, duration_ms, "tool call");
+                let _ = self.middleware.run_after_tool(call, &result).await;
+                // Inline completion advances the governed flow through the
+                // single shared gate (#7).
+                tool_gate.observe_completion(id, &call.name, true, self.flow, state);
+                Ran::Ok(result)
+            }
+            Err(e) => {
+                tracing::warn!(tool = %call.name, duration_ms, error = %e, "tool call failed");
+                let _ = self.middleware.run_on_tool_error(call, &e).await;
+                tool_gate.observe_completion(id, &call.name, false, self.flow, state);
+                Ran::Failed(e.to_string())
+            }
+        }
+    }
+
+    /// Run the program in `call` and return what the model reads, or `None`
+    /// when a barge-in cancelled it. Each call the program makes is checked
+    /// against the phase's tools, decided, admitted and run like a direct
+    /// call, and recorded as a tool execution of its own.
+    async fn run_program(
+        &self,
+        code: &CodeMode,
+        dispatcher: &ToolDispatcher,
+        call: &FunctionCall,
+        phase_tools: Option<&[String]>,
+        transcript_buffer: &mut TranscriptBuffer,
+        tool_gate: &mut ToolGate,
+    ) -> Option<Value> {
+        let Some(source) = call.args.get("code").and_then(Value::as_str) else {
+            return Some(serde_json::json!({
+                "error": format!("{} needs `code`: the Python program to run", code.tool())
+            }));
+        };
+        let catalog: Vec<FunctionDeclaration> = dispatcher
+            .to_tool_declarations()
+            .into_iter()
+            .filter_map(|tool| tool.function_declarations)
+            .flatten()
+            .collect();
+        let started = std::time::Instant::now();
+        let wall = code.limit().wall;
+        let parent = call.id.clone().unwrap_or_default();
+        let mut program = code.start(source, &catalog).await;
+        while let Some((name, args)) = program
+            .call()
+            .map(|(name, args)| (name.to_string(), args.clone()))
+        {
+            if started.elapsed() > wall {
+                program.abort(format!(
+                    "The program ran past its time limit of {} s, its calls included.",
+                    wall.as_secs()
+                ));
+                break;
+            }
+            let inner = FunctionCall {
+                name,
+                args,
+                id: Some(format!("{parent}.{}", program.calls().len() + 1)),
+            };
+            let answer = if phase_tools.is_some_and(|tools| !tools.contains(&inner.name)) {
+                Err(format!(
+                    "Tool '{}' is not available in the current conversation phase.",
+                    inner.name
+                ))
+            } else {
+                self.decide(std::slice::from_ref(&inner.name), transcript_buffer)
+                    .await;
+                match self.admit(&inner, transcript_buffer).await {
+                    Err(reason) => Err(reason),
+                    Ok(()) => match self.run_inline(dispatcher, &inner, tool_gate).await {
+                        Ran::Ok(value) => Ok(value),
+                        Ran::Failed(e) | Ran::Vetoed(e) => Err(e),
+                        Ran::Cancelled => return None,
+                    },
+                }
+            };
+            let result = match &answer {
+                Ok(value) => value.clone(),
+                Err(e) => serde_json::json!({ "error": e }),
+            };
+            transcript_buffer.push_tool_call(inner.name.clone(), &inner.args, &result);
+            let _ = self.event_tx.send(LiveEvent::ToolExecution {
+                name: inner.name.clone(),
+                args: inner.args.clone(),
+                result,
+            });
+            program.answer(answer).await;
+        }
+        let calls = program.calls();
+        tracing::info!(
+            tool = %code.tool(),
+            calls = calls.len(),
+            refused = calls.iter().filter(|(_, ok)| !ok).count(),
+            duration_ms = started.elapsed().as_millis() as u64,
+            "program ran"
+        );
+        program.response()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -566,6 +762,7 @@ mod tests {
     use gemini_genai_rs::session::SessionError;
     use serde_json::json;
 
+    use crate::code_mode::CodeMode;
     use crate::flow::{Enforcement, Flow, FlowMonitor, Guard};
     use crate::live::background_tool::ToolExecutionMode;
     use crate::live::processor::ControlEvent;
@@ -760,6 +957,7 @@ mod tests {
             &flow,
             &None,
             &scope,
+            &None,
             &mut ToolGate::new(),
             &ctrl_tx.downgrade(),
             &CancellationToken::new(),
@@ -812,6 +1010,7 @@ mod tests {
             &None,
             &[],
             &middleware,
+            &None,
             &None,
             &None,
             &None,
@@ -979,6 +1178,7 @@ mod tests {
                 &flow,
                 &None,
                 &None,
+                &None,
                 &mut gate,
                 &ctrl_tx.downgrade(),
                 &barge_in,
@@ -1056,6 +1256,7 @@ mod tests {
             &None,
             &None,
             &None,
+            &None,
             &mut ToolGate::new(),
             &ctrl_tx.downgrade(),
             &barge_in,
@@ -1125,6 +1326,7 @@ mod tests {
             &[],
             &middleware,
             &flow,
+            &None,
             &None,
             &None,
             &mut gate,
@@ -1238,6 +1440,7 @@ mod tests {
             extractors,
             &Arc::new(MiddlewareChain::new()),
             flow,
+            &None,
             &None,
             &None,
             &mut ToolGate::new(),
@@ -1460,6 +1663,7 @@ mod tests {
             flow,
             &Some(decisions.clone()),
             &None,
+            &None,
             &mut ToolGate::new(),
             &ctrl_tx.downgrade(),
             &CancellationToken::new(),
@@ -1623,5 +1827,241 @@ mod tests {
             stack.lock().is_terminated(),
             "one transfer completes the handoff"
         );
+    }
+
+    // ── Code mode ────────────────────────────────────────────────────────────
+
+    /// A teller's tools: `verify_identity`, then `lookup_payments` (three
+    /// payments), and `transfer`, which no program may call. Each run is
+    /// recorded by name.
+    fn teller(runs: Arc<parking_lot::Mutex<Vec<String>>>) -> ToolDispatcher {
+        let mut dispatcher = ToolDispatcher::new();
+        for (name, result) in [
+            ("verify_identity", json!({ "verified": true })),
+            (
+                "lookup_payments",
+                json!({ "payments": [{"amount": 10.5}, {"amount": 20.25}, {"amount": 5.0}] }),
+            ),
+            ("transfer", json!({ "ok": true })),
+        ] {
+            let runs = runs.clone();
+            let schema = json!({
+                "type": "object",
+                "properties": { "account": { "type": "string" } },
+            });
+            dispatcher.register_function(Arc::new(SimpleTool::new(
+                name,
+                format!("{name} tool"),
+                Some(schema),
+                move |_| {
+                    let runs = runs.clone();
+                    let result = result.clone();
+                    async move {
+                        runs.lock().push(name.to_string());
+                        Ok(result)
+                    }
+                },
+            )));
+        }
+        dispatcher
+    }
+
+    /// Verify first, then look up payments.
+    fn teller_flow() -> crate::flow::SharedFlowStack {
+        let flow = Flow::new()
+            .step("verify")
+            .allow(["verify_identity"])
+            .done(Guard::called_ok("verify_identity"))
+            .step("history")
+            .after("verify")
+            .allow(["lookup_payments"])
+            .terminal()
+            .build()
+            .expect("valid flow");
+        FlowMonitor::new(flow, Enforcement::Enforce)
+            .into_stack()
+            .into_shared()
+    }
+
+    struct Outcome {
+        responses: Vec<FunctionResponse>,
+        executions: Vec<(String, serde_json::Value)>,
+        cancelled: Vec<String>,
+    }
+
+    async fn run_code(
+        program: &str,
+        code: CodeMode,
+        flow: &Option<crate::flow::SharedFlowStack>,
+        runs: Arc<parking_lot::Mutex<Vec<String>>>,
+        barge_in: &CancellationToken,
+    ) -> Outcome {
+        let writer = Arc::new(RecordingToolWriter::default());
+        let dyn_writer: Arc<dyn SessionWriter> = writer.clone();
+        let (tx, mut rx) = tokio::sync::broadcast::channel(64);
+        let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel::<ControlEvent>(8);
+        handle_tool_calls(
+            vec![FunctionCall {
+                name: "run_code".into(),
+                args: json!({ "code": program }),
+                id: Some("p1".into()),
+            }],
+            &EventCallbacks::default(),
+            &Some(Arc::new(teller(runs))),
+            &dyn_writer,
+            &State::new(),
+            &None,
+            &mut TranscriptBuffer::new(),
+            &std::collections::HashMap::new(),
+            &None,
+            &[],
+            &Arc::new(MiddlewareChain::new()),
+            flow,
+            &None,
+            &None,
+            &Some(Arc::new(code)),
+            &mut ToolGate::new(),
+            &ctrl_tx.downgrade(),
+            barge_in,
+            &tx,
+        )
+        .await;
+        let mut executions = Vec::new();
+        let mut cancelled = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                LiveEvent::ToolExecution { name, result, .. } => executions.push((name, result)),
+                LiveEvent::ToolCancelled { ids } => cancelled.extend(ids),
+                _ => {}
+            }
+        }
+        Outcome {
+            responses: writer.sent.lock().iter().flatten().cloned().collect(),
+            executions,
+            cancelled,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_program_calls_tools_down_the_governed_path() {
+        // The program tries the history before verifying: the flow refuses
+        // it, as it would a direct call. Verifying moves the flow on, and the
+        // same program's next lookup is admitted.
+        let runs = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let ran = run_code(
+            "try:\n    lookup_payments(account='A1')\nexcept RuntimeError as e:\n    first = str(e)\n\
+             verify_identity('A1')\n\
+             p = lookup_payments(account='A1')['payments']\n\
+             {'refused': 'not available' in first or 'verify' in first, 'total': sum(x['amount'] for x in p)}",
+            CodeMode::new().functions(["verify_identity", "lookup_payments"]),
+            &Some(teller_flow()),
+            runs.clone(),
+            &CancellationToken::new(),
+        )
+        .await;
+
+        assert_eq!(*runs.lock(), ["verify_identity", "lookup_payments"]);
+        assert_eq!(ran.responses.len(), 1);
+        assert_eq!(ran.responses[0].name, "run_code");
+        assert_eq!(
+            ran.responses[0].response,
+            json!({ "result": { "refused": true, "total": 35.75 } })
+        );
+        let names: Vec<&str> = ran.executions.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "lookup_payments",
+                "verify_identity",
+                "lookup_payments",
+                "run_code"
+            ],
+            "each call the program made is recorded, the refused one too"
+        );
+        assert!(ran.executions[0].1.get("error").is_some());
+    }
+
+    #[tokio::test]
+    async fn a_program_cannot_call_a_tool_it_does_not_expose() {
+        let runs = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let ran = run_code(
+            "transfer(account='A1')",
+            CodeMode::new().function("lookup_payments"),
+            &None,
+            runs.clone(),
+            &CancellationToken::new(),
+        )
+        .await;
+        assert!(runs.lock().is_empty(), "transfer never ran");
+        let error = ran.responses[0].response["error"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(error.contains("NameError"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_barge_in_cancels_the_program_without_a_response() {
+        let runs = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let interrupted = CancellationToken::new();
+        interrupted.cancel();
+        let ran = run_code(
+            "lookup_payments(account='A1')",
+            CodeMode::new().function("lookup_payments"),
+            &None,
+            runs.clone(),
+            &interrupted,
+        )
+        .await;
+        assert!(runs.lock().is_empty());
+        assert!(
+            ran.responses.is_empty(),
+            "nothing is sent for a cancelled program"
+        );
+        assert_eq!(ran.cancelled, ["p1"]);
+    }
+
+    #[tokio::test]
+    async fn a_program_over_its_call_limit_ends_with_the_reason() {
+        let runs = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let ran = run_code(
+            "[lookup_payments(account=str(n)) for n in range(5)]",
+            CodeMode::new()
+                .function("lookup_payments")
+                .limits(crate::code_mode::CodeLimits {
+                    calls: 3,
+                    ..Default::default()
+                }),
+            &None,
+            runs.clone(),
+            &CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(runs.lock().len(), 3);
+        let error = ran.responses[0].response["error"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(error.contains("more than 3 function calls"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_large_result_is_refused_with_a_note_to_return_less() {
+        let runs = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let ran = run_code(
+            "'x' * 50",
+            CodeMode::new()
+                .function("lookup_payments")
+                .limits(crate::code_mode::CodeLimits {
+                    output_chars: 20,
+                    ..Default::default()
+                }),
+            &None,
+            runs,
+            &CancellationToken::new(),
+        )
+        .await;
+        let error = ran.responses[0].response["error"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(error.contains("over the limit of 20"), "{error}");
     }
 }
