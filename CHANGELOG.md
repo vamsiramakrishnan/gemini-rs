@@ -83,6 +83,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A call the phase refuses no longer opens a digression.** The decision
+  gate asked about every incoming call before the phase filter, so a call to
+  a tool the active phase excludes could answer a decision and enter a
+  digression, though the call itself was refused.
+- **A failed `contextUpdate` is sent again.** The tool scope recorded the
+  new tools and instruction before the send, so after a failure the next
+  sync found nothing changed and the model kept the old ones. It now
+  forgets what it recorded when a send fails, at the turn boundary, after a
+  tool result, and in task sessions.
+- **Skill names leave room for their entry point.** A skill name may be at
+  most 58 characters, so that `start_{skill}` fits the Live API's
+  64-character function names; a longer one was refused at setup. A skill's
+  code tool name is held to the same limit.
+- **A malformed stub no longer panics the control lane.** Code mode's stub
+  guard read past the end of a program whose copied `def` never closed its
+  signature.
+- CI: the Python binding's lockfile carries code mode's dependencies, and
+  `deny.toml` allows BlueOak-1.0.0 (permissive), the license of `minicbor`,
+  which Monty uses.
+
 - **Code execution no longer ends a Live session at setup.** Gemini 3.8 Live,
   3.8 Live Extended Thinking and 2.5 native audio on Google AI close the
   session over the `codeExecution` tool (1007). The setup message leaves it

@@ -263,7 +263,12 @@ pub(in crate::live) async fn run_control_lane(
                     )
                     .await
                     {
-                        crate::live::tool_scope::send_tools(&writer, tools).await;
+                        crate::live::tool_scope::send_tools(
+                            &writer,
+                            &control_plane.tool_scope,
+                            tools,
+                        )
+                        .await;
                     }
                 }
                 ControlEvent::ToolCallCancelled(ids) => {

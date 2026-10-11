@@ -114,6 +114,17 @@ impl ToolScope {
         Some(self.tools_for(names))
     }
 
+    /// Forget what the model was last sent, after an update failed to reach
+    /// it: the next [`redeclare`](Self::redeclare) or [`sync`](Self::sync)
+    /// then sends the tools and the instruction again, rather than finding
+    /// nothing changed and leaving the model with the old ones.
+    pub(crate) fn forget(&self) {
+        // No offer is ever a single empty name, so the next comparison
+        // differs.
+        *self.declared.lock() = vec![String::new()];
+        *self.instruction.lock() = None;
+    }
+
     /// The connect-time system instruction.
     pub(crate) fn base_instruction(&self) -> Option<&str> {
         self.base_instruction.as_deref()
@@ -196,13 +207,21 @@ pub(crate) async fn rescope(
     Some(tools)
 }
 
-/// Re-declare `tools` on their own, outside a turn boundary.
-pub(crate) async fn send_tools(writer: &Arc<dyn SessionWriter>, tools: Vec<Tool>) {
+/// Re-declare `tools` on their own, outside a turn boundary. On failure the
+/// scope forgets what it recorded, so the next re-scope sends them again.
+pub(crate) async fn send_tools(
+    writer: &Arc<dyn SessionWriter>,
+    scope: &Option<Arc<ToolScope>>,
+    tools: Vec<Tool>,
+) {
     if let Err(e) = writer
         .update_context(ContextUpdate::new().tools(tools))
         .await
     {
         tracing::warn!(error = %e, "re-declaring the tools failed");
+        if let Some(scope) = scope {
+            scope.forget();
+        }
     }
 }
 

@@ -190,6 +190,14 @@ impl TaskRuntime {
                         skill.name, missing.name
                     )));
                 }
+                if skill.name.len() + 2 + code.tool().len() > 64 {
+                    return Err(err(format!(
+                        "skill '{}' code tool name '{}__{}' must fit 64 characters",
+                        skill.name,
+                        skill.name,
+                        code.tool()
+                    )));
+                }
                 if skill.tools.iter().any(|t| t.name == code.tool()) {
                     return Err(err(format!(
                         "skill '{}' code tool '{}' is also one of its tools",

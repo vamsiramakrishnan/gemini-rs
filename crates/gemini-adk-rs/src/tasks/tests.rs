@@ -1806,3 +1806,12 @@ async fn historical_memory_receipts_remain_observable_without_republishing_forgo
         Some(json!({"facts":[forgotten]}))
     );
 }
+
+#[test]
+fn a_skill_name_leaves_room_for_its_entry_point() {
+    let longest = "a".repeat(MAX_SKILL_NAME);
+    assert!(validate_skill_identity(&longest, "1").is_ok());
+    assert_eq!(format!("start_{longest}").len(), 64);
+    let error = validate_skill_identity(&format!("{longest}b"), "1").unwrap_err();
+    assert!(error.0.contains("64-character"), "{}", error.0);
+}

@@ -30,6 +30,9 @@ allow = [
   "CDLA-Permissive-2.0",
   "Unlicense",
   "Zlib",
+  # Blue Oak Model License: permissive (OSI-approved). minicbor, which Monty
+  # (code mode's interpreter) uses for its snapshots.
+  "BlueOak-1.0.0",
 ]
 # Internal unpublished crates (examples, apps, tools) are not distributed.
 private = { ignore = true }
