@@ -52,5 +52,6 @@ python3 summarize.py results.json
 | `--tasks` | all | Task id prefixes, such as `t1,t9` |
 | `--model` | `gemini-3.8-live` | Live model |
 | `--json PATH` | none | Write every run, with the programs the model wrote |
+| `--voice` | off | SDK arms only: speak each caller line (Gemini TTS, streamed in real time through an open mic) and grade the model's spoken answer by its transcription |
 
 `results/` holds the runs behind the numbers in the report (2026-10-11).

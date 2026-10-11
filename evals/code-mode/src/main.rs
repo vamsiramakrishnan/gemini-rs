@@ -30,6 +30,7 @@ use gemini_genai_rs::protocol::{
 use gemini_genai_rs::session::SessionCommand;
 use gemini_genai_rs::transport::{Codec, JsonCodec, Transport, TungsteniteTransport};
 mod sdk;
+mod voice;
 
 use monty::{MontyRun, RunProgress};
 use monty_types::{
@@ -938,6 +939,7 @@ async fn main() {
     let mut runs = 3usize;
     let mut arms = vec![Arm::Tools, Arm::Server, Arm::Code];
     let mut sdk_arms: Vec<sdk::SdkArm> = Vec::new();
+    let mut spoken = false;
     let mut only: Option<Vec<String>> = None;
     let mut json_path = None;
     let mut model = ModelId::LIVE_3_8;
@@ -960,6 +962,7 @@ async fn main() {
                     }
                 }
             }
+            "--voice" => spoken = true,
             "--tasks" => only = Some(args.next().unwrap().split(',').map(str::to_string).collect()),
             "--json" => json_path = args.next(),
             "--model" => {
@@ -1003,7 +1006,7 @@ async fn main() {
         }
         for &arm in &sdk_arms {
             for run in 0..runs {
-                let r = sdk::run_task_sdk(&model_name, arm, task).await;
+                let r = sdk::run_task_sdk(&model_name, arm, task, spoken).await;
                 println!(
                     "{:<18} {:<10} #{run} ok={:<5} ms={:<6} trips={} code={} errs={} tokens={} refusals={} unbacked={} | {}",
                     task.id, arm.name(), r["ok"], r["ms"], r["round_trips"], r["code_blocks"], r["code_errors"], r["max_prompt_tokens"], r["refusals"], r["unbacked_claims"], r["why"]

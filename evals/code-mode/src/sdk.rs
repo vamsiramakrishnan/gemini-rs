@@ -60,6 +60,10 @@ struct Seen {
     errors: Vec<String>,
     /// Whether the model has said anything since its last call.
     spoke_since_calls: bool,
+    /// When the model's first audio of the exchange arrived.
+    first_audio: Option<Instant>,
+    /// What the server heard the caller say.
+    heard: String,
     /// Whether a turn has completed since the model last spoke or called:
     /// the server reports a turn's usage with its `turnComplete`.
     completed_since_output: bool,
@@ -85,7 +89,7 @@ async fn settle(seen: &Mutex<Seen>, turns: usize) {
     }
 }
 
-pub async fn run_task_sdk(model: &str, arm: SdkArm, task: &Task) -> Value {
+pub async fn run_task_sdk(model: &str, arm: SdkArm, task: &Task, spoken: bool) -> Value {
     // The world's own gate stays open: the flow decides bookings.
     let world = Arc::new(Mutex::new(World {
         confirmed_from: Some(0),
@@ -93,8 +97,8 @@ pub async fn run_task_sdk(model: &str, arm: SdkArm, task: &Task) -> Value {
     }));
     let mut live = Live::builder()
         .model(ModelId::new(model.to_string()))
-        .text_only()
         .instruction(instruction(Arm::Tools));
+    live = if spoken { live.transcription() } else { live.text_only() };
     if model.contains("extended") {
         live = live.thinking_level(gemini_genai_rs::protocol::ThinkingLevel::Low);
     }
@@ -152,6 +156,19 @@ pub async fn run_task_sdk(model: &str, arm: SdkArm, task: &Task) -> Value {
                 let now = Instant::now();
                 s.last_event = Some(now);
                 match event {
+                    SessionEvent::OutputTranscription(t) => {
+                        s.first_output.get_or_insert(now);
+                        s.text.push_str(&t);
+                        s.spoke_since_calls = true;
+                        s.completed_since_output = false;
+                    }
+                    SessionEvent::AudioData(_) => {
+                        s.first_output.get_or_insert(now);
+                        s.first_audio.get_or_insert(now);
+                        s.spoke_since_calls = true;
+                        s.completed_since_output = false;
+                    }
+                    SessionEvent::InputTranscription(t) => s.heard.push_str(&t),
                     SessionEvent::TextDelta(t) => {
                         s.first_output.get_or_insert(now);
                         s.text.push_str(&t);
@@ -214,6 +231,7 @@ pub async fn run_task_sdk(model: &str, arm: SdkArm, task: &Task) -> Value {
         });
     }
 
+    let mic = spoken.then(|| crate::voice::Mic::open(&handle));
     let started = Instant::now();
     let mut turns = Vec::new();
     let mut max_prompt = 0u32;
@@ -228,17 +246,37 @@ pub async fn run_task_sdk(model: &str, arm: SdkArm, task: &Task) -> Value {
         let (from_turns, from_calls, from_programs, from_errors, from_executions) = {
             let mut s = seen.lock().unwrap();
             s.text.clear();
+            s.heard.clear();
             s.first_output = None;
+            s.first_audio = None;
             s.prompt_tokens = 0;
             s.round_trips = 0;
             s.spoke_since_calls = false;
             (s.turns, s.model_calls.len(), s.programs.len(), s.program_errors, s.executions.len())
         };
-        let sent = Instant::now();
-        if let Err(e) = handle.send_text(*line).await {
-            turns.push(json!({"caller": line, "error": e.to_string()}));
-            break;
-        }
+        let sent = match &mic {
+            None => {
+                let sent = Instant::now();
+                if let Err(e) = handle.send_text(*line).await {
+                    turns.push(json!({"caller": line, "error": e.to_string()}));
+                    break;
+                }
+                sent
+            }
+            Some(mic) => {
+                let Some(pcm) = crate::voice::speak(line, "Puck").await else {
+                    turns.push(json!({"caller": line, "error": "speech synthesis failed"}));
+                    break;
+                };
+                if let Err(e) = mic.say(&pcm).await {
+                    turns.push(json!({"caller": line, "error": e.to_string()}));
+                    break;
+                }
+                // The caller stopped speaking before the trailing silence.
+                Instant::now()
+                    - Duration::from_millis(crate::voice::TRAILING_SILENCE_MS as u64)
+            }
+        };
         settle(&seen, from_turns).await;
         let s = seen.lock().unwrap();
         let reply_ms = s.last_event.map(|t| t.saturating_duration_since(sent).as_millis());
@@ -258,6 +296,8 @@ pub async fn run_task_sdk(model: &str, arm: SdkArm, task: &Task) -> Value {
             "said": said,
             "ms": reply_ms,
             "first_output_ms": s.first_output.map(|t| t.saturating_duration_since(sent).as_millis()),
+            "first_audio_ms": s.first_audio.map(|t| t.saturating_duration_since(sent).as_millis()),
+            "heard": s.heard.trim(),
             "round_trips": s.round_trips,
             "calls": s.model_calls[from_calls..].to_vec(),
             "programs": s.programs[from_programs..].to_vec(),
@@ -273,6 +313,9 @@ pub async fn run_task_sdk(model: &str, arm: SdkArm, task: &Task) -> Value {
             "prompt_tokens": s.prompt_tokens,
         }));
     }
+    if let Some(mic) = &mic {
+        mic.close();
+    }
     let _ = handle.disconnect().await;
     let s = seen.lock().unwrap();
     let w = world.lock().unwrap();
@@ -286,7 +329,7 @@ pub async fn run_task_sdk(model: &str, arm: SdkArm, task: &Task) -> Value {
     json!({
         "task": task.id,
         "kind": task.kind,
-        "arm": arm.name(),
+        "arm": if spoken { format!("{}-voice", arm.name()) } else { arm.name().to_string() },
         "ok": ok,
         "why": why,
         "ms": ms,
