@@ -12,7 +12,7 @@ repository.workspace = true
 [dependencies]
 # Internal workspace crates
 gemini-genai-rs       = { workspace = true, default-features = true }
-gemini-adk-rs        = { workspace = true, default-features = true, features = ["gemini-llm"] }
+gemini-adk-rs        = { workspace = true, default-features = true, features = ["gemini-llm", "ai-gateway"] }
 gemini-adk-fluent-rs = { workspace = true, default-features = true, features = ["gemini-llm", "denoise", "http-tools", "gcs-store"] }
 gemini-adk-server-rs = { workspace = true }
 
@@ -56,3 +56,6 @@ path = "templates/agent/main.rs"
 # Microphone and speakers for `adk spec run` on audio specs (needs system
 # audio headers).
 voice = ["gemini-adk-fluent-rs/voice-io"]
+# Run a spec's `code` programs in Monty worker processes when `MONTY_BIN`
+# names the worker binary (`cargo install monty-runtime`).
+code-pool = ["gemini-adk-rs/code-pool"]

@@ -75,6 +75,10 @@ pub struct CompiledSkill {
     /// Pure state reconstruction for trusted reconciliation. Custom stateful tools
     /// must supply their own mapping; failed-worker writes are never trusted.
     pub receipt_applier: Option<ReceiptApplier>,
+    /// The skill's code tool, declared as `{skill}__run_code`: a program whose
+    /// functions are the skill's own tools, by their local names. Each call
+    /// it makes is an invocation of the task, governed like a direct one.
+    pub code: Option<crate::code_mode::CodeMode>,
 }
 /// One declared operation. Names are local to a skill.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

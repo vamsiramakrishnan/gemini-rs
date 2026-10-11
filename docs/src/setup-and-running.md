@@ -1,7 +1,7 @@
 # Setup and Running
 
 Choose the first result you want, then install its dependencies. The workspace
-uses Rust 1.93+ (the checked-in toolchain pins 1.93.1).
+uses Rust 1.99+ (the checked-in toolchain pins 1.99.0).
 
 | Goal | Path | Additional requirements |
 |---|---|---|

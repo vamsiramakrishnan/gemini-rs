@@ -229,6 +229,16 @@ struct ActiveOverlay {
     resume: Resume,
 }
 
+/// See [`FlowStack::decision_scope`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DecisionScope {
+    /// Questions named by the driving layer's guards and the enterable
+    /// digressions' triggers.
+    pub questions: BTreeSet<String>,
+    /// State keys the active steps' guards and those triggers read.
+    pub reads: BTreeSet<String>,
+}
+
 /// A shared, lock-protected [`FlowStack`] — the form in which the Live
 /// control plane owns governance, so runtime surfaces (e.g.
 /// [`LiveHandle::explain`](crate::live::LiveHandle::explain)) can snapshot it
@@ -932,7 +942,26 @@ impl FlowStack {
     /// `never(tool).until(..)` guards hold (see
     /// [`FlowMonitor::offers_tool`]). Nothing is offered after termination.
     pub fn offers_tool(&self, tool: &str, state: &State) -> bool {
-        self.termination_denial().is_none() && self.current().offers_tool(tool, state)
+        self.termination_denial().is_none()
+            && (self.current().offers_tool(tool, state) || self.digression_offers(tool, state))
+    }
+
+    /// Whether a digression the caller's next words could open would admit
+    /// `tool` on entry: its trigger turns on a decision (see
+    /// [`Guard::possible`]) and a step it starts with allows the tool. Then
+    /// the model can call it in the turn the caller asks, and the gate enters
+    /// the digression first (see [`gate_scope`](Self::gate_scope)).
+    fn digression_offers(&self, tool: &str, state: &State) -> bool {
+        self.overlays.iter().any(|ov| {
+            !self.active.iter().any(|a| a.name == ov.name)
+                && self.main.possible(&ov.trigger, state).is_none()
+                && ov
+                    .flow
+                    .steps
+                    .iter()
+                    .filter(|s| s.after.is_empty())
+                    .any(|s| s.allow.iter().any(|a| a == tool))
+        })
     }
 
     /// The state keys read by the guards that refuse `tool` in the active
@@ -978,6 +1007,79 @@ impl FlowStack {
             overlay_path: self.overlay_path().into_iter().map(str::to_owned).collect(),
             terminated: self.is_terminated(),
         }
+    }
+
+    /// What a decision model should be asked now: the questions named by the
+    /// driving layer's guards and by the triggers of the digressions that can
+    /// still be entered, and the state keys the driving layer could act on
+    /// (for decisions that write a key). Empty after termination.
+    pub fn decision_scope(&self, state: &State) -> DecisionScope {
+        if self.is_terminated() {
+            return DecisionScope::default();
+        }
+        let current = self.current();
+        let mut questions = current.flow().decisions();
+        let mut reads = current.reads_now(state);
+        for ov in &self.overlays {
+            if !self.active.iter().any(|a| a.name == ov.name) {
+                questions.extend(ov.trigger.decisions());
+                reads.extend(ov.trigger.state_keys());
+            }
+        }
+        DecisionScope { questions, reads }
+    }
+
+    /// What decides whether `tools` are admitted now: the questions in the
+    /// driving layer's `never(tool).until(..)` guards on them (a stage's
+    /// commit), in the way of the [frontier](FlowMonitor::frontier_steps)
+    /// steps that allow one, and in the triggers of the digressions that
+    /// would admit one of them, with the state keys those guards read. A call
+    /// no decision governs gets an empty scope, so it is not held up by a
+    /// decision round.
+    pub fn gate_scope(&self, tools: &[String], state: &State) -> DecisionScope {
+        if self.is_terminated() {
+            return DecisionScope::default();
+        }
+        let mut scope = DecisionScope::default();
+        for c in &self.current().flow().constraints {
+            if let crate::flow::Constraint::NeverUntil { tool, until } = c
+                && tools.contains(tool)
+            {
+                scope.questions.extend(until.decisions());
+                scope.reads.extend(until.state_keys());
+            }
+        }
+        for tool in tools {
+            let frontier = self.current().frontier_questions(tool, state);
+            scope.questions.extend(frontier.questions);
+            scope.reads.extend(frontier.reads);
+        }
+        for ov in &self.overlays {
+            if !self.active.iter().any(|a| a.name == ov.name)
+                && tools.iter().any(|t| ov.flow.tool_universe().contains(t))
+            {
+                scope.questions.extend(ov.trigger.decisions());
+                scope.reads.extend(ov.trigger.state_keys());
+            }
+        }
+        scope
+    }
+
+    /// Apply fresh decisions mid-turn: enter a digression whose trigger now
+    /// holds, or re-evaluate the driving layer. Counts no turn and advances
+    /// no repair policy, so it can run before a tool call is admitted: a
+    /// caller who asks for a person and a model that transfers in the same
+    /// turn then see the transfer counted inside the handoff digression.
+    pub fn on_decisions(&mut self, state: &State) {
+        if self.is_terminated() {
+            return;
+        }
+        if let Some(idx) = self.triggered(state) {
+            self.enter(idx, state);
+        } else {
+            self.relatch(state);
+        }
+        self.publish_timing(state);
     }
 
     /// Re-evaluate the current layer after directly setting state.
@@ -1891,5 +1993,239 @@ mod tests {
         stack.on_turn(&state);
         assert!(stack.admits_tool("faq_tool", &state).is_ok());
         assert!(stack.admits_tool("main_tool", &state).is_err());
+    }
+
+    fn answer(state: &State, question: &str, outcome: crate::flow::Outcome, turn: &str) {
+        let _ = state.set(crate::flow::DECISION_TURN_KEY, turn);
+        let _ = state.set(
+            crate::flow::decision_key(question),
+            serde_json::to_value(crate::flow::DecisionRecord {
+                outcome,
+                value: serde_json::Value::Null,
+                confidence: None,
+                turn: turn.into(),
+            })
+            .unwrap(),
+        );
+    }
+
+    fn booking_with_handoff() -> FlowStack {
+        let main = Flow::new()
+            .step("collect")
+            .done(Guard::captured(["slot"]))
+            .step("confirm")
+            .after("collect")
+            .allow(["book"])
+            .commit("book", Guard::decided("confirmed"))
+            .done(Guard::called_ok("book"))
+            .step("end")
+            .after("confirm")
+            .terminal()
+            .build()
+            .expect("valid")
+            .compile()
+            .expect("compiles");
+        let handoff = Flow::new()
+            .step("transfer")
+            .allow(["transfer"])
+            .done(Guard::called_ok("transfer"))
+            .build()
+            .expect("valid")
+            .compile()
+            .expect("compiles");
+        FlowStack::new(main, Enforcement::Enforce).with_overlay(Overlay::new(
+            "handoff",
+            Guard::decided("wants_person"),
+            handoff,
+            Resume::Terminate,
+        ))
+    }
+
+    /// `ask` leads to `book` when the caller wants to book, and to `faq`
+    /// behind a flag no decision sets.
+    fn routed() -> FlowStack {
+        let main = Flow::new()
+            .step("ask")
+            .allow(["lookup"])
+            .done(Guard::any([
+                Guard::decided("wants_booking"),
+                Guard::is_true("faq_flag"),
+            ]))
+            .step("book")
+            .after_when("ask", Guard::decided("wants_booking"))
+            .allow(["book_table"])
+            .done(Guard::called_ok("book_table"))
+            .step("faq")
+            .after_when("ask", Guard::is_true("faq_flag"))
+            .allow(["answer"])
+            .done(Guard::called_ok("answer"))
+            .build()
+            .expect("valid")
+            .compile()
+            .expect("compiles");
+        FlowStack::new(main, Enforcement::Enforce)
+    }
+
+    #[test]
+    fn a_step_one_decision_away_is_offered_and_decided_at_the_gate() {
+        let mut stack = routed();
+        let state = State::new();
+        stack.on_turn(&state);
+        let monitor = stack.current();
+        let frontier: Vec<_> = monitor
+            .frontier_steps(&state)
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
+        assert_eq!(frontier, ["book"], "faq waits on a flag, not a decision");
+        assert!(stack.offers_tool("lookup", &state), "the active step's");
+        assert!(stack.offers_tool("book_table", &state), "one decision away");
+        assert!(!stack.offers_tool("answer", &state));
+        assert!(
+            stack.admits_tool("book_table", &state).is_err(),
+            "offered is not admitted"
+        );
+        assert_eq!(
+            stack
+                .gate_scope(&["book_table".to_string()], &state)
+                .questions,
+            ["wants_booking".to_string()].into()
+        );
+
+        // The gate asks about the turn in progress; a yes opens the step.
+        answer(&state, "wants_booking", crate::flow::Outcome::Yes, "2:a");
+        stack.on_decisions(&state);
+        assert!(stack.admits_tool("book_table", &state).is_ok());
+        assert!(
+            !stack.offers_tool("lookup", &state),
+            "ask is done, and its tool goes with it"
+        );
+    }
+
+    #[test]
+    fn a_no_keeps_the_step_closed() {
+        let mut stack = routed();
+        let state = State::new();
+        stack.on_turn(&state);
+        answer(&state, "wants_booking", crate::flow::Outcome::No, "2:a");
+        stack.on_decisions(&state);
+        assert!(stack.admits_tool("book_table", &state).is_err());
+        // Still one decision away: the next turn may say yes.
+        assert!(stack.offers_tool("book_table", &state));
+    }
+
+    /// A main step that allows only `lookup`, with a handoff digression
+    /// behind `trigger`.
+    fn talk_with_handoff(trigger: Guard) -> FlowStack {
+        let flow = |step: &str, tool: &str| {
+            Flow::new()
+                .step(step)
+                .allow([tool])
+                .done(Guard::called_ok(tool))
+                .build()
+                .expect("valid")
+                .compile()
+                .expect("compiles")
+        };
+        FlowStack::new(flow("talk", "lookup"), Enforcement::Enforce).with_overlay(Overlay::new(
+            "handoff",
+            trigger,
+            flow("transfer", "transfer"),
+            Resume::Terminate,
+        ))
+    }
+
+    #[test]
+    fn a_digression_a_decision_opens_offers_its_entry_tools() {
+        let state = State::new();
+        let mut stack = talk_with_handoff(Guard::decided("wants_person"));
+        stack.on_turn(&state);
+        assert!(stack.offers_tool("transfer", &state));
+        assert!(stack.admits_tool("transfer", &state).is_err());
+        assert_eq!(
+            stack
+                .gate_scope(&["transfer".to_string()], &state)
+                .questions,
+            ["wants_person".to_string()].into()
+        );
+        answer(&state, "wants_person", crate::flow::Outcome::Yes, "2:a");
+        stack.on_decisions(&state);
+        assert!(stack.admits_tool("transfer", &state).is_ok());
+
+        // A trigger no decision sets is not offered ahead.
+        let mut flagged = talk_with_handoff(Guard::is_true("intent:human_agent"));
+        flagged.on_turn(&State::new());
+        assert!(!flagged.offers_tool("transfer", &State::new()));
+    }
+
+    #[test]
+    fn the_decision_scope_names_guards_and_triggers_and_what_active_steps_read() {
+        let stack = booking_with_handoff();
+        let state = State::new();
+        let scope = stack.decision_scope(&state);
+        assert_eq!(
+            scope.questions,
+            ["confirmed", "wants_person"].map(String::from).into()
+        );
+        assert!(
+            scope.reads.contains("slot"),
+            "collect reads the slot: {scope:?}"
+        );
+    }
+
+    #[test]
+    fn the_gate_scope_names_only_what_decides_these_calls() {
+        let mut stack = booking_with_handoff();
+        let state = State::new();
+        let _ = state.set("slot", "19:00");
+        stack.on_turn(&state);
+        let scope = |tools: &[&str]| {
+            stack
+                .gate_scope(
+                    &tools.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                    &state,
+                )
+                .questions
+        };
+        assert_eq!(scope(&["book"]), ["confirmed".to_string()].into());
+        assert_eq!(scope(&["transfer"]), ["wants_person".to_string()].into());
+        assert!(
+            scope(&["check_availability"]).is_empty(),
+            "a call no decision governs waits for none"
+        );
+    }
+
+    #[test]
+    fn a_decided_commit_is_admitted_only_for_the_current_turn() {
+        let mut stack = booking_with_handoff();
+        let state = State::new();
+        let _ = state.set("slot", "19:00");
+        stack.on_turn(&state);
+        assert!(
+            stack.admits_tool("book", &state).is_err(),
+            "not confirmed yet"
+        );
+        answer(&state, "confirmed", crate::flow::Outcome::Yes, "t1");
+        assert!(stack.admits_tool("book", &state).is_ok());
+        // The caller spoke again; the yes was about the previous turn.
+        let _ = state.set(crate::flow::DECISION_TURN_KEY, "t2");
+        let refusal = stack.admits_tool("book", &state).unwrap_err();
+        assert!(refusal.contains("confirmed"), "{refusal}");
+    }
+
+    #[test]
+    fn fresh_decisions_open_a_digression_mid_turn() {
+        let mut stack = booking_with_handoff();
+        let state = State::new();
+        stack.on_turn(&state);
+        assert_eq!(stack.active_overlay(), None);
+        answer(&state, "wants_person", crate::flow::Outcome::Yes, "t1");
+        stack.on_decisions(&state);
+        assert_eq!(stack.active_overlay(), Some("handoff"));
+        assert!(stack.admits_tool("transfer", &state).is_ok());
+        stack.on_tool_ok("transfer", &state);
+        stack.on_turn(&state);
+        stack.on_turn(&state);
+        assert!(stack.is_terminated(), "one transfer completes the handoff");
     }
 }

@@ -83,6 +83,55 @@ Task tool execution uses task-owned asynchronous delivery. Skill tool `backgroun
 
 Skill redaction policies also fail validation until input steering, approval arguments, operation results, and task exports share a complete redaction path. Invocation-local state isolation alone is not a data-retention guarantee.
 
+## What the model is offered
+
+Each installed skill has a typed entry point, `start_{skill}`, whose
+parameters are the skill's input fields, plus `parent_task` for a temporary
+child task. `task_control` still suspends, resumes, revises, cancels and
+completes tasks, and can start one too. The typed entry point exists because
+the model fills typed parameters and not a free-form object: given only
+`task_control`'s `input`, Gemini 3.8 Live left it out and retried the same
+failing start over a hundred times in one turn.
+
+On a model that accepts `contextUpdate` (Gemini 3.8 Live), a task session
+declares only what the foreground task needs:
+
+- At connect, `task_control` and every `start_{skill}`. The instruction
+  lists the catalog.
+- When a task becomes foreground, its skill's tools that its flow offers now
+  (see [steering modes](steering-modes.md#what-a-flow-offers)) are declared,
+  and the skill's instruction is added to the system instruction. Both go out
+  in one `contextUpdate` before the response to the call that started or
+  resumed it, so the model can call the skill's tools in the same turn.
+- When a result advances the task's flow, its tools are re-declared before
+  the model reads the result. When the task completes, its tools and
+  instruction are withdrawn.
+- A tool whose call is still waiting for its result stays declared until the
+  result is delivered.
+- The task's changing context (values, postures, grounds, results) still goes
+  out as a context turn, now without the skill instruction, which no longer
+  piles up in the conversation each time a value changes.
+
+The names declared now are in session state under `declared_tools`. Setting
+a steering mode other than `ContextUpdate` keeps every skill's tools declared
+from connect. On a model without `contextUpdate` that is the only behavior.
+
+Measured on Gemini 3.8 Live with the collections gallery spec (payment
+history, then a payment-method question, typed caller), scoped against every
+tool declared:
+
+| Arm | Prompt tokens, turn 1 / 2 / 3 (median of 3) | Journeys completed | Calls to another skill's tools |
+|---|---|---|---|
+| Foreground skill only (`contextUpdate`) | 3,076 / 3,914 / 4,846 | 3/3 | 0 |
+| Every skill's tools | 4,845 / 6,191 / 6,494 | 3/3 | 0 |
+
+The foreground skill's tools were callable in the turn that started it: in
+every scoped run the first turn called `start_payment_history` and then
+`verify_identity`, which the start had just declared. In two of three runs
+per arm it also looked up the history in that turn; in the third it did so a
+turn later, in both arms. Run it with
+`cargo test -p gemini-adk-fluent-rs --test skills_live -- --ignored --nocapture`.
+
 ## Extraction, derived state, and memory
 
 Skills use the same `extract`, `computed`, `watch`, `patterns`, and `memory` declarations as single-workflow specs. Every activation has separate transcript windows, computed registries, watcher state, and temporal detectors. Supply `SpecResources.extraction_llm` for extraction and `SpecResources.memory` for memory. Missing resources fail before connection. Studio and generated Rust projects detect resources inside skills automatically.

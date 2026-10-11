@@ -84,6 +84,52 @@
         }
       ]
     },
+    "BooleanCriteriaSpec": {
+      "description": "What the true and false cases of a boolean question mean.",
+      "properties": {
+        "false": {
+          "description": "When it is false.",
+          "type": "string"
+        },
+        "true": {
+          "description": "When it is true.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "false",
+        "true"
+      ],
+      "type": "object"
+    },
+    "Bound": {
+      "anyOf": [
+        {
+          "properties": {
+            "at_least": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "at_least"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "at_most": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "at_most"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ClientVadPreset": {
       "description": "Named client-VAD starting points.",
       "oneOf": [
@@ -148,6 +194,92 @@
           "format": "double",
           "type": [
             "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CodeLimitsSpec": {
+      "description": "Bounds on each program; unset fields keep the defaults.",
+      "properties": {
+        "calls": {
+          "description": "Function calls per program. Default 20.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cpu_ms": {
+          "description": "Interpreter time per program, excluding its calls, in ms. Default 2000.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "memory_mb": {
+          "description": "Memory per program in MiB, enforced by worker-process sandboxes. Default 64.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "output_chars": {
+          "description": "Characters of a program's result the model reads. Default 4000.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "wall_ms": {
+          "description": "Wall-clock time per program, its calls included, in ms. Default 30000.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CodeSpec": {
+      "description": "The code tool of a spec.",
+      "properties": {
+        "direct": {
+          "description": "Keep the functions declared as tools of their own too, so the model can make a single lookup without writing a program. Default `true`.",
+          "type": "boolean"
+        },
+        "functions": {
+          "description": "The declared tools a program can call. Empty: every declared tool except commits and background tools.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limits": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CodeLimitsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Bounds on each program."
+        },
+        "tool": {
+          "description": "The code tool's name. Default `run_code`.",
+          "type": [
+            "string",
             "null"
           ]
         }
@@ -430,6 +562,143 @@
       ],
       "type": "object"
     },
+    "Decided": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/definitions/Expectation"
+          },
+          "type": "object"
+        }
+      ],
+      "description": "A question id (yes, picked, or scored), or one `{question: expectation}` entry."
+    },
+    "DecisionSpec": {
+      "description": "One question a decision model answers about the conversation.",
+      "oneOf": [
+        {
+          "description": "Answered with the probability that it is true.",
+          "properties": {
+            "criteria": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/BooleanCriteriaSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What the true and false cases mean."
+            },
+            "instructions": {
+              "description": "The question. Ask about \"their last turn\" for a confirmation or an intent, so an earlier answer is not read again.",
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "boolean"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "instructions",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Answered with one option.",
+          "properties": {
+            "criteria": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Option name to description (1 to 255). May be empty with `options_from`.",
+              "type": "object"
+            },
+            "instructions": {
+              "description": "The question.",
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "choice"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "instructions",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Answered with a position on an ordered scale, from 0.",
+          "properties": {
+            "criteria": {
+              "description": "Level descriptions, lowest first (2 to 10).",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "instructions": {
+              "description": "The question.",
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "score"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "criteria",
+            "instructions",
+            "type"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "at_least": {
+          "description": "Boolean: the probability needed for yes (and `1 -` this for no, default 0.85). Choice and score: the certainty needed (default 0.6).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "none": {
+          "description": "For a choice: an extra option, `none_of_these`, with this description. A choice always picks something, so \"which offered time did the caller pick?\" needs a way to say they have not.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options_from": {
+          "description": "For a choice: the state path (`key` or `key.field`) holding an array of options, read at each ask, such as the slots a tool offered. An object option is keyed by its `id`, `value` or `name`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "writes": {
+          "description": "Write the decided value into this state key: the chosen option (an object option whole), the score, or the boolean. The question is then also asked whenever an active guard reads the key, so a stage that collects it is filled by the pick.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "Edge": {
       "anyOf": [
         {
@@ -513,6 +782,26 @@
             "remember"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "Expectation": {
+      "anyOf": [
+        {
+          "description": "`true` (yes) or `false` (no).",
+          "type": "boolean"
+        },
+        {
+          "description": "A choice's option.",
+          "type": "string"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Bound"
+            }
+          ],
+          "description": "A score bound."
         }
       ]
     },
@@ -914,6 +1203,13 @@
           "description": "Instruction for the extraction model.",
           "type": "string"
         },
+        "model": {
+          "description": "The text model this entry runs on, such as `gemini-3.5-flash-lite`. Overrides `models.extraction`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "description": "Extraction name — the state key the full result is stored under.",
           "type": "string"
@@ -927,6 +1223,15 @@
         },
         "schema": {
           "description": "JSON Schema the extraction must satisfy."
+        },
+        "thinking_budget": {
+          "description": "The thinking budget this entry's requests send. Overrides `models.extraction_thinking_budget`.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "trigger": {
           "allOf": [
@@ -1084,6 +1389,28 @@
             "$ref": "#/definitions/MemorySlotSpec"
           },
           "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ModelsSpec": {
+      "description": "The models a spec runs on, by role.",
+      "properties": {
+        "extraction": {
+          "description": "The text model `extract` entries run on, such as `gemini-3.5-flash-lite`, unless an entry names its own. Name one: the host default is the rolling `gemini-flash-latest` alias, whose model (and latency) changes under you, and every turn waits for extraction.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "extraction_thinking_budget": {
+          "description": "The thinking budget extraction requests send. The default, 0, keeps thinking off; a model that rejects 0 (`gemini-3.5-flash-lite` needs at least 1) is retried at 64, then with no budget. Set 64 for such a model to skip the rejected first request.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -1528,6 +1855,19 @@
           },
           "required": [
             "done"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A decision model's answer to a declared question, about the caller's current turn (see [`decided`]).",
+          "properties": {
+            "decided": {
+              "$ref": "#/definitions/Decided"
+            }
+          },
+          "required": [
+            "decided"
           ],
           "type": "object"
         },
@@ -2236,6 +2576,20 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
+          "description": "The caller just spoke and a decision model answered these questions (see [`Sim::decide`]): `{\"decide\": {\"confirmed\": true, \"next_step\": \"book\", \"frustration\": 2.5, \"picked\": \"none_of_these\"}}`.",
+          "properties": {
+            "decide": {
+              "additionalProperties": true,
+              "type": "object"
+            }
+          },
+          "required": [
+            "decide"
+          ],
+          "type": "object"
+        },
+        {
           "description": "Advance a turn with no input.",
           "enum": [
             "turn"
@@ -2322,6 +2676,17 @@
     "SkillSpec": {
       "description": "A versioned capability installed in one speaking session.",
       "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CodeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A code tool for this skill, declared as `{skill}__run_code` while the skill is foreground: a program whose functions are the skill's tools by their local names. Without `functions`, every read tool that the skill's flow does not guard as a commit."
+        },
         "computed": {
           "description": "Derived task state, evaluated in dependency order.",
           "items": {
@@ -2490,6 +2855,9 @@
         },
         "response": {
           "description": "Canned JSON response (mock tools). Default `{\"ok\": true}`."
+        },
+        "returns": {
+          "description": "JSON Schema of what the tool returns. Code mode shows it in the function's docstring, so a program reads the right keys; a mock tool without it shows the shape of its `response`."
         },
         "save_response_as": {
           "description": "Store the tool's full response under this state key.",
@@ -3889,6 +4257,9 @@
         "response": {
           "description": "Canned JSON response (mock tools). Default `{\"ok\": true}`."
         },
+        "returns": {
+          "description": "JSON Schema of what the tool returns. Code mode shows it in the function's docstring, so a program reads the right keys; a mock tool without it shows the shape of its `response`."
+        },
         "save_response_as": {
           "description": "Store the tool's full response under this state key.",
           "type": [
@@ -4249,6 +4620,17 @@
   },
   "description": "A complete Live session as one JSON document. See the module docs.",
   "properties": {
+    "code": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CodeSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A code tool: the model runs a short Python program whose functions are the declared tools, each call governed like a direct call. Use it for reads the model would otherwise add up, sort or join itself."
+    },
     "computed": {
       "description": "Computed (derived) state variables.",
       "items": {
@@ -4266,6 +4648,13 @@
         }
       ],
       "description": "The conversation: stages, slots, digressions, commits, timing and policies, compiled by the [conversation compiler](crate::conversation). The higher-level alternative to `flow`; set one or the other. Stage resolvers bind to the declared `tools` by name."
+    },
+    "decisions": {
+      "additionalProperties": {
+        "$ref": "#/definitions/DecisionSpec"
+      },
+      "description": "Questions a decision model (such as Jev) answers about the conversation, by id. Guards name them with the `decided` atom, and the runtime asks the ones the flow can act on at each decision point. Requires [`SpecResources::decision_model`].",
+      "type": "object"
     },
     "description": {
       "default": "",
@@ -4342,6 +4731,14 @@
       ],
       "default": "text",
       "description": "Output modality. Defaults to text."
+    },
+    "models": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ModelsSpec"
+        }
+      ],
+      "description": "The models the spec runs on, by role."
     },
     "name": {
       "default": "",

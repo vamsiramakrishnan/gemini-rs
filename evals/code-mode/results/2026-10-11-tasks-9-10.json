@@ -1,0 +1,604 @@
+[
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 5796,
+    "ms": 16953,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "total_tokens": 7300,
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 624,
+        "ms": 16952,
+        "programs": [],
+        "round_trips": 1,
+        "said": "In 2025, you paid a total of $2,697.58, with 22 payments made after the due date and your largest single payment being $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "looked up: true; total 2588.70: false; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 5796,
+    "ms": 21655,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "total_tokens": 7329,
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 612,
+        "ms": 21653,
+        "programs": [],
+        "round_trips": 1,
+        "said": "In 2025, you paid a total of $2,629.70 across 52 payments, with 22 payments being late and the largest single payment being $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "looked up: true; total 2588.70: false; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 5796,
+    "ms": 18312,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "total_tokens": 7289,
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 783,
+        "ms": 18311,
+        "programs": [],
+        "round_trips": 1,
+        "said": "In 2025, you paid a total of $2,588.70, had twenty-two late payments, and your largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "looked up: true; total 2588.70: true; 22 late: false; largest 79.34: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 5796,
+    "ms": 19995,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "total_tokens": 7277,
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 438,
+        "ms": 19994,
+        "programs": [],
+        "round_trips": 1,
+        "said": "You paid a total of $2,588.70 in 2025, had 22 late payments, and your largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 5796,
+    "ms": 27819,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "total_tokens": 7332,
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 602,
+        "ms": 27818,
+        "programs": [],
+        "round_trips": 1,
+        "said": "For account ACME-9000 in 2025, you paid a total of $2,618.70. There were 22 late payments, and your largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "looked up: true; total 2588.70: false; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 1361,
+    "ms": 11837,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "total_tokens": 2942,
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 822,
+        "ms": 11836,
+        "programs": [
+          "import datetime\nfrom datetime import datetime as dt\n\nhistory = lookup_payment_history(\"ACME-9000\")\ntotal_paid = 0.0\nlate_payments = 0\nlargest_payment = 0.0\n\nfor payment in history['payments']:\n    paid_date = dt.strptime(payment['paid'], \"%Y-%m-%d\")\n    due_date = dt.strptime(payment['due'], \"%Y-%m-%d\")\n    \n    if paid_date.year == 2025:\n        total_paid += payment['amount']\n        if paid_date > due_date:\n            late_payments += 1\n        if payment['amount'] > largest_payment:\n            largest_payment = payment['amount']\n\nprint(f\"Total Paid: {total_paid:.2f}\")\nprint(f\"Late Payments: {late_payments}\")\nprint(f\"Largest Payment: {largest_payment:.2f}\")\n"
+        ],
+        "round_trips": 1,
+        "said": "In 2025, you paid a total of 2,588.70, with 22 late payments and a largest single payment of 79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 1371,
+    "ms": 11563,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "total_tokens": 2939,
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 964,
+        "ms": 11562,
+        "programs": [
+          "def analyze_payments():\n    history = lookup_payment_history(account_id=\"ACME-9000\")\n    payments_2025 = []\n    for p in history[\"payments\"]:\n        if p[\"paid\"].startswith(\"2025\"):\n            payments_2025.append(p)\n            \n    total_paid = sum(p[\"amount\"] for p in payments_2025)\n    late_payments = sum(1 for p in payments_2025 if p[\"paid\"] > p[\"due\"])\n    max_payment = max(p[\"amount\"] for p in payments_2025) if payments_2025 else 0.0\n    \n    return {\n        \"total_paid\": round(total_paid, 2),\n        \"late_payments\": late_payments,\n        \"max_payment\": round(max_payment, 2)\n    }\n\nprint(analyze_payments())\n"
+        ],
+        "round_trips": 1,
+        "said": "In 2025, you paid a total of $2,588.70, with 22 late payments and a largest single payment of $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 1375,
+    "ms": 13029,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "total_tokens": 3003,
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 829,
+        "ms": 13027,
+        "programs": [
+          "import datetime\nfrom datetime import datetime as dt\nimport json\n\n# Fetch payment history\nresponse = lookup_payment_history(account_id=\"ACME-9000\")\npayments = response[\"payments\"]\n\ntotal_paid = 0.0\nlate_payments = 0\nlargest_payment = 0.0\n\nfor p in payments:\n    paid_date = dt.strptime(p[\"paid\"], \"%Y-%m-%d\")\n    due_date = dt.strptime(p[\"due\"], \"%Y-%m-%d\")\n    amount = p[\"amount\"]\n\n    if paid_date.year == 2025:\n        total_paid += amount\n        if paid_date > due_date:\n            late_payments += 1\n        if amount > largest_payment:\n            largest_payment = amount\n\nprint(f\"Total paid: ${total_paid:.2f}\")\nprint(f\"Late payments: {late_payments}\")\nprint(f\"Largest payment: ${largest_payment:.2f}\")\n"
+        ],
+        "round_trips": 1,
+        "said": "For account ACME-9000 in 2025, you paid a total of 2588.70, with 22 late payments and a largest single payment of 79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 1309,
+    "ms": 12110,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "total_tokens": 2836,
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 956,
+        "ms": 12109,
+        "programs": [
+          "history = lookup_payment_history(\"ACME-9000\")\npayments_2025 = [p for p in history['payments'] if p['paid'].startswith('2025')]\n\ntotal_paid = sum(p['amount'] for p in payments_2025)\nlate_payments = sum(1 for p in payments_2025 if p['paid'] > p['due'])\nlargest_payment = max(p['amount'] for p in payments_2025) if payments_2025 else 0\n\nprint(f\"Total: ${total_paid:.2f}\")\nprint(f\"Late: {late_payments}\")\nprint(f\"Largest: ${largest_payment:.2f}\")"
+        ],
+        "round_trips": 1,
+        "said": "In 2025, you paid a total of $2,588.70, had 22 late payments, and your largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 1331,
+    "ms": 12170,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "total_tokens": 2888,
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1008,
+        "ms": 12169,
+        "programs": [
+          "history = lookup_payment_history(\"ACME-9000\")\npayments_2025 = []\nfor p in history[\"payments\"]:\n    if p[\"paid\"].startswith(\"2025\"):\n        payments_2025.append(p)\n\ntotal_paid = sum(p[\"amount\"] for p in payments_2025)\nlate_count = sum(1 for p in payments_2025 if p[\"paid\"] > p[\"due\"])\nlargest_payment = max(p[\"amount\"] for p in payments_2025) if payments_2025 else 0\n\nprint(f\"Total Paid: ${total_paid:.2f}\")\nprint(f\"Late Payments: {late_count}\")\nprint(f\"Largest Payment: ${largest_payment:.2f}\")\n"
+        ],
+        "round_trips": 1,
+        "said": "You paid a total of $2,588.70 in 2025, with twenty-two payments being late and the largest payment being $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "looked up: true; total 2588.70: true; 22 late: false; largest 79.34: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1316,
+    "ms": 7149,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "total_tokens": 2700,
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 497,
+        "ms": 7148,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The first available evening is Monday, October twelfth, with a table open at 8:30 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: false; checks made: 1"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1316,
+    "ms": 6451,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "total_tokens": 2685,
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 549,
+        "ms": 6450,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The first available evening is Monday, October 12th, with a table open at 8:30 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1316,
+    "ms": 8055,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "total_tokens": 2724,
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 408,
+        "ms": 8053,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The first evening with a table for seven at 8:30pm or later is Monday, October 12th at 8:30pm."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1316,
+    "ms": 7465,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "total_tokens": 2708,
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 511,
+        "ms": 7463,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The first available evening for seven people at 8:30 PM or later is Monday, October 12th."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1316,
+    "ms": 7537,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "total_tokens": 2708,
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 726,
+        "ms": 7536,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The first evening with an available table for seven people is Monday, October 12th, at 8:30pm."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 3,
+    "code_errors": 1,
+    "executions": 3,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1902,
+    "ms": 7468,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 3,
+    "task": "t10-fanout-14",
+    "total_tokens": 6791,
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "closed": null,
+        "code_errors": 1,
+        "first_output_ms": 975,
+        "ms": 7467,
+        "programs": [
+          "from datetime import datetime, timedelta\n\ndef find_first_available_table():\n    start_date = datetime(2026, 10, 12)\n    end_date = datetime(2026, 10, 25)\n    party_size = 7\n\n    current_date = start_date\n    while current_date <= end_date:\n        date_str = current_date.strftime(\"%Y-%m-%d\")\n        result = check_availability(date=date_str, party_size=party_size)\n        \n        # Check if any time is 20:30 or later\n        for time_str in result.get('times', []):\n            time_dt = datetime.strptime(time_str, \"%H:%M\")\n            limit_dt = datetime.strptime(\"20:30\", \"%H:%M\")\n            if time_dt >= limit_dt:\n                return f\"{date_str} at {time_str}\"\n                \n        current_date += timedelta(days=1)\n    \n    return \"No availability found.\"\n\nprint(find_first_available_table())",
+          "from datetime import datetime\nprint(check_availability(date=\"2026-10-12\", party_size=7))",
+          "from datetime import datetime, timedelta\n\ndef find_first_available_table():\n    start_date = datetime(2026, 10, 12)\n    end_date = datetime(2026, 10, 25)\n    party_size = 7\n\n    current_date = start_date\n    while current_date <= end_date:\n        date_str = current_date.strftime(\"%Y-%m-%d\")\n        result = check_availability(date=date_str, party_size=party_size)\n        \n        times = result.get('times', [])\n        for time_str in times:\n            # Clean string\n            time_str = time_str.strip()\n            # Compare time strings directly since format is HH:MM\n            if time_str >= \"20:30\":\n                return f\"{date_str} at {time_str}\"\n                \n        current_date += timedelta(days=1)\n    \n    return \"No availability found.\"\n\nprint(find_first_available_table())"
+        ],
+        "round_trips": 3,
+        "said": "The first available table is on Monday, October 12th at 8:30 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 3"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1398,
+    "ms": 6806,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "total_tokens": 2887,
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 961,
+        "ms": 6805,
+        "programs": [
+          "from datetime import datetime, timedelta\n\nstart_date = datetime(2026, 10, 12)\nend_date = datetime(2026, 10, 25)\nparty_size = 7\n\nresult = None\ncurrent_date = start_date\n\nwhile current_date <= end_date:\n    date_str = current_date.strftime(\"%Y-%m-%d\")\n    avail = check_availability(date=date_str, party_size=party_size)\n    available_times = avail.get(\"times\", [])\n    \n    # Check for times >= 8:30 PM (20:30)\n    for time_str in available_times:\n         hour, minute = map(int, time_str.split(':'))\n         if hour >= 20 and (hour > 20 or minute >= 30):\n             result = {\"date\": date_str, \"time\": time_str}\n             break\n             \n    if result:\n        break\n    current_date += timedelta(days=1)\n\nprint(result)"
+        ],
+        "round_trips": 1,
+        "said": "The first available table for seven is on Monday, October 12th at 8:30 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1421,
+    "ms": 6152,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "total_tokens": 2921,
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1080,
+        "ms": 6151,
+        "programs": [
+          "import datetime\n\nstart_date = datetime.date(2026, 10, 12)\nend_date = datetime.date(2026, 10, 25)\ncurrent_date = start_date\n\nparty_size = 7\n\nfound_date = None\nfound_time = None\n\nwhile current_date <= end_date:\n    date_str = current_date.strftime(\"%Y-%m-%d\")\n    response = check_availability(date=date_str, party_size=party_size)\n    times = response.get(\"times\", [])\n    \n    # Check for times at or after 8:30 PM (20:30)\n    valid_times = [t for t in times if t >= \"20:30\"]\n    \n    if valid_times:\n        # We want the first date, and the earliest valid time on that date\n        found_date = date_str\n        valid_times.sort()\n        found_time = valid_times[0]\n        break\n        \n    current_date += datetime.timedelta(days=1)\n\nprint(f\"Date: {found_date}, Time: {found_time}\")\n"
+        ],
+        "round_trips": 1,
+        "said": "The first available date is Monday, October 12th at 8:30 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1439,
+    "ms": 6659,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "total_tokens": 2959,
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1220,
+        "ms": 6658,
+        "programs": [
+          "import datetime\n\ndef find_first_available_table():\n    start_date = datetime.date(2026, 10, 12)\n    end_date = datetime.date(2026, 10, 25)\n    current_date = start_date\n    \n    while current_date <= end_date:\n        date_str = current_date.strftime(\"%Y-%m-%d\")\n        availability = check_availability(date_str, 7)\n        times = availability.get(\"times\", [])\n        \n        # Check if any time is 20:30 or later\n        for time_str in times:\n            hour, minute = map(int, time_str.split(':'))\n            if hour >= 20 and minute >= 30:\n                return f\"The first available table is on {date_str} at {time_str}.\"\n            elif hour > 20:\n                return f\"The first available table is on {date_str} at {time_str}.\"\n        \n        current_date += datetime.timedelta(days=1)\n        \n    return \"No tables available at 8:30pm or later during the requested period.\"\n\nprint(find_first_available_table())\n"
+        ],
+        "round_trips": 1,
+        "said": "The first available table is on Monday, October 12th, at 8:30 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "fan-out over 14 days",
+    "max_prompt_tokens": 1399,
+    "ms": 7029,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t10-fanout-14",
+    "total_tokens": 2893,
+    "turns": [
+      {
+        "caller": "We're 7 people. What's the first evening from Monday the 12th of October through Sunday the 25th that has a table at 8:30pm or later? Tell me the date and the time.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 957,
+        "ms": 7027,
+        "programs": [
+          "import datetime\n\ndef check_dates():\n    start_date = datetime.date(2026, 10, 12)\n    end_date = datetime.date(2026, 10, 25)\n    current_date = start_date\n    \n    while current_date <= end_date:\n        date_str = current_date.strftime(\"%Y-%m-%d\")\n        result = check_availability(date=date_str, party_size=7)\n        times = result.get('times', [])\n        \n        # Check for 20:30 (8:30 PM) or later\n        for time in times:\n            hour, minute = map(int, time.split(':'))\n            if hour >= 20 and (hour > 20 or minute >= 30):\n                return {\"found\": True, \"date\": date_str, \"time\": time}\n        \n        current_date += datetime.timedelta(days=1)\n        \n    return {\"found\": False}\n\nprint(check_dates())"
+        ],
+        "round_trips": 1,
+        "said": "The first available evening for your party of 7 is Monday, October 12th, at 8:30 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "why": "checked 2026-10-12: true; said 2026-10-12 20:30: true; checks made: 1"
+  }
+]

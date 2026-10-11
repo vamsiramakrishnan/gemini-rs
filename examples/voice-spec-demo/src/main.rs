@@ -188,7 +188,9 @@ async fn tts(
         .ok_or_else(|| format!("no audio in TTS response: {response}"))?;
     let bytes = base64::engine::general_purpose::STANDARD.decode(b64)?;
     Ok(bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|b| i16::from_le_bytes([b[0], b[1]]))
         .collect())
 }

@@ -48,6 +48,7 @@ use gemini_adk_fluent_rs::agents::*;        // Agent, orchestration (call_agent,
 use gemini_adk_fluent_rs::llm::*;           // LlmRequest/Response/Params/Registry
 use gemini_adk_fluent_rs::conversation::*;  // Conversation, ConversationSpec, CompiledConversation
 use gemini_adk_fluent_rs::tasks::*;         // Skill, SkillSpec, TaskRuntime, TaskCommand, snapshots
+use gemini_adk_fluent_rs::code_mode::*;     // CodeMode, CodeLimits, InProcess, MontyPool (code-pool)
 use gemini_adk_fluent_rs::wire::*;          // raw L0 wire types
 // a2a, motifs, policy, simulation, testing — the same-named module.
 ```
@@ -448,6 +449,30 @@ Live::builder()
     .tool_background("search_kb")                                    // default WhenIdle scheduling
     .tool_background_with_scheduling("log_event", FunctionResponseScheduling::Silent)  // silent
 ```
+
+### Code Mode
+
+`run_code` lets the model write a short Python program over the session's
+own tools. Every call the program makes is governed like a direct call, and a
+refused one raises `RuntimeError` in the program. Use it for sums, counts and
+dates over many rows and for chains of reads; keep commits as direct calls.
+
+```rust
+use gemini_adk_fluent_rs::code_mode::CodeMode;
+
+Live::builder()
+    .code_mode(
+        CodeMode::new()
+            .function_returning("lookup_payment_history", r#"{"payments": [{"amount": float}]}"#)
+            .function("check_availability"),
+    )
+```
+
+In a spec: `"code": {}` (every non-commit tool) or
+`"code": {"functions": [...], "direct": false, "limits": {"calls": 10}}`.
+Production deployments run programs in worker processes:
+`SpecResources::code_sandbox = Some(Arc::new(MontyPool::spawn(bin, n).await?))`
+(feature `code-pool`). See [code mode](user-guide/code-mode.md).
 
 ### Control Plane Features
 

@@ -18,6 +18,7 @@ use gemini_genai_rs::session::SessionWriter;
 use parking_lot::Mutex;
 
 use super::phase::PhaseMachine;
+use crate::code_mode::CodeMode;
 use crate::flow::{Enforcement, FlowStack, SharedFlowStack};
 use crate::state::State;
 
@@ -25,15 +26,27 @@ use crate::state::State;
 pub(crate) const DECLARED_TOOLS_KEY: &str = "declared_tools";
 
 /// Every tool declaration of the session, and the names currently declared.
+///
+/// With code mode, what is declared follows from the names offered: a
+/// function the model reaches only through programs is left out, and the
+/// code tool is declared, listing the offered functions it exposes, when
+/// there is at least one.
 #[derive(Debug)]
 pub(crate) struct ToolScope {
     /// The session's tool declarations, as resolved at connect.
     catalog: Vec<Tool>,
+    /// The session's code tool, if any. Its declaration is built from the
+    /// offered functions, never kept in `catalog`.
+    code: Option<Arc<CodeMode>>,
     /// The connect-time system instruction, which a phase instruction is
     /// appended to rather than replacing.
     base_instruction: Option<String>,
-    /// The function names the model has declared now, sorted.
+    /// The function names offered now, sorted. What is declared follows
+    /// from them (see [`declared`](Self::declared)).
     declared: Mutex<Vec<String>>,
+    /// The system instruction the model has now, when [`sync`](Self::sync)
+    /// manages it (task sessions). Starts as the connect-time instruction.
+    instruction: Mutex<Option<String>>,
 }
 
 impl ToolScope {
@@ -46,9 +59,17 @@ impl ToolScope {
     ) -> Self {
         Self {
             catalog,
+            code: None,
+            instruction: Mutex::new(base_instruction.clone()),
             base_instruction,
             declared: Mutex::new(declared.iter().cloned().collect()),
         }
+    }
+
+    /// Declare `code`'s tool with the functions it exposes that are offered.
+    pub(crate) fn with_code(mut self, code: Option<Arc<CodeMode>>) -> Self {
+        self.code = code;
+        self
     }
 
     /// The function names offered right now: in the phase's tool list (when
@@ -62,11 +83,23 @@ impl ToolScope {
         offered_names(&self.catalog, phase_tools, flow, state)
     }
 
-    /// The declarations to send for `names`: their function declarations, and
-    /// every tool that is not a function list (search, code execution), which
-    /// no phase or step can name.
+    /// The declarations to send for the offered `names`: their function
+    /// declarations, and every tool that is not a function list (search, code
+    /// execution), which no phase or step can name. With code mode, the
+    /// functions only programs reach are left out, and the code tool lists
+    /// the offered ones it exposes.
     pub(crate) fn tools_for(&self, names: &BTreeSet<String>) -> Vec<Tool> {
-        tools_for(&self.catalog, names)
+        let Some(code) = &self.code else {
+            return tools_for(&self.catalog, names);
+        };
+        let direct: BTreeSet<String> = names.iter().filter(|n| !code.hides(n)).cloned().collect();
+        let mut tools = tools_for(&self.catalog, &direct);
+        if let Some(declaration) =
+            code.declaration(function_declarations(&self.catalog), |n| names.contains(n))
+        {
+            tools.push(Tool::functions(vec![declaration]));
+        }
+        tools
     }
 
     /// Record `names` as declared. Returns the declarations to send when they
@@ -81,9 +114,55 @@ impl ToolScope {
         Some(self.tools_for(names))
     }
 
+    /// The connect-time system instruction.
+    pub(crate) fn base_instruction(&self) -> Option<&str> {
+        self.base_instruction.as_deref()
+    }
+
     /// The function names declared now.
     pub(crate) fn declared(&self) -> Vec<String> {
-        self.declared.lock().clone()
+        let offered = self.declared.lock().clone();
+        let Some(code) = &self.code else {
+            return offered;
+        };
+        let mut declared: Vec<String> =
+            offered.iter().filter(|n| !code.hides(n)).cloned().collect();
+        if offered.iter().any(|n| code.exposes(n)) {
+            declared.push(code.tool().to_string());
+            declared.sort();
+        }
+        declared
+    }
+
+    /// Record `names` and `instruction` as what the model has, and return the
+    /// update that brings it there: only the fields that changed, `None` when
+    /// neither did. Each update invalidates the server's prefix cache, so
+    /// nothing is sent for an unchanged list or instruction.
+    pub(crate) fn sync(
+        &self,
+        names: &BTreeSet<String>,
+        instruction: Option<String>,
+    ) -> Option<ContextUpdate> {
+        let tools = self.redeclare(names);
+        let instruction = instruction.filter(|next| {
+            let mut current = self.instruction.lock();
+            if current.as_deref() == Some(next.as_str()) {
+                return false;
+            }
+            *current = Some(next.clone());
+            true
+        });
+        if tools.is_none() && instruction.is_none() {
+            return None;
+        }
+        let mut update = ContextUpdate::new();
+        if let Some(tools) = tools {
+            update = update.tools(tools);
+        }
+        if let Some(instruction) = instruction {
+            update = update.system_instruction(instruction);
+        }
+        Some(update)
     }
 
     /// The system instruction for a phase: the connect-time instruction with
@@ -155,6 +234,32 @@ pub(crate) fn offered_names(
         .filter(|name| flow.is_none_or(|f| f.offers_tool(name, state)))
         .map(str::to_string)
         .collect()
+}
+
+/// Every function declaration in `catalog`.
+pub(crate) fn function_declarations(
+    catalog: &[Tool],
+) -> impl Iterator<Item = &gemini_genai_rs::prelude::FunctionDeclaration> {
+    catalog
+        .iter()
+        .filter_map(|tool| tool.function_declarations.as_ref())
+        .flatten()
+}
+
+/// The declarations for a session that declares its tools once, at connect:
+/// `catalog` without the functions only programs reach, and the code tool
+/// listing every function it exposes.
+pub(crate) fn with_code(catalog: Vec<Tool>, code: &CodeMode) -> Vec<Tool> {
+    let all: BTreeSet<String> = function_declarations(&catalog)
+        .map(|d| d.name.clone())
+        .collect();
+    let declaration = code.declaration(function_declarations(&catalog), |_| true);
+    let direct: BTreeSet<String> = all.iter().filter(|n| !code.hides(n)).cloned().collect();
+    let mut tools = tools_for(&catalog, &direct);
+    if let Some(declaration) = declaration {
+        tools.push(Tool::functions(vec![declaration]));
+    }
+    tools
 }
 
 /// See [`ToolScope::tools_for`].
@@ -332,6 +437,58 @@ mod tests {
         let tools = scope.redeclare(&names(&["get_balance"])).expect("changed");
         assert_eq!(declared_functions(&tools), vec!["get_balance"]);
         assert_eq!(scope.declared(), vec!["get_balance"]);
+    }
+
+    fn code_description(tools: &[Tool]) -> Option<String> {
+        tools
+            .iter()
+            .filter_map(|t| t.function_declarations.as_ref())
+            .flatten()
+            .find(|d| d.name == "run_code")
+            .map(|d| d.description.clone())
+    }
+
+    #[test]
+    fn the_code_tool_lists_only_the_offered_functions_it_exposes() {
+        let code = Arc::new(
+            CodeMode::new()
+                .functions(["get_balance", "transfer"])
+                .direct(false),
+        );
+        let scope =
+            ToolScope::new(catalog(), None, &names(&["verify_identity"])).with_code(Some(code));
+
+        // Nothing it exposes is offered yet: no code tool.
+        let tools = scope.tools_for(&names(&["verify_identity"]));
+        assert_eq!(declared_functions(&tools), vec!["verify_identity"]);
+        assert_eq!(scope.declared(), vec!["verify_identity"]);
+
+        // The step offers the balance: the code tool lists it, and the
+        // balance is not declared on its own.
+        let tools = scope.redeclare(&names(&["get_balance"])).expect("changed");
+        assert_eq!(declared_functions(&tools), vec!["run_code"]);
+        let description = code_description(&tools).unwrap();
+        assert!(description.contains("def get_balance("));
+        assert!(!description.contains("def transfer("));
+        assert_eq!(scope.declared(), vec!["run_code"]);
+    }
+
+    #[test]
+    fn direct_functions_stay_declared_beside_the_code_tool() {
+        let code = CodeMode::new().function("get_balance");
+        let tools = with_code(catalog(), &code);
+        assert_eq!(
+            declared_functions(&tools),
+            vec!["verify_identity", "get_balance", "transfer", "run_code"]
+        );
+        let description = code_description(&tools).unwrap();
+        assert!(description.contains("Call a tool directly only when its result"));
+
+        let hidden = with_code(catalog(), &code.direct(false));
+        assert_eq!(
+            declared_functions(&hidden),
+            vec!["verify_identity", "transfer", "run_code"]
+        );
     }
 
     #[test]

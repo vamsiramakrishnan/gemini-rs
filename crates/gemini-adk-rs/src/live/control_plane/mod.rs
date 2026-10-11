@@ -2,6 +2,7 @@
 //!
 //! All functions here are internal to the processor and not part of the public API.
 
+mod decisions;
 mod extractors;
 mod lifecycle;
 mod main_loop;

@@ -121,7 +121,7 @@ constructed. Everything below is mechanical.
 | A2A server | `a2a::A2AServer` | `a2a::A2aServer` (matches `A2aRegistry`) |
 | Mic chain | `voice::MicProcessor` (`process`), `pump_processed(.., Vec<Box<dyn MicProcessor>>, ..)`, `NoiseGate::new(threshold_rms, hang_frames)` | One trait: L1 `InputAudioProcessor` (`process_frame`), re-exported as `voice::InputAudioProcessor`; `NoiseGate::new(threshold_rms, hold_frames)` |
 
-Toolchain: the workspace is Rust edition 2024 with MSRV 1.93. `gemini-genai-rs`
+Toolchain: the workspace is Rust edition 2024 with MSRV 1.99. `gemini-genai-rs`
 default features are `["live", "tls-native"]` (`tls-rustls` is the alternative;
 `vad`, `vad-wavekat`, `tracing-subscriber`, and the REST features are opt-in;
 there is no `opus` feature). `gemini-adk-rs` no longer gates tracing behind

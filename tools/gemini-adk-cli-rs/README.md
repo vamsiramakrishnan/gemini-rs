@@ -4,7 +4,7 @@ Command-line interface for ADK agent development. Mirrors the upstream `adk` CLI
 
 ## Prerequisites
 
-- **Rust toolchain** (stable, 1.93+)
+- **Rust toolchain** (stable, 1.99+)
 - **Google API key or GCP credentials** for agent execution
 - **Docker** (for `deploy cloud_run` and `deploy gke`)
 - **gcloud CLI** (for `deploy cloud_run` and `deploy agent_engine`)

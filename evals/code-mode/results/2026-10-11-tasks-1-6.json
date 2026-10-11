@@ -1,0 +1,1933 @@
+[
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1298,
+    "ms": 7386,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "total_tokens": 2674,
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 488,
+        "ms": 7385,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest available table for four on Friday, November 13th at or after 7:30 PM is at 8:00 PM."
+      }
+    ],
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1298,
+    "ms": 8231,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "total_tokens": 2692,
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 573,
+        "ms": 8229,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest available table for four on Friday, November 13th, at or after 7:30 PM is at 8:00 PM."
+      }
+    ],
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1298,
+    "ms": 7105,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "total_tokens": 2664,
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 562,
+        "ms": 7104,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest available table for four on November thirteenth at or after seven-thirty PM is at eight o'clock."
+      }
+    ],
+    "why": "checked 2026-11-13 for 4: true; said 20:00: false"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1298,
+    "ms": 7979,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "total_tokens": 2687,
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 575,
+        "ms": 7978,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest available table for four on Friday, November 13th, at or after 7:30 PM, is at 8:00 PM."
+      }
+    ],
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1298,
+    "ms": 6517,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "total_tokens": 2650,
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 478,
+        "ms": 6516,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest available table for four on Friday, November 13th is at eight o'clock in the evening."
+      }
+    ],
+    "why": "checked 2026-11-13 for 4: true; said 20:00: false"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1380,
+    "ms": 8217,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "total_tokens": 2828,
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 914,
+        "ms": 8215,
+        "programs": [
+          "import datetime\n\n# Find the second Friday of November 2026\nnov_1 = datetime.date(2026, 11, 1)\n# 0 is Monday, 4 is Friday\ndays_until_first_friday = (4 - nov_1.weekday() + 7) % 7\nif days_until_first_friday == 0:\n    first_friday = nov_1\nelse:\n    first_friday = nov_1 + datetime.timedelta(days=days_until_first_friday)\n\nsecond_friday = first_friday + datetime.timedelta(weeks=1)\ndate_str = second_friday.strftime('%Y-%m-%d')\n\nprint(f\"Checking availability for: {date_str}\")\nprint(check_availability(date=date_str, party_size=4))\n"
+        ],
+        "round_trips": 1,
+        "said": "The earliest available table for four on Friday, November thirteenth at or after seven thirty PM is at eight PM."
+      }
+    ],
+    "why": "checked 2026-11-13 for 4: true; said 20:00: false"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1361,
+    "ms": 7459,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "total_tokens": 2770,
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1018,
+        "ms": 7458,
+        "programs": [
+          "import datetime\n\n# Find the second Friday of November 2026\nnov_1 = datetime.date(2026, 11, 1)\n# 0 is Monday, 4 is Friday\ndays_to_first_friday = (4 - nov_1.weekday() + 7) % 7\nfirst_friday = nov_1 + datetime.timedelta(days=days_to_first_friday)\nsecond_friday = first_friday + datetime.timedelta(weeks=1)\n\nprint(f\"Checking availability for: {second_friday.strftime('%Y-%m-%d')}\")\nimport json\nprint(json.dumps(check_availability(date=second_friday.strftime('%Y-%m-%d'), party_size=4)))\n"
+        ],
+        "round_trips": 1,
+        "said": "There is no table at 7:30 PM, but the earliest available time that evening is 8:00 PM."
+      }
+    ],
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1376,
+    "ms": 8816,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "total_tokens": 2833,
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1111,
+        "ms": 8815,
+        "programs": [
+          "import datetime\nfrom datetime import timedelta\n\ndef get_second_friday(year, month):\n    first_day = datetime.date(year, month, 1)\n    # 0 is Monday, 4 is Friday\n    days_to_first_friday = (4 - first_day.weekday()) % 7\n    first_friday = first_day + timedelta(days=days_to_first_friday)\n    second_friday = first_friday + timedelta(weeks=1)\n    return second_friday\n\ndate_to_check = get_second_friday(2026, 11)\nprint(f\"Checking date: {date_to_check}\")\n\nresult = check_availability(date=date_to_check.strftime('%Y-%m-%d'), party_size=4)\nprint(result)\n"
+        ],
+        "round_trips": 1,
+        "said": "There is no table at 7:30 PM; however, the earliest available time from 7:30 PM onwards is 8:00 PM."
+      }
+    ],
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1360,
+    "ms": 8238,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "total_tokens": 2789,
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 941,
+        "ms": 8237,
+        "programs": [
+          "import datetime\n\n# Find second Friday of November 2026\n# Nov 1, 2026\nfirst_day = datetime.date(2026, 11, 1)\n# Find first Friday\ndays_until_first_friday = (4 - first_day.weekday()) % 7\nfirst_friday = first_day + datetime.timedelta(days=days_until_first_friday)\nsecond_friday = first_friday + datetime.timedelta(weeks=1)\n\ndate_str = second_friday.strftime(\"%Y-%m-%d\")\n\nprint(f\"Checking availability for: {date_str}\")\nimport json\nprint(json.dumps(check_availability(date=date_str, party_size=4)))"
+        ],
+        "round_trips": 1,
+        "said": "The earliest available table for four on the second Friday of next month at 7:30 PM or later is at 8:00 PM."
+      }
+    ],
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 2,
+    "code_errors": 1,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1612,
+    "ms": 9531,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t1-date",
+    "total_tokens": 4643,
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "closed": null,
+        "code_errors": 1,
+        "first_output_ms": 859,
+        "ms": 9530,
+        "programs": [
+          "import datetime\n\ntoday = datetime.date(2026, 10, 11)\n# Next month is November\nyear = 2026\nmonth = 11\n\n# Find the first day of November\nfirst_day = datetime.date(year, month, 1)\n# Find the first Friday of November\n# weekday() returns 0 for Monday, ..., 4 for Friday\nfirst_friday_day = (4 - first_day.weekday()) % 7 + 1\nfirst_friday = datetime.date(year, month, first_friday_day)\n# The second Friday is one week after the first Friday\nsecond_friday = first_friday + datetime.timedelta(weeks=1)\n\ndate_str = second_friday.strftime(\"%Y-%m-%d\")\nprint(f\"Checking availability for: {date_str}\")\n\nimport functions\navail = functions.check_availability(date=date_str, party_size=4)\nprint(avail)\n",
+          "import datetime\n\ntoday = datetime.date(2026, 10, 11)\nyear = 2026\nmonth = 11\n\nfirst_day = datetime.date(year, month, 1)\nfirst_friday_day = (4 - first_day.weekday()) % 7 + 1\nfirst_friday = datetime.date(year, month, first_friday_day)\nsecond_friday = first_friday + datetime.timedelta(weeks=1)\n\ndate_str = second_friday.strftime(\"%Y-%m-%d\")\n\navail = check_availability(date=date_str, party_size=4)\nprint(avail)\n"
+        ],
+        "round_trips": 2,
+        "said": "Yes, the earliest available time for a table of 4 on the second Friday of next month, November 13th, is at 8:00 PM."
+      }
+    ],
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1282,
+    "ms": 5036,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "total_tokens": 2585,
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 465,
+        "ms": 5034,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest table for two on November 3rd is at 5:30 PM."
+      }
+    ],
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1282,
+    "ms": 5775,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "total_tokens": 2600,
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 526,
+        "ms": 5774,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest table for two on Tuesday, November third, is at 5:30 PM."
+      }
+    ],
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1282,
+    "ms": 5770,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "total_tokens": 2593,
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 646,
+        "ms": 5769,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest table for two on November 3rd is at 5:30 PM."
+      }
+    ],
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1282,
+    "ms": 6073,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "total_tokens": 2600,
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 546,
+        "ms": 6072,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest available time for two people on November 3rd is 17:30."
+      }
+    ],
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1282,
+    "ms": 5329,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "total_tokens": 2593,
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 437,
+        "ms": 5328,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest table for two on November 3rd is at 17:30."
+      }
+    ],
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1333,
+    "ms": 6784,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "total_tokens": 2710,
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 751,
+        "ms": 6782,
+        "programs": [
+          "import datetime\n\ntoday = datetime.date(2026, 10, 11)\ndays_ahead = 1 - today.weekday() # Tuesday is 1\nif days_ahead <= 0:\n    days_ahead += 7\nthis_coming_tuesday = today + datetime.timedelta(days=days_ahead)\nthree_weeks_after = this_coming_tuesday + datetime.timedelta(weeks=3)\n\ndate_str = three_weeks_after.strftime(\"%Y-%m-%d\")\nprint(f\"Checking availability for: {date_str}\")\nimport json\nprint(json.dumps(check_availability(date=date_str, party_size=2)))\n"
+        ],
+        "round_trips": 1,
+        "said": "The earliest table for two on November 3rd is available at 5:30 PM. Would you like to book it?"
+      }
+    ],
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1337,
+    "ms": 6948,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "total_tokens": 2717,
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 730,
+        "ms": 6947,
+        "programs": [
+          "import datetime\n\ntoday = datetime.date(2026, 10, 11)\ndays_ahead = 1 - today.weekday() # Monday is 0, Tuesday is 1\nif days_ahead <= 0:\n    days_ahead += 7\nthis_coming_tuesday = today + datetime.timedelta(days=days_ahead)\nthree_weeks_later = this_coming_tuesday + datetime.timedelta(weeks=3)\n\ndate_str = three_weeks_later.strftime('%Y-%m-%d')\nprint(f\"Checking availability for: {date_str}\")\nimport json\nprint(json.dumps(check_availability(date=date_str, party_size=2)))"
+        ],
+        "round_trips": 1,
+        "said": "The earliest available table for two on Tuesday, November 3rd, is at 5:30 PM."
+      }
+    ],
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1329,
+    "ms": 6470,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "total_tokens": 2687,
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 740,
+        "ms": 6469,
+        "programs": [
+          "import datetime\n\ntoday = datetime.date(2026, 10, 11)\ndays_until_tuesday = (1 - today.weekday() + 7) % 7\nif days_until_tuesday == 0:\n    days_until_tuesday = 7\nthis_coming_tuesday = today + datetime.timedelta(days=days_until_tuesday)\ntarget_date = this_coming_tuesday + datetime.timedelta(weeks=3)\nprint(f\"Target date: {target_date.isoformat()}\")\n\nfrom datetime import datetime as dt\nprint(check_availability(date=target_date.isoformat(), party_size=2))"
+        ],
+        "round_trips": 1,
+        "said": "The earliest available table for two on Tuesday, November 3rd, is at 5:30 PM."
+      }
+    ],
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1345,
+    "ms": 6114,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "total_tokens": 2705,
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 988,
+        "ms": 6113,
+        "programs": [
+          "import datetime\n\ntoday = datetime.date(2026, 10, 11)\n# Find the upcoming Tuesday\ndays_ahead = 1 - today.weekday() # Monday is 0, Tuesday is 1\nif days_ahead <= 0: # Target day already happened this week\n    days_ahead += 7\nupcoming_tuesday = today + datetime.timedelta(days=(1 - today.weekday()) % 7)\ntarget_date = upcoming_tuesday + datetime.timedelta(weeks=3)\ndate_str = target_date.strftime('%Y-%m-%d')\n\nprint(f\"Target date: {date_str}\")\n\nresult = check_availability(date=date_str, party_size=2)\nprint(result)\n"
+        ],
+        "round_trips": 1,
+        "said": "The earliest table for two on Tuesday, November 3rd, is at 17:30."
+      }
+    ],
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 1335,
+    "ms": 6650,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t2-date",
+    "total_tokens": 2703,
+    "turns": [
+      {
+        "caller": "What's the earliest table for 2 exactly three weeks after this coming Tuesday?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 888,
+        "ms": 6648,
+        "programs": [
+          "import datetime\n\ntoday = datetime.date(2026, 10, 11)\n# Find this coming Tuesday\ndays_until_tuesday = (1 - today.weekday() + 7) % 7\nif days_until_tuesday == 0:\n    days_until_tuesday = 7\nthis_coming_tuesday = today + datetime.timedelta(days=days_until_tuesday)\ntarget_date = this_coming_tuesday + datetime.timedelta(weeks=3)\n\nprint(f\"Target date: {target_date}\")\nresult = check_availability(date=target_date.strftime(\"%Y-%m-%d\"), party_size=2)\nprint(result)"
+        ],
+        "round_trips": 1,
+        "said": "The earliest table for two on Tuesday, November 3rd, is available at 5:30 PM."
+      }
+    ],
+    "why": "checked 2026-11-03 for 2: true; said 17:30: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1638,
+    "ms": 8451,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 4,
+    "task": "t3-fanout",
+    "total_tokens": 7361,
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 653,
+        "ms": 8450,
+        "programs": [],
+        "round_trips": 4,
+        "said": "The earliest available table after six PM is on Tuesday, October 20th at six thirty PM."
+      }
+    ],
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1670,
+    "ms": 6560,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t3-fanout",
+    "total_tokens": 3030,
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 653,
+        "ms": 6559,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest table after 6 PM is on Tuesday, October 20th at 6:30 PM."
+      }
+    ],
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1670,
+    "ms": 7855,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t3-fanout",
+    "total_tokens": 3057,
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 697,
+        "ms": 7853,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest available table after six PM is Tuesday, October twentieth at six thirty PM."
+      }
+    ],
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 3,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1530,
+    "ms": 7897,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 3,
+    "task": "t3-fanout",
+    "total_tokens": 5694,
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 621,
+        "ms": 7895,
+        "programs": [],
+        "round_trips": 3,
+        "said": "The earliest available table after 6 PM is on Tuesday, October 20th at 6:30 PM."
+      }
+    ],
+    "why": "checked all four days: false; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1670,
+    "ms": 7211,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t3-fanout",
+    "total_tokens": 3046,
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 638,
+        "ms": 7210,
+        "programs": [],
+        "round_trips": 1,
+        "said": "The earliest table after six PM is on Tuesday, October 20th at six thirty PM."
+      }
+    ],
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 2,
+    "code_errors": 1,
+    "executions": 5,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1806,
+    "ms": 9281,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t3-fanout",
+    "total_tokens": 4796,
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "closed": null,
+        "code_errors": 1,
+        "first_output_ms": 889,
+        "ms": 9280,
+        "programs": [
+          "import datetime\n\ndates = [\"2026-10-19\", \"2026-10-20\", \"2026-10-21\", \"2026-10-22\"]\nparty_size = 6\nearliest_datetime = None\n\nfor d in dates:\n    avail = check_availability(date=d, party_size=party_size)\n    for t_str in avail.get(\"times\", []):\n        t = datetime.datetime.strptime(t_str, \"%H:%M\").time()\n        if t > datetime.time(18, 0):\n            current_datetime = datetime.datetime.combine(datetime.datetime.strptime(d, \"%Y-%m-%d\").date(), t)\n            if earliest_datetime is None or current_datetime < earliest_datetime:\n                earliest_datetime = current_datetime\n\nprint(earliest_datetime)",
+          "import datetime\n\ndates = [\"2026-10-19\", \"2026-10-20\", \"2026-10-21\", \"2026-10-22\"]\nparty_size = 6\navailabilities = []\n\nfor d in dates:\n    availabilities.append(check_availability(date=d, party_size=party_size))\n\nprint(availabilities)"
+        ],
+        "round_trips": 2,
+        "said": "The earliest table after 6 pm is on Tuesday, the 20th of October at 6:30 pm."
+      }
+    ],
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1391,
+    "ms": 6870,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t3-fanout",
+    "total_tokens": 2880,
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1090,
+        "ms": 6869,
+        "programs": [
+          "import datetime\n\ndates = [\"2026-10-19\", \"2026-10-20\", \"2026-10-21\", \"2026-10-22\"]\nparty_size = 6\nbest_date = None\nbest_time = None\n\nfor date in dates:\n    response = check_availability(date, party_size)\n    times = response.get(\"times\", [])\n    for time_str in times:\n        hour, minute = map(int, time_str.split(\":\"))\n        if hour >= 18:\n            if best_time is None or (date < best_date) or (date == best_date and time_str < best_time):\n                best_date = date\n                best_time = time_str\n            # Since we iterate sequentially by date and times are usually chronological, \n            # we just need to keep the very first valid time we find for the soonest date.\n\nprint(f\"Best Date: {best_date}, Best Time: {best_time}\")"
+        ],
+        "round_trips": 1,
+        "said": "The earliest available table for six people is on Monday, October 19th at 6:00 pm."
+      }
+    ],
+    "why": "checked all four days: true; said 2026-10-20 18:30: false"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1342,
+    "ms": 7255,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t3-fanout",
+    "total_tokens": 2772,
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 967,
+        "ms": 7254,
+        "programs": [
+          "import datetime\n\ndates = [\"2026-10-19\", \"2026-10-20\", \"2026-10-21\", \"2026-10-22\"]\nparty_size = 6\nearliest_time = None\nbest_date = None\n\nfor date in dates:\n    result = check_availability(date=date, party_size=party_size)\n    times = result.get(\"times\", [])\n    for time in times:\n        if time > \"18:00\":\n            if earliest_time is None or time < earliest_time:\n                earliest_time = time\n                best_date = date\n                break # Since times are usually sorted, but we will check anyway\n\nprint(f\"Best date: {best_date}, Time: {earliest_time}\")\n"
+        ],
+        "round_trips": 1,
+        "said": "The earliest available table is Tuesday, October 20th at 6:30 PM."
+      }
+    ],
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1358,
+    "ms": 8962,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t3-fanout",
+    "total_tokens": 2859,
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 949,
+        "ms": 8960,
+        "programs": [
+          "dates = [\"2026-10-19\", \"2026-10-20\", \"2026-10-21\", \"2026-10-22\"]\nparty_size = 6\nearliest_time = None\nbest_date = None\n\nfor date in dates:\n    avail = check_availability(date, party_size)\n    times = avail.get(\"times\", [])\n    for time in times:\n        if time > \"18:00\":\n            if earliest_time is None or time < earliest_time:\n                earliest_time = time\n                best_date = date\n            # Since we iterate dates in order, and times might be sorted or not,\n            # this logic finds the absolute minimum time > 18:00.\n\nprint(f\"Best Date: {best_date}, Earliest Time: {earliest_time}\")\n"
+        ],
+        "round_trips": 1,
+        "said": "The earliest available table for six is on Tuesday, October 20th at 6:30 PM. Would you like me to book this for you?"
+      }
+    ],
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 4,
+    "kind": "fan-out",
+    "max_prompt_tokens": 1494,
+    "ms": 7031,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t3-fanout",
+    "total_tokens": 3079,
+    "turns": [
+      {
+        "caller": "We're 6 people and can do any evening from Monday the 19th to Thursday the 22nd of October. Which of those evenings has the earliest table after 6pm? If several tie, the earliest day.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1303,
+        "ms": 7030,
+        "programs": [
+          "from datetime import date, timedelta\nimport json\n\ndef check_dates():\n    start_date = date(2026, 10, 19)\n    end_date = date(2026, 10, 22)\n    party_size = 6\n    \n    best_day = None\n    best_time = None\n    \n    current_date = start_date\n    while current_date <= end_date:\n        date_str = current_date.strftime(\"%Y-%m-%d\")\n        response = check_availability(date=date_str, party_size=party_size)\n        \n        for time_str in response.get(\"times\", []):\n            if time_str > \"18:00\":\n                if best_time is None or time_str < best_time:\n                    best_time = time_str\n                    best_day = date_str\n                    # Since we are iterating chronologically, the first time we find the absolute earliest time\n                    # will naturally be the earliest date among ties if we just check for strict inequality.\n                    # Wait, if time_str == best_time, we don't update, keeping the earlier date.\n                    # That is exactly what we want.\n                elif time_str == best_time:\n                    pass # Keep the earlier day\n        \n        current_date += timedelta(days=1)\n        \n    return {\"day\": best_day, \"time\": best_time}\n\nprint(json.dumps(check_dates()))\n"
+        ],
+        "round_trips": 1,
+        "said": "The earliest table after 6 PM is Tuesday, October 20th, at 6:30 PM."
+      }
+    ],
+    "why": "checked all four days: true; said 2026-10-20 18:30: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1456,
+    "ms": 8864,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "total_tokens": 2851,
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 540,
+        "ms": 8863,
+        "programs": [],
+        "round_trips": 1,
+        "said": "You've paid a total of $525.50 since August 1st. The payment due on September 5th was made late."
+      }
+    ],
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1456,
+    "ms": 9011,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "total_tokens": 2861,
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 501,
+        "ms": 9010,
+        "programs": [],
+        "round_trips": 1,
+        "said": "You paid a total of 525.50 since August 1st, and the payment due on September 5th was late."
+      }
+    ],
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1456,
+    "ms": 9406,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "total_tokens": 2867,
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 634,
+        "ms": 9405,
+        "programs": [],
+        "round_trips": 1,
+        "said": "You have paid a total of $525.50 since August 1st, and one payment due on September 5th was late."
+      }
+    ],
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1456,
+    "ms": 7693,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "total_tokens": 2824,
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 541,
+        "ms": 7692,
+        "programs": [],
+        "round_trips": 1,
+        "said": "You paid a total of 525.50 since August 1st, and one of those payments was late."
+      }
+    ],
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1456,
+    "ms": 8571,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "total_tokens": 2853,
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 448,
+        "ms": 8570,
+        "programs": [],
+        "round_trips": 1,
+        "said": "You have paid a total of $525.50 since August 1st. The payment due on September 5th was paid late."
+      }
+    ],
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1246,
+    "ms": 8084,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "total_tokens": 2625,
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 794,
+        "ms": 8081,
+        "programs": [
+          "history = lookup_payment_history(account_id=\"ACME-4821\")\n\ntotal_paid = 0.0\nlate_payments = []\n\nfor payment in history['payments']:\n    if payment['paid'] >= '2026-08-01':\n        total_paid += payment['amount']\n        if payment['paid'] > payment['due']:\n            late_payments.append(payment)\n\nprint(f\"Total paid: {total_paid}\")\nprint(f\"Late payments found: {len(late_payments)}\")\n"
+        ],
+        "round_trips": 1,
+        "said": "You have paid a total of $525.50 since August 1st, and one of those payments was late."
+      }
+    ],
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 2,
+    "code_errors": 1,
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1718,
+    "ms": 9982,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t4-aggregate",
+    "total_tokens": 4674,
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "closed": null,
+        "code_errors": 1,
+        "first_output_ms": 967,
+        "ms": 9980,
+        "programs": [
+          "import datetime\nfrom datetime import datetime as dt\n\n# Function provided in the prompt's context implicitly\ndef lookup_payment_history(account_id: str) -> dict:\n    pass # This will be executed via the actual tool invocation in the environment\n\ndata = lookup_payment_history(\"ACME-4821\")\n\nstart_date = dt.strptime(\"2026-08-01\", \"%Y-%m-%d\")\ntotal_paid = 0.0\nlate_payments_count = 0\n\nfor payment in data.get(\"payments\", []):\n    paid_date = dt.strptime(payment[\"paid\"], \"%Y-%m-%d\")\n    due_date = dt.strptime(payment[\"due\"], \"%Y-%m-%d\")\n    \n    if paid_date >= start_date:\n        total_paid += payment[\"amount\"]\n        if paid_date > due_date:\n            late_payments_count += 1\n\nprint(f\"Total paid: ${total_paid:.2f}\")\nprint(f\"Late payments: {late_payments_count}\")\n",
+          "import datetime\nfrom datetime import datetime as dt\n\ndata = lookup_payment_history(\"ACME-4821\")\nprint(data)\n"
+        ],
+        "round_trips": 2,
+        "said": "Since August 1st, you have paid a total of $525.50, and one of those payments was late."
+      }
+    ],
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1382,
+    "ms": 8457,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "total_tokens": 2656,
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 901,
+        "ms": 8456,
+        "programs": [
+          "print(lookup_payment_history(account_id=\"ACME-4821\"))"
+        ],
+        "round_trips": 1,
+        "said": "You've paid a total of $525.50 since August 1st, and one of those payments was late."
+      }
+    ],
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1246,
+    "ms": 7684,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "total_tokens": 2623,
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 738,
+        "ms": 7682,
+        "programs": [
+          "history = lookup_payment_history(\"ACME-4821\")\ntotal_paid = 0.0\nlate_payments = []\n\nfor payment in history['payments']:\n    if payment['paid'] >= '2026-08-01':\n        total_paid += payment['amount']\n        if payment['paid'] > payment['due']:\n            late_payments.append(payment)\n\nprint(f\"Total paid: ${total_paid:.2f}\")\nprint(f\"Late payments found: {len(late_payments)}\")\n"
+        ],
+        "round_trips": 1,
+        "said": "You've paid a total of $525.50 since August 1st, and one of those payments was late."
+      }
+    ],
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 1,
+    "kind": "aggregation",
+    "max_prompt_tokens": 1223,
+    "ms": 8545,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t4-aggregate",
+    "total_tokens": 2595,
+    "turns": [
+      {
+        "caller": "For account ACME-4821, how much have I paid in total since August 1st, and was any of those payments late?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 861,
+        "ms": 8543,
+        "programs": [
+          "history = lookup_payment_history(\"ACME-4821\")\ntotal = 0\nlate_payments = []\nfor p in history[\"payments\"]:\n    if p[\"paid\"] >= \"2026-08-01\":\n        total += p[\"amount\"]\n        if p[\"paid\"] > p[\"due\"]:\n            late_payments.append(p)\nprint(f\"Total: {total}, Late: {len(late_payments)}\")\n"
+        ],
+        "round_trips": 1,
+        "said": "You have paid a total of $525.50 since August 1st, and one of your payments was late."
+      }
+    ],
+    "why": "looked up: true; total 525.50: true; Sept late: true; mentioned July: false"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1600,
+    "ms": 13094,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "total_tokens": 4877,
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1005,
+        "ms": 13092,
+        "programs": [],
+        "round_trips": 2,
+        "said": "There are two refills remaining on your Atorvastatin prescription. This information is not medical advice or diagnosis, and you should see a healthcare professional for medical care."
+      }
+    ],
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1600,
+    "ms": 13886,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "total_tokens": 4903,
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1263,
+        "ms": 13884,
+        "programs": [],
+        "round_trips": 2,
+        "said": "You have two refills remaining for your Atorvastatin cholesterol medication. This information is not medical advice or diagnosis; please consult a healthcare professional for any medical concerns."
+      }
+    ],
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1600,
+    "ms": 12408,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "total_tokens": 4855,
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1026,
+        "ms": 12407,
+        "programs": [],
+        "round_trips": 2,
+        "said": "You have two refills remaining on your Atorvastatin cholesterol medication. This information is not medical advice or diagnosis; please see a healthcare professional."
+      }
+    ],
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1600,
+    "ms": 10428,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "total_tokens": 4821,
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 907,
+        "ms": 10427,
+        "programs": [],
+        "round_trips": 2,
+        "said": "You have 2 refills remaining on your Atorvastatin. This information is not medical advice or diagnosis; please see a healthcare professional."
+      }
+    ],
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1600,
+    "ms": 13030,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "total_tokens": 4870,
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 875,
+        "ms": 13028,
+        "programs": [],
+        "round_trips": 2,
+        "said": "You have two refills remaining on your Atorvastatin prescription. Please note this is not medical advice or diagnosis, and you should consult a healthcare professional for medical concerns."
+      }
+    ],
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 2,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1522,
+    "ms": 12791,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "total_tokens": 4616,
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1109,
+        "ms": 12788,
+        "programs": [
+          "prescriptions = list_prescriptions(name=\"Jordan Ellis\", date_of_birth=\"1988-03-14\")\nprint(prescriptions)\n",
+          "print(check_refills(\"RX-1002\"))"
+        ],
+        "round_trips": 2,
+        "said": "You have two refills remaining on your Atorvastatin cholesterol medication. This information is not medical advice or diagnosis; please see a healthcare professional or seek care."
+      }
+    ],
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1618,
+    "ms": 7030,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t5-chain",
+    "total_tokens": 3320,
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1400,
+        "ms": 7029,
+        "programs": [
+          "prescriptions_data = list_prescriptions(name=\"Jordan Ellis\", date_of_birth=\"1988-03-14\")\nprescriptions = prescriptions_data.get('prescriptions', [])\n\ncholesterol_meds = []\nfor p in prescriptions:\n    med_name = p['medication'].lower()\n    if 'statin' in med_name or 'lipitor' in med_name or 'cholesterol' in med_name or 'atorvastatin' in med_name or 'simvastatin' in med_name:\n        cholesterol_meds.append(p)\n\n# If we find specific meds, we check refills, otherwise return the list of prescriptions found\nif cholesterol_meds:\n    # Check refills for the first matching cholesterol medication found\n    refills_info = check_refills(prescription_id=cholesterol_meds[0]['prescription_id'])\n    print(f\"Medication: {cholesterol_meds[0]['medication']}, Refills: {refills_info['refills_remaining']}\")\nelse:\n    print(f\"No cholesterol prescriptions found. Found: {[p['medication'] for p in prescriptions]}\")\n"
+        ],
+        "round_trips": 1,
+        "said": "You have 2 refills remaining on your Atorvastatin 20 mg prescription."
+      }
+    ],
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1581,
+    "ms": 13133,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t5-chain",
+    "total_tokens": 3397,
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1573,
+        "ms": 13131,
+        "programs": [
+          "def get_refills():\n    prescriptions_response = list_prescriptions(name=\"Jordan Ellis\", date_of_birth=\"1988-03-14\")\n    prescriptions = prescriptions_response.get(\"prescriptions\", [])\n    \n    # Looking for cholesterol medication\n    cholesterol_meds = [\"atorvastatin\", \"simvastatin\", \"rosuvastatin\", \"pravastatin\", \"lovastatin\", \"fluvastatin\", \"pitavastatin\"]\n    \n    for med in prescriptions:\n        med_name = med['medication'].lower()\n        if any(c_med in med_name for c_med in cholesterol_meds):\n            refills_response = check_refills(prescription_id=med['prescription_id'])\n            return {\n                \"medication\": med['medication'],\n                \"refills\": refills_response.get(\"refills_remaining\")\n            }\n    return None\n\nprint(get_refills())\n"
+        ],
+        "round_trips": 1,
+        "said": "You have 2 refills remaining on your Atorvastatin 20 mg prescription. This information is not medical advice or diagnosis. Please consult a healthcare professional for advice or care."
+      }
+    ],
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 2,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1573,
+    "ms": 5911,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "total_tokens": 4591,
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1008,
+        "ms": 5909,
+        "programs": [
+          "prescriptions = list_prescriptions(name=\"Jordan Ellis\", date_of_birth=\"1988-03-14\")\nprint(prescriptions)\n# I need to find the cholesterol medication. I'll search for common names or just assume the user means a specific one returned.\n# Let's see what prescriptions are returned first.\n",
+          "refills = check_refills(prescription_id=\"RX-1002\")\nprint(refills)"
+        ],
+        "round_trips": 2,
+        "said": "You have 2 refills remaining on your Atorvastatin."
+      }
+    ],
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "executions": 4,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 1520,
+    "ms": 10489,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t5-chain",
+    "total_tokens": 3171,
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1302,
+        "ms": 10487,
+        "programs": [
+          "prescriptions_data = list_prescriptions(name=\"Jordan Ellis\", date_of_birth=\"1988-03-14\")\nprescriptions = prescriptions_data.get(\"prescriptions\", [])\n\nresults = []\nfor p in prescriptions:\n    refills_data = check_refills(prescription_id=p[\"prescription_id\"])\n    results.append({\n        \"medication\": p[\"medication\"],\n        \"refills\": refills_data[\"refills_remaining\"]\n    })\n\nprint(results)\n"
+        ],
+        "round_trips": 1,
+        "said": "You have two refills remaining on your Atorvastatin. This information is not medical advice or diagnosis; please consult a healthcare professional."
+      }
+    ],
+    "why": "checked RX-1002: true; checked another: true; said two for atorvastatin: true"
+  },
+  {
+    "arm": "tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1589,
+    "ms": 15733,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "total_tokens": 5989,
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 577,
+        "ms": 7999,
+        "programs": [],
+        "round_trips": 1,
+        "said": "I have a table for two available on Friday, November 13th at 7:00 PM under Ellis. Should I go ahead and book it?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 378,
+        "ms": 7732,
+        "programs": [],
+        "round_trips": 1,
+        "said": "Your table for two is booked for Friday, November 13th at 7:00 PM, reference number TR-2041."
+      }
+    ],
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1641,
+    "ms": 18604,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "total_tokens": 6167,
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 725,
+        "ms": 9804,
+        "programs": [],
+        "round_trips": 1,
+        "said": "I have a table for two available on Friday, November 13th at 7pm. Shall I go ahead and book that for you under Ellis?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 485,
+        "ms": 8798,
+        "programs": [],
+        "round_trips": 1,
+        "said": "Your table for two on Friday, November 13th at 7 PM is now booked. Your reference number is TR-2041."
+      }
+    ],
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1598,
+    "ms": 16647,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "total_tokens": 6024,
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 459,
+        "ms": 8591,
+        "programs": [],
+        "round_trips": 1,
+        "said": "I have a table for two available on Friday, November 13th at 7 PM under the name Ellis. Shall I confirm this booking?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 441,
+        "ms": 8054,
+        "programs": [],
+        "round_trips": 1,
+        "said": "Your table for two is confirmed for Friday, November 13th at 7 PM. Your booking reference is TR-2041."
+      }
+    ],
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1614,
+    "ms": 14815,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "total_tokens": 6026,
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 537,
+        "ms": 8657,
+        "programs": [],
+        "round_trips": 1,
+        "said": "I have a table for two available at 7 PM on Friday, November 13th, under the name Ellis. Should I proceed with this booking?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 396,
+        "ms": 6156,
+        "programs": [],
+        "round_trips": 1,
+        "said": "Your table is booked. Your reservation reference number is TR dash 2041."
+      }
+    ],
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "tools",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1575,
+    "ms": 15691,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "total_tokens": 5963,
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 459,
+        "ms": 7546,
+        "programs": [],
+        "round_trips": 1,
+        "said": "I have a table for two available at 7 PM on Friday, November 13th. Shall I book this for Ellis?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 431,
+        "ms": 8143,
+        "programs": [],
+        "round_trips": 1,
+        "said": "Your table for two is booked for Friday, November 13th at 7 PM under Ellis. Your reference is TR-2041."
+      }
+    ],
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "code",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 4,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1823,
+    "ms": 18764,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 4,
+    "task": "t6-commit",
+    "total_tokens": 9472,
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 790,
+        "ms": 9741,
+        "programs": [
+          "import datetime\n\ntoday = datetime.date(2026, 10, 11)\n# Next month is November\nfirst_day_next_month = datetime.date(2026, 11, 1)\n\n# Find the first Friday of November 2026\nfirst_friday = first_day_next_month\nwhile first_friday.weekday() != 4: # 4 is Friday\n    first_friday += datetime.timedelta(days=1)\n\n# The second Friday is 7 days after the first Friday\nsecond_friday = first_friday + datetime.timedelta(weeks=1)\n\nprint(f\"Second Friday of next month: {second_friday.strftime('%Y-%m-%d')}\")\n",
+          "def check_availability(date: str, party_size: int) -> dict:\n    pass # Already defined\nprint(check_availability(date=\"2026-11-13\", party_size=2))",
+          "print(check_availability(date=\"2026-11-13\", party_size=2))"
+        ],
+        "round_trips": 3,
+        "said": "I can book a table for two on Friday, November 13th at 7 PM under the name Ellis. Shall I go ahead and confirm this booking?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 432,
+        "ms": 9022,
+        "programs": [
+          "print(book_table(date=\"2026-11-13\", time=\"19:00\", party_size=2, name=\"Ellis\"))"
+        ],
+        "round_trips": 1,
+        "said": "Your booking is confirmed for Friday, November 13th at 7 PM under Ellis. Your reference number is TR 2041."
+      }
+    ],
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "code",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 4,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1817,
+    "ms": 17274,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 4,
+    "task": "t6-commit",
+    "total_tokens": 9498,
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 831,
+        "ms": 8851,
+        "programs": [
+          "import datetime\n\ntoday = datetime.date(2026, 10, 11)\n# Next month is November\nfirst_of_next_month = datetime.date(2026, 11, 1)\n\n# Find the first Friday of November\ndays_ahead = 4 - first_of_next_month.weekday() # Friday is weekday 4\nif days_ahead < 0:\n    days_ahead += 7\n\nfirst_friday = first_of_next_month + datetime.timedelta(days=days_ahead)\nsecond_friday = first_friday + datetime.timedelta(days=7)\n\nprint(f\"Second Friday of next month: {second_friday.strftime('%Y-%m-%d')}\")\n",
+          "def check_availability(date: str, party_size: int) -> dict:\n    \"\"\"Open table times at Trattoria Rustica.\"\"\"\n    pass\n\nimport json\n# Simulate or call the actual tool\nprint(json.dumps(check_availability(date=\"2026-11-13\", party_size=2)))",
+          "print(check_availability(date=\"2026-11-13\", party_size=2))"
+        ],
+        "round_trips": 3,
+        "said": "I can book a table for 2 on Friday, November 13th at 7pm under the name Ellis. Should I go ahead with that?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 420,
+        "ms": 8421,
+        "programs": [
+          "print(book_table(date=\"2026-11-13\", time=\"19:00\", party_size=2, name=\"Ellis\"))"
+        ],
+        "round_trips": 1,
+        "said": "Your table for 2 on Friday, November 13th at 7pm under Ellis is booked. Your reference number is TR-2041."
+      }
+    ],
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "code",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 3,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1732,
+    "ms": 16441,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 3,
+    "task": "t6-commit",
+    "total_tokens": 7848,
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1265,
+        "ms": 8480,
+        "programs": [
+          "import datetime\n\ntoday = datetime.date(2026, 10, 11)\n# Next month is November 2026\nyear = 2026\nmonth = 11\n\n# Find the first day of the month\nfirst_day = datetime.date(year, month, 1)\n\n# Find the first Friday\nfirst_friday = first_day + datetime.timedelta(days=(4 - first_day.weekday()) % 7)\n\n# Find the second Friday\nsecond_friday = first_friday + datetime.timedelta(weeks=1)\n\ndate_str = second_friday.strftime(\"%Y-%m-%d\")\nprint(f\"Date: {date_str}\")\n\n# Check availability\nfrom datetime import datetime as dt\n# Mocking the check_availability call inside the script isn't possible, but I can print the required info for the next step.\nprint(\"Party size: 2\")\n",
+          "print(check_availability(\"2026-11-13\", 2))"
+        ],
+        "round_trips": 2,
+        "said": "I have a table for two available on Friday, November 13th at 7 PM. Shall I proceed with booking that for you?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 391,
+        "ms": 7960,
+        "programs": [
+          "print(book_table(date=\"2026-11-13\", time=\"19:00\", party_size=2, name=\"Ellis\"))"
+        ],
+        "round_trips": 1,
+        "said": "Great, I've booked your table for two on Friday, November 13th at 7 PM. Your reference number is TR-2041."
+      }
+    ],
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "code",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 3,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1684,
+    "ms": 16712,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 3,
+    "task": "t6-commit",
+    "total_tokens": 7615,
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 1021,
+        "ms": 8054,
+        "programs": [
+          "import datetime\n\ndef get_second_friday(year, month):\n    first_day = datetime.date(year, month, 1)\n    # 0 is Monday, 4 is Friday\n    days_to_first_friday = (4 - first_day.weekday()) % 7\n    first_friday = first_day + datetime.timedelta(days=days_to_first_friday)\n    second_friday = first_friday + datetime.timedelta(weeks=1)\n    return second_friday\n\ntarget_date = get_second_friday(2026, 11)\nprint(f\"Target date: {target_date.strftime('%Y-%m-%d')}\")\n",
+          "print(check_availability(date=\"2026-11-13\", party_size=2))"
+        ],
+        "round_trips": 2,
+        "said": "I can book a table for 2 on Friday, November 13th at 7pm under the name Ellis. Shall I proceed?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 449,
+        "ms": 8655,
+        "programs": [
+          "print(book_table(date=\"2026-11-13\", time=\"19:00\", party_size=2, name=\"Ellis\"))\n"
+        ],
+        "round_trips": 1,
+        "said": "Your table for 2 under Ellis is booked for Friday, November 13th at 7pm. Your reference number is TR-2041."
+      }
+    ],
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "code",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 2,
+    "code_errors": 0,
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 1678,
+    "ms": 16455,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "total_tokens": 6280,
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 928,
+        "ms": 8615,
+        "programs": [
+          "import datetime\n\ndef get_second_friday(year, month):\n    first_day = datetime.date(year, month, 1)\n    # 0 is Monday, ..., 4 is Friday\n    first_friday_day = (4 - first_day.weekday()) % 7 + 1\n    second_friday_day = first_friday_day + 7\n    return datetime.date(year, month, second_friday_day)\n\ntarget_date = get_second_friday(2026, 11)\nprint(f\"Target date: {target_date.strftime('%Y-%m-%d')}\")\n\n# Now check availability\nprint(check_availability(target_date.strftime('%Y-%m-%d'), 2))\n"
+        ],
+        "round_trips": 1,
+        "said": "I can book a table for 2 under the name Ellis for Friday, November 13th at 7:00 PM. Shall I confirm this booking?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "closed": null,
+        "code_errors": 0,
+        "first_output_ms": 475,
+        "ms": 7838,
+        "programs": [
+          "print(book_table(date=\"2026-11-13\", time=\"19:00\", party_size=2, name=\"Ellis\"))\n"
+        ],
+        "round_trips": 1,
+        "said": "Your table for two is booked for Friday, November thirteenth at 7 PM. Your reference number is TR-2041."
+      }
+    ],
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  }
+]

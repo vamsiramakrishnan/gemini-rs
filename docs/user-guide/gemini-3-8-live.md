@@ -120,6 +120,13 @@ again after the resumed setup. Shrinking the declarations
 from twelve tools to one cut the prompt from about 1,650 to about 700 tokens
 per turn. Extended Thinking reported no such drop.
 
+An update does not change a reply the model is already forming. With
+`--only discovery` (five runs each), a tool declared before the question was
+used in that turn's reply 5 of 5 times; declared 0, 300 or 800 ms after it,
+with no call pending, 0 of 5 each. A pending call is the exception: declared
+before the response to a `load_capability` call the model made, the tool was
+used 5 of 5 times, at about 800 ms instead of 340 ms.
+
 To have each phase or flow step declare its own tools, set
 `SteeringMode::ContextUpdate` and let the runtime send these updates; see
 [steering modes](steering-modes.md#contextupdate-gemini-38-live).
@@ -196,6 +203,16 @@ Live::builder()
 Language hints (`language_codes`, BCP-47) reduce misdetected languages on
 short utterances. `custom_vocabulary` biases recognition toward product names,
 SKUs and proper nouns. Both are accepted on Google AI and Vertex AI.
+
+## Code execution
+
+Gemini 3.8 Live, 3.8 Live Extended Thinking and 2.5 native audio on Google AI
+refuse the built-in `codeExecution` tool: the session closes at setup (1007,
+"Code Execution tool is not supported for this model"; measured 2026-10-11).
+The setup message leaves the tool off for these models and connect logs it
+among the ignored settings. To have the model compute over tool results, use
+[code mode](code-mode.md): a `run_code` tool whose programs call your own
+tools, each call governed like a direct one.
 
 ## Tools: informative responses
 

@@ -417,6 +417,9 @@ fn rust_cargo_toml(spec: &SessionSpec, options: &ProjectOptions) -> String {
     {
         features.push("http-tools");
     }
+    if !spec.decisions.is_empty() {
+        features.push("ai-gateway");
+    }
     let features = features
         .iter()
         .map(|f| quoted(f))
@@ -462,7 +465,11 @@ fn rust_main(spec: &SessionSpec) -> String {
          //! declarations and tests. `src/tools.rs` implements its tools.\n\n\
          mod tools;\n\n",
     );
-    if !spec.requires_extraction() && !spec.requires_memory() {
+    let decides = !spec.decisions.is_empty();
+    // Extraction that names its model (`models.extraction`) is resolved by
+    // the spec; only unnamed extraction needs the environment's model.
+    let default_extraction = spec.requires_extraction() && spec.uses_default_extraction_model();
+    if !default_extraction && !spec.requires_memory() && !decides {
         out.push_str("use gemini_adk_fluent_rs::prelude::*;\n");
     } else {
         out.push_str("use std::sync::Arc;\n\nuse gemini_adk_fluent_rs::prelude::*;\n");
@@ -478,13 +485,23 @@ fn rust_main(spec: &SessionSpec) -> String {
          let spec = spec()?;\n    \
          let state = State::new();\n",
     );
-    let needs_more = spec.requires_extraction() || spec.requires_memory();
+    let needs_more = default_extraction || spec.requires_memory() || decides;
     if needs_more {
         out.push_str("    let resources = gemini_adk_fluent_rs::spec::SpecResources {\n");
-        if spec.requires_extraction() {
+        if default_extraction {
             out.push_str(
-                "        // The out-of-band model behind the spec's `extract` entries.\n        \
+                "        // The out-of-band model behind `extract` entries that name no model\n        \
+                 // (GEMINI_TEXT_MODEL, or gemini-flash-latest). Prefer models.extraction.\n        \
                  extraction_llm: Some(Arc::new(GeminiLlm::from_env()?)),\n",
+            );
+        }
+        if decides {
+            out.push_str(
+                "        // Jev on Vercel AI Gateway, answering the spec's `decisions`. Reads\n        \
+                 // AI_GATEWAY_API_KEY (for example from .env.local).\n        \
+                 decision_model: Some(Arc::new(\n            \
+                 gemini_adk_fluent_rs::gemini_adk_rs::decision::GatewayDecisionModel::from_env()?,\n        \
+                 )),\n",
             );
         }
         if spec.requires_memory() {
@@ -1430,6 +1447,28 @@ mod tests {
         // agent.json is the spec unchanged.
         let agent: Value = serde_json::from_str(file(&files, "agent.json")).unwrap();
         assert!(agent["tools"][0].get("mcp").is_none());
+    }
+
+    #[test]
+    fn named_extraction_needs_no_environment_model() {
+        let mut spec = spec();
+        spec.extract.push(
+            serde_json::from_value(json!({
+                "name": "notes", "instruction": "Notes.", "schema": { "type": "object" }
+            }))
+            .unwrap(),
+        );
+        let unnamed = spec.to_project(ProjectLanguage::Rust);
+        assert!(file(&unnamed, "src/main.rs").contains("extraction_llm: Some("));
+
+        spec.models.extraction = Some("gemini-3.1-flash-lite".into());
+        let named = spec.to_project(ProjectLanguage::Rust);
+        let main = file(&named, "src/main.rs");
+        assert!(!main.contains("extraction_llm"), "{main}");
+        assert!(
+            !main.contains("use std::sync::Arc;"),
+            "unused import: {main}"
+        );
     }
 
     #[test]

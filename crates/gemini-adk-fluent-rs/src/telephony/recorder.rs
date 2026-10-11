@@ -200,7 +200,9 @@ mod tests {
         let len = u32::from_le_bytes(bytes[40..44].try_into().unwrap()) as usize;
         assert_eq!(bytes.len(), 44 + len);
         let frames = bytes[44..]
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|f| {
                 (
                     i16::from_le_bytes([f[0], f[1]]),

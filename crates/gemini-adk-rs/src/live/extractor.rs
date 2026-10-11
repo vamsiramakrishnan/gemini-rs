@@ -132,6 +132,14 @@ impl FieldPromotion {
     }
 }
 
+/// Whether the newest turn of `window` has no caller words while an earlier
+/// one does: a turn the caller said nothing in, with input transcription on.
+/// Extracting it cannot find anything new from the caller.
+pub(crate) fn nothing_new_from_caller(window: &[TranscriptTurn]) -> bool {
+    window.last().is_some_and(|t| t.user.trim().is_empty())
+        && window.iter().any(|t| !t.user.trim().is_empty())
+}
+
 /// Strip markdown code fences from LLM output.
 ///
 /// Handles `` ```json\n...\n``` ``, `` ```\n...\n``` ``, and bare JSON.
@@ -338,10 +346,16 @@ const NULL_GUIDANCE: &str = "\n\nUse null for any field the transcript does not 
 
 /// Appended when some fields are already in state: re-reading the window
 /// every turn, the model would otherwise re-state known values in new words,
-/// and each re-statement would read as a correction.
+/// and each re-statement would read as a correction. The latest turn is also
+/// quoted after the transcript: told only to compare with "the latest turn",
+/// `gemini-3.5-flash-lite` without thinking re-stated a known slot in 17 of
+/// 20 turns that changed nothing (7 in other words, read as corrections);
+/// with the turn quoted, in none of 30, and it still caught a real change in
+/// 30 of 30.
 const KNOWN_GUIDANCE: &str = "\n\nSome fields are already known (listed before the transcript). \
-     Return a known field only if the user's latest turn changes it; otherwise return null \
-     for it, even if the transcript mentions it again in other words.";
+     Compare each known field only with the user's latest turn, quoted after the transcript: \
+     return it only if that turn gives a different value. Agreeing, confirming, repeating or \
+     rewording a known value is not a change: return null.";
 
 /// The schema with every top-level property allowed to be null, so the
 /// model can say "not stated" instead of inventing a value of the right type.
@@ -397,9 +411,17 @@ pub struct LlmExtractor {
     /// Thinking budget sent with each request; `None` leaves the model's
     /// default.
     thinking_budget: Option<u32>,
-    /// Set once the model rejects `thinking_budget`, so it is not sent again.
-    budget_rejected: std::sync::atomic::AtomicBool,
+    /// How far down [`FALLBACK_THINKING_BUDGET`] the model has pushed the
+    /// budget: 0 sends `thinking_budget`, 1 the fallback, 2 none. Kept so a
+    /// rejected budget is not sent again.
+    budget_step: std::sync::atomic::AtomicU8,
 }
+
+/// The budget sent when a model rejects a thinking budget of 0, such as
+/// `gemini-3.5-flash-lite` ("Request contains an invalid argument"). That
+/// model accepts budgets from 1, and below about 1024 it does not think at
+/// all, so this keeps thinking off at the smallest budget it accepts.
+pub const FALLBACK_THINKING_BUDGET: u32 = 64;
 
 impl LlmExtractor {
     /// Create a new LLM-backed extractor.
@@ -425,7 +447,7 @@ impl LlmExtractor {
             trigger: ExtractionTrigger::EveryTurn,
             promotion_rules: Vec::new(),
             thinking_budget: Some(0),
-            budget_rejected: std::sync::atomic::AtomicBool::new(false),
+            budget_step: std::sync::atomic::AtomicU8::new(0),
         }
     }
 
@@ -435,9 +457,10 @@ impl LlmExtractor {
     /// pipeline waits for it, so thinking costs seconds of latency on every
     /// turn. Measured on `gemini-flash-latest`, a budget of 0 cut a short
     /// extraction from 7.7 s to 2.3 s with the same results. `None` leaves
-    /// the model's default. When a model rejects the budget (some only work
-    /// in thinking mode), the extractor retries without it and stops sending
-    /// it.
+    /// the model's default. When a model rejects a budget of 0 (some only
+    /// work in thinking mode, and `gemini-3.5-flash-lite` needs at least 1),
+    /// the extractor retries with [`FALLBACK_THINKING_BUDGET`], then without
+    /// a budget, and keeps sending the first one the model accepted.
     pub fn with_thinking_budget(mut self, budget: Option<u32>) -> Self {
         self.thinking_budget = budget;
         self
@@ -511,16 +534,26 @@ impl LlmExtractor {
         known: &serde_json::Map<String, Value>,
     ) -> Result<Value, LlmError> {
         let transcript = Self::format_transcript(window);
-        let (preamble, guidance) = if known.is_empty() {
-            (String::new(), "")
+        let (preamble, latest, guidance) = if known.is_empty() {
+            (String::new(), String::new(), "")
         } else {
+            let latest = window
+                .iter()
+                .rev()
+                .map(|t| t.user.trim())
+                .find(|u| !u.is_empty())
+                .unwrap_or_default();
             (
                 format!("Already known: {}\n\n", Value::Object(known.clone())),
+                format!(
+                    "The user's latest turn: {}\n\n",
+                    Value::String(latest.to_string())
+                ),
                 KNOWN_GUIDANCE,
             )
         };
         let mut request = LlmRequest::from_text(format!(
-            "{preamble}Transcript:\n{transcript}\nExtract the requested information."
+            "{preamble}Transcript:\n{transcript}\n{latest}Extract the requested information."
         ));
         request.system_instruction = Some(format!("{}{NULL_GUIDANCE}{guidance}", self.prompt));
 
@@ -554,27 +587,36 @@ impl LlmExtractor {
     /// extraction loses what the caller said in that turn.
     async fn generate(&self, mut request: LlmRequest) -> Result<LlmResponse, LlmError> {
         use std::sync::atomic::Ordering;
-        let budget = self
-            .thinking_budget
-            .filter(|_| !self.budget_rejected.load(Ordering::Relaxed));
-        request.thinking_budget = budget;
-        match self.llm.generate(request.clone()).await {
-            Err(LlmError::Api { status: 400, .. }) if budget.is_some() => {
-                tracing::warn!(
-                    extractor = %self.name,
-                    "the extraction model rejected thinking budget {budget:?}; \
-                     sending requests without it"
-                );
-                self.budget_rejected.store(true, Ordering::Relaxed);
-                request.thinking_budget = None;
-                self.llm.generate(request).await
+        loop {
+            let step = self.budget_step.load(Ordering::Relaxed);
+            let budget = match step {
+                0 => self.thinking_budget,
+                1 => Some(FALLBACK_THINKING_BUDGET),
+                _ => None,
+            };
+            request.thinking_budget = budget;
+            match self.llm.generate(request.clone()).await {
+                Err(LlmError::Api { status: 400, .. }) if budget.is_some() => {
+                    let next = if step == 0 && budget != Some(FALLBACK_THINKING_BUDGET) {
+                        1
+                    } else {
+                        2
+                    };
+                    tracing::warn!(
+                        extractor = %self.name,
+                        "the extraction model rejected thinking budget {budget:?}; \
+                         trying {:?}",
+                        if next == 1 { Some(FALLBACK_THINKING_BUDGET) } else { None }
+                    );
+                    self.budget_step.fetch_max(next, Ordering::Relaxed);
+                }
+                Err(e) if e.is_retryable() => {
+                    tracing::warn!(extractor = %self.name, "extraction failed ({e}); retrying once");
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    return self.llm.generate(request).await;
+                }
+                other => return other,
             }
-            Err(e) if e.is_retryable() => {
-                tracing::warn!(extractor = %self.name, "extraction failed ({e}); retrying once");
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                self.llm.generate(request).await
-            }
-            other => other,
         }
     }
 
@@ -615,10 +657,7 @@ impl TurnExtractor for LlmExtractor {
         // the next tool call by seconds. Only when the window shows the
         // caller's words are transcribed at all, so a session without input
         // transcription still extracts.
-        if self.trigger == ExtractionTrigger::EveryTurn
-            && window.last().is_some_and(|t| t.user.trim().is_empty())
-            && window.iter().any(|t| !t.user.trim().is_empty())
-        {
+        if self.trigger == ExtractionTrigger::EveryTurn && nothing_new_from_caller(window) {
             return false;
         }
         if self.min_words == 0 {
@@ -930,6 +969,11 @@ mod tests {
         let second = text(&requests[1]);
         assert!(second.starts_with("Already known: "), "{second}");
         assert!(
+            second.contains("The user's latest turn: \"seven is perfect\""),
+            "{second}"
+        );
+        assert!(!text(&requests[0]).contains("latest turn"));
+        assert!(
             second.contains(r#""party_size":4"#) && second.contains(r#""slot":"tomorrow at 7 pm""#)
         );
         assert!(
@@ -1072,13 +1116,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_rejected_thinking_budget_is_dropped_for_good() {
+    async fn a_rejected_budget_of_zero_falls_back_to_the_smallest_accepted() {
         let llm = Scripted::new(vec![Err(bad_request()), Ok(r#"{"a": 1}"#), Ok("{}")]);
         let extractor = LlmExtractor::new("x", llm.clone(), "Extract.", 2);
         let window = make_turns(&[("hi", "hello")]);
         assert_eq!(extractor.extract(&window).await.unwrap()["a"], 1);
         extractor.extract(&window).await.unwrap();
-        assert_eq!(llm.budgets(), [Some(0), None, None]);
+        assert_eq!(
+            llm.budgets(),
+            [
+                Some(0),
+                Some(FALLBACK_THINKING_BUDGET),
+                Some(FALLBACK_THINKING_BUDGET)
+            ],
+            "the accepted fallback is kept"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_model_that_rejects_every_budget_gets_none() {
+        let llm = Scripted::new(vec![
+            Err(bad_request()),
+            Err(bad_request()),
+            Ok(r#"{"a": 1}"#),
+            Ok("{}"),
+        ]);
+        let extractor = LlmExtractor::new("x", llm.clone(), "Extract.", 2);
+        let window = make_turns(&[("hi", "hello")]);
+        assert_eq!(extractor.extract(&window).await.unwrap()["a"], 1);
+        extractor.extract(&window).await.unwrap();
+        assert_eq!(
+            llm.budgets(),
+            [Some(0), Some(FALLBACK_THINKING_BUDGET), None, None]
+        );
+
+        // A configured budget the model rejects goes straight to none when it
+        // is the fallback already.
+        let llm = Scripted::new(vec![Err(bad_request()), Ok("{}")]);
+        let extractor = LlmExtractor::new("x", llm.clone(), "Extract.", 2)
+            .with_thinking_budget(Some(FALLBACK_THINKING_BUDGET));
+        extractor.extract(&window).await.unwrap();
+        assert_eq!(llm.budgets(), [Some(FALLBACK_THINKING_BUDGET), None]);
     }
 
     #[tokio::test]

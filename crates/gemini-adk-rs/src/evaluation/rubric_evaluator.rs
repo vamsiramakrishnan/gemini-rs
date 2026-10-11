@@ -175,7 +175,8 @@ fn try_parse_json(text: &str) -> Option<(f64, String)> {
 
     let score = if let Some(overall) = v["overall_score"].as_f64() {
         overall.clamp(0.0, 1.0)
-    } else if let Some(scores) = v["scores"].as_array() {
+    } else {
+        let scores = v["scores"].as_array()?;
         // Average only the entries that are actually numbers. Dividing by
         // `scores.len()` counted entries the numerator never received — a judge
         // emitting `[0.9, "n/a"]` for a criterion it could not score scored the
@@ -191,8 +192,6 @@ fn try_parse_json(text: &str) -> Option<(f64, String)> {
             return None;
         }
         graded.iter().sum::<f64>() / graded.len() as f64
-    } else {
-        return None;
     };
 
     let explanation = v["explanation"]

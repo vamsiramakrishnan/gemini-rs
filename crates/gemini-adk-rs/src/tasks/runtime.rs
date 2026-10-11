@@ -179,6 +179,25 @@ impl TaskRuntime {
                     )));
                 }
             }
+            if let Some(code) = &skill.code {
+                if let Some(missing) = code
+                    .function_list()
+                    .iter()
+                    .find(|f| !skill.tools.iter().any(|t| t.name == f.name))
+                {
+                    return Err(err(format!(
+                        "skill '{}' code tool exposes '{}', which is not one of its tools",
+                        skill.name, missing.name
+                    )));
+                }
+                if skill.tools.iter().any(|t| t.name == code.tool()) {
+                    return Err(err(format!(
+                        "skill '{}' code tool '{}' is also one of its tools",
+                        skill.name,
+                        code.tool()
+                    )));
+                }
+            }
             let name = skill.name.clone();
             if catalog.insert(name.clone(), Arc::new(skill)).is_some() {
                 return Err(err(format!("duplicate installed skill '{name}'")));
@@ -929,8 +948,67 @@ impl TaskRuntime {
                 .collect(),
         }
     }
-    /// Foreground skill instructions and current governed posture/grounding.
+    /// Foreground skill instructions and current governed posture/grounding:
+    /// [`foreground_brief`](Self::foreground_brief) followed by
+    /// [`foreground_context`](Self::foreground_context).
     pub fn foreground_instruction(&self) -> Option<String> {
+        let brief = self.foreground_brief()?;
+        Some(match self.foreground_context() {
+            Some(context) if !context.is_empty() => format!("{brief}\n{context}"),
+            _ => brief,
+        })
+    }
+
+    /// The part of the foreground instruction that changes only when the
+    /// foreground task or its revision does: the task's identity and its
+    /// skill's instruction. Under `contextUpdate` it rides the system
+    /// instruction, which an update replaces, rather than a context turn,
+    /// which stays in the conversation.
+    pub fn foreground_brief(&self) -> Option<String> {
+        let task = self.tasks.get(self.foreground.as_ref()?)?;
+        Some(format!(
+            "Task {} / skill {}@{} / revision {}\n{}",
+            task.id.0, task.skill.name, task.skill.version, task.revision, task.skill.instruction
+        ))
+    }
+
+    /// Give the installed skill `name` a code tool, for tests.
+    #[cfg(all(test, feature = "code-mode"))]
+    pub(crate) fn set_skill_code(&mut self, name: &str, code: crate::code_mode::CodeMode) {
+        if let Some(skill) = self.skills.get_mut(name) {
+            Arc::make_mut(skill).code = Some(code);
+        }
+    }
+
+    /// The code tool of the skill `name`, if it has one.
+    pub fn skill_code(&self, name: &str) -> Option<&crate::code_mode::CodeMode> {
+        self.skills.get(name)?.code.as_ref()
+    }
+
+    /// The foreground task's skill and the tools it offers the model now:
+    /// those its flow would admit once their `never(..).until(..)` guards
+    /// hold, as [`FlowStack::offers_tool`] decides, or every tool of a skill
+    /// without a flow. `None` with no foreground task.
+    pub fn foreground_offer(&self) -> Option<(String, Vec<String>)> {
+        let task = self.tasks.get(self.foreground.as_ref()?)?;
+        let tools = task
+            .skill
+            .tools
+            .iter()
+            .map(|tool| tool.name.clone())
+            .filter(|name| {
+                task.flow
+                    .as_ref()
+                    .is_none_or(|flow| flow.offers_tool(name, &task.state))
+            })
+            .collect();
+        Some((task.skill.name.clone(), tools))
+    }
+
+    /// The part of the foreground instruction that changes as the task runs:
+    /// service contexts, extracted, computed and remembered values, active
+    /// postures and grounds, input and results. Empty when there is none.
+    pub fn foreground_context(&self) -> Option<String> {
         let task = self.tasks.get(self.foreground.as_ref()?)?;
         let refreshing = task
             .services
@@ -954,13 +1032,7 @@ impl TaskRuntime {
             None
         };
         let state = visible.as_ref().unwrap_or(&task.state);
-        let mut parts = vec![
-            format!(
-                "Task {} / skill {}@{} / revision {}",
-                task.id.0, task.skill.name, task.skill.version, task.revision
-            ),
-            task.skill.instruction.clone(),
-        ];
+        let mut parts = Vec::new();
         if let Some(services) = &task.services {
             if refreshing {
                 parts.push(

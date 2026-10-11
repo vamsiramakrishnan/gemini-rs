@@ -65,8 +65,8 @@ use crate::voice::{Playback, VoicePump, pump};
 pub enum SipError {
     /// Binding or socket I/O failed.
     Io(std::io::Error),
-    /// The SIP stack reported an error.
-    Sip(rsipstack::Error),
+    /// The SIP stack reported an error (boxed: it is large).
+    Sip(Box<rsipstack::Error>),
     /// The INVITE carried no answerable audio offer (no `m=audio`, port 0).
     NoAudioOffer,
     /// The offer had audio but no G.711 codec this agent can speak.
@@ -105,7 +105,7 @@ impl From<std::io::Error> for SipError {
 
 impl From<rsipstack::Error> for SipError {
     fn from(e: rsipstack::Error) -> Self {
-        Self::Sip(e)
+        Self::Sip(Box::new(e))
     }
 }
 
@@ -128,7 +128,7 @@ impl SipAgent {
         let transport_layer = TransportLayer::new(cancel.child_token());
         let udp = UdpConnection::create_connection(addr, None, Some(cancel.child_token()))
             .await
-            .map_err(SipError::Sip)?;
+            .map_err(SipError::from)?;
         let sip_port = udp
             .get_addr()
             .addr
@@ -148,13 +148,13 @@ impl SipAgent {
             .transport_layer
             .serve_listens()
             .await
-            .map_err(SipError::Sip)?;
+            .map_err(SipError::from)?;
         let inner = endpoint.inner.clone();
         tokio::spawn(async move {
             let _ = inner.serve().await;
         });
 
-        let incoming = endpoint.incoming_transactions().map_err(SipError::Sip)?;
+        let incoming = endpoint.incoming_transactions().map_err(SipError::from)?;
         let dialog_layer = Arc::new(DialogLayer::new(endpoint.inner.clone()));
 
         Ok(SipAgent {
@@ -619,7 +619,7 @@ impl IncomingCall {
         };
         self.dialog
             .accept(None, Some(answer.into_bytes()))
-            .map_err(SipError::Sip)?;
+            .map_err(SipError::from)?;
         let _ = handle.state().set(bridge::KEY_CALLER, self.from.clone());
 
         let cancel = CancellationToken::new();

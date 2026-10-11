@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.93.1"
+          toolchain: "1.99.0"
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       # Before the first workspace build, not just before the semver check: any
@@ -84,7 +84,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.93.1"
+          toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@v2
 
       # ── Helper: publish one crate, then poll until it appears in the index ──

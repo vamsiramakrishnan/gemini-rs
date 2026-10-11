@@ -54,7 +54,7 @@ impl Live {
                 soft_turn_timeout_ms: self
                     .soft_turn_timeout
                     .map(|timeout| timeout.as_millis() as u64),
-                steering_mode: format!("{:?}", self.steering_mode),
+                steering_mode: format!("{:?}", self.steering_mode.unwrap_or_default()),
                 context_delivery: format!("{:?}", self.context_delivery),
                 tool_advisory: self.tool_advisory,
                 telemetry_interval_ms: self

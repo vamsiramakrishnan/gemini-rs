@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+pub mod env;
 pub mod evaluate;
 pub mod live;
 pub mod report;

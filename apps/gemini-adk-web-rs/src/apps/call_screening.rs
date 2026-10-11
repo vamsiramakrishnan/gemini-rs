@@ -529,13 +529,12 @@ impl DemoApp for CallScreening {
                                         state.set("call_transferred", true);
                                     }
                                 }
-                                "block_caller" => {
+                                "block_caller"
                                     if r.response.get("status").and_then(|v| v.as_str())
                                         == Some("blocked")
-                                    {
+                                    => {
                                         state.set("caller_blocked", true);
                                     }
-                                }
                                 _ => {}
                             })
                             .collect()

@@ -173,6 +173,19 @@ Writes a transcript, a stereo recording (collector left, caller right, so crosst
 - **Features:** 24→16 kHz resampling, realtime-paced jitter buffer, open-line silence so VAD can close a turn, barge-in flush, full duplex on purpose
 - **Costs money:** two concurrent native-audio sessions for the wall-clock duration of the call
 
+### ai-gateway-jev (TypeScript, AI SDK)
+
+One Jev decision through Vercel AI Gateway with the AI SDK: a boolean, a choice
+and a score about one caller turn, with latency and usage. Needs
+`AI_GATEWAY_API_KEY` in `.env.local` and paid Gateway credits.
+
+```bash
+cd examples/ai-gateway-jev && npm install && npm run decide
+```
+
+The Rust integration is `gemini_adk_rs::decision`; see
+[Decision Models (Jev)](../docs/user-guide/decisions.md).
+
 ### context-update-spike (L0 wire)
 
 Six live probes of `contextUpdate`, the message that replaces the declared tools and the system instruction mid-session. Each probe opens its own session over a raw transport, so it controls exactly which frame goes out when. It sends the update even where the session codec would refuse it, so it reports what the server does: is the update accepted between turns, while a tool call is pending, and while the model is speaking? Does the model see only the new tools? Which tools survive a resume? How do prompt tokens move when the tool list shrinks?

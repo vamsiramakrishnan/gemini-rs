@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Code mode: programs over your own tools.** `Live::code_mode(CodeMode)`,
+  `SessionSpec.code` and `SkillSpec.code` give the model `run_code`: a short
+  Python program whose functions are the session's tools, run in
+  [Monty](https://github.com/pydantic/monty). The model reads only the
+  program's final value. Every call a program makes goes down the same path
+  as a direct call (phase tools, decision gate, flow gate, middleware, the
+  tool, the flow advance); a refused call raises `RuntimeError` in the
+  program, each call is recorded as a tool execution, and a barge-in cancels
+  the program. The tool is declared with Python stubs generated from the
+  tools' declarations (`ToolSpec.returns`, or a mock's response, gives the
+  result shape); under `ContextUpdate` steering it lists only the functions
+  the flow offers. Commits are left out by default. Limits bound calls,
+  interpreter time, wall time, output and (in worker processes) memory. See
+  [code mode](docs/user-guide/code-mode.md).
+- **Two sandboxes.** `InProcess` (feature `code-mode`, on by default) runs
+  Monty on a blocking thread; it cannot bound memory, and `'a' * 10**10` can
+  abort the process. `MontyPool` (feature `code-pool`) runs programs in Monty
+  worker processes with a memory cap and hard deadlines, where the same
+  program ends only its worker. `SpecResources::code_sandbox` picks one for a
+  spec, and `adk spec run` uses a pool when `MONTY_BIN` is set.
+- **Code mode in skills.** A skill's code tool, `{skill}__run_code`, calls
+  the skill's tools by their local names; each call is a task invocation
+  governed by the skill's flow, and its receipt moves the task on before the
+  program reads the result.
+- `evals/code-mode` runs the same ten tasks through the SDK (`sdk-tools`,
+  `sdk-code`, `sdk-hybrid`), next to the raw-protocol arms.
 - **Replace tools and the instruction mid-session.**
   `SessionHandle::update_context(ContextUpdate)` sends a `contextUpdate`
   message, which replaces the declared tools, the system instruction, or
@@ -24,6 +50,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resume, and its effect on prompt tokens.
 - **Breaking:** `SessionCommand` has a new variant, `UpdateContext`. A
   `match` over `SessionCommand` outside this crate needs an arm for it.
+- **Skills declare only what the foreground task needs.** On a model that
+  accepts `contextUpdate`, a session of skills declares `task_control` and
+  each skill's typed `start_{skill}` at connect; starting or resuming a task
+  declares its skill's flow-offered tools and adds its instruction to the
+  system instruction before the call's response, so the model uses them in
+  the same turn. The task context turn no longer repeats the skill
+  instruction. Setting another steering mode keeps every tool declared. See
+  [skills and tasks](docs/user-guide/skills-and-tasks.md#what-the-model-is-offered).
+- **Typed skill entry points.** Every skill has `start_{skill}`, its inputs
+  as parameters. Given only `task_control`'s free-form `input`, Gemini 3.8
+  Live left it out and retried the same failing start in a loop.
+- **A flow offers what one decision could open.** Under `ContextUpdate`
+  steering, the tools of steps one `decided` atom away, and of digressions
+  whose trigger is a decision, are declared with the active steps'; the gate
+  asks those questions when such a tool is called and admits it only if the
+  step opened. `Guard::possible` evaluates a guard with decisions unknown;
+  `FlowMonitor::frontier_steps` lists the steps. A tool declared after the
+  caller's turn ended was not used in that turn's reply (0 of 15 on Gemini
+  3.8 Live). See
+  [steering modes](docs/user-guide/steering-modes.md#what-a-flow-offers).
+- **Breaking:** `FlowStack::gate_scope` takes the session state, to find the
+  steps a called tool would open.
+
+### Changed
+
+- **Breaking: the minimum Rust is 1.99** (was 1.93), and the checked-in
+  toolchain pins 1.99.0. Code mode runs programs in Monty, which needs it.
+  `SipError::Sip` now boxes the SIP stack's error.
+
+### Fixed
+
+- **Code execution no longer ends a Live session at setup.** Gemini 3.8 Live,
+  3.8 Live Extended Thinking and 2.5 native audio on Google AI close the
+  session over the `codeExecution` tool (1007). The setup message leaves it
+  off for them, `SessionConfig::ignored_settings()` lists
+  `tools.codeExecution` so connect warns, and
+  `SessionConfig::supports_code_execution()` reports support.
+  `LiveModelProfile` gains `code_execution` and `GEMINI_2_5_NATIVE_AUDIO`.
+  Text agents are unaffected.
 
 ## [4.0.0] - 2026-10-02
 

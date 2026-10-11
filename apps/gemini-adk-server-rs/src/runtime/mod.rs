@@ -340,7 +340,7 @@ impl Runtime {
         match self
             .gauge
             .active
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (n < max).then_some(n + 1)
             }) {
             Ok(_) => {

@@ -91,6 +91,7 @@ fn skill(counter: Arc<AtomicUsize>, commit: bool, fail: bool) -> CompiledSkill {
         project_output: Some(Arc::new(|state| {
             Ok(json!({"value": state.get_raw("value")}))
         })),
+        code: None,
     }
 }
 fn runtime(counter: Arc<AtomicUsize>, commit: bool, fail: bool) -> TaskRuntime {

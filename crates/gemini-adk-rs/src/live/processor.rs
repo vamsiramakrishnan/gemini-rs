@@ -364,6 +364,13 @@ pub(crate) struct ControlPlaneConfig {
     /// [`SteeringMode::ContextUpdate`] on a model that accepts it. `None`
     /// otherwise: then tools are declared once, at connect.
     pub tool_scope: Option<Arc<super::tool_scope::ToolScope>>,
+    /// Every task tool declaration and the names declared now, in a task
+    /// session on a model that accepts `contextUpdate`. `None` otherwise:
+    /// then every skill's tools are declared at connect.
+    pub task_scope: Option<Arc<super::tool_scope::ToolScope>>,
+    /// The session's code tool: the runtime runs its programs, each call
+    /// down the governed path. `None` without code mode.
+    pub code_mode: Option<Arc<crate::code_mode::CodeMode>>,
     /// Shared pending context buffer for deferred delivery (None when Immediate).
     /// Must be the same Arc given to the DeferredWriter so the control lane
     /// can push context and the DeferredWriter can drain it.
@@ -379,6 +386,9 @@ pub(crate) struct ControlPlaneConfig {
     /// the control lane advances it. Lock briefly; never hold the guard across
     /// an `await`.
     pub flow: Option<crate::flow::SharedFlowStack>,
+    /// Questions a decision model answers about the conversation, asked at
+    /// the turn boundary and before tools are admitted.
+    pub decisions: Option<Arc<crate::decision::Decisions>>,
     /// Task runtime, exclusively advanced by the control lane.
     pub tasks: Option<crate::tasks::TaskRuntime>,
     /// Read-only observation cache shared with LiveHandle.
@@ -445,9 +455,12 @@ impl Default for ControlPlaneConfig {
             session_id: None,
             tool_advisory: true,
             tool_scope: None,
+            task_scope: None,
+            code_mode: None,
             pending_context: None,
             middleware: Arc::new(crate::middleware::MiddlewareChain::new()),
             flow: None,
+            decisions: None,
             tasks: None,
             task_status: None,
             delivery: DeliveryConfig::default(),

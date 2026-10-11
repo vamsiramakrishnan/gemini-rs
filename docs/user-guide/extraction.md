@@ -191,9 +191,9 @@ its schema. The runtime also adds three things:
   state a field. Without this, the model fills fields nobody mentioned with
   placeholders such as `"unknown"`, `""` or `0`.
 - **Known values.** When the extractor runs with access to state, the values
-  already promoted for its fields are listed as `Already known: {...}`.
-  The model returns a known field only when the caller's latest words change
-  it. A value equal to the known one apart from case, spacing or punctuation
+  already promoted for its fields are listed as `Already known: {...}`, and
+  the caller's latest turn is quoted after the transcript. The model returns
+  a known field only when that turn gives a different value. A value equal to the known one apart from case, spacing or punctuation
   (`"7 pm"` and `"7 PM"`) is not promoted again, so it is not taken for a
   correction.
 - **No thinking.** Requests send a thinking budget of 0. The turn pipeline
@@ -207,10 +207,95 @@ its schema. The runtime also adds three things:
 A transient failure (HTTP 5xx, 429 or a transport error) is retried once
 after 300 ms. A failed extraction loses what the caller said in that turn.
 
-`gemini-flash-lite-latest` answers in under a second. In testing it also
-marked "Seven o'clock is perfect", said when picking a time, as agreeing to
-book. Use it only for fields where that kind of mistake is harmless, not for
-confirmations or intents.
+### Choosing the extraction model
+
+Name the model. In a spec, `models.extraction` sets it for every `extract`
+entry, and an entry's own `model` overrides it; `models.extraction_thinking_budget`
+and an entry's `thinking_budget` set the budget the same way:
+
+```json
+"models": { "extraction": "gemini-3.5-flash-lite", "extraction_thinking_budget": 64 },
+"extract": [
+  { "name": "caller_identity", "instruction": "...", "schema": { ... } },
+  { "name": "notes", "model": "gemini-3.5-flash", "thinking_budget": 0, "instruction": "...", "schema": { ... } }
+]
+```
+
+A `gemini-*` name runs on `GeminiLlm`. `SpecResources::models`, an
+`LlmRegistry`, resolves any other name, such as a model served elsewhere,
+and takes precedence. An entry that names no model runs on
+`SpecResources::extraction_llm`; `adk spec run` creates it from
+`GEMINI_TEXT_MODEL`, else `gemini-flash-latest`. `adk spec check` warns
+(`unpinned_extraction_model`) when extraction names no model, and its fix
+pins `gemini-3.5-flash-lite` with a thinking budget of 64.
+
+`tests/extraction_latency.rs` replays the pharmacy fixture's three
+extractors over the turn "I need a refill of my Lisinopril", all three at
+once as the turn pipeline runs them, six turns at a time (18 concurrent
+requests), through `LlmExtractor`, and checks the name, date of birth,
+medication and signals:
+
+| Model | Turn p50 / p90 / p99 / max | Correct |
+|---|---|---|
+| `gemini-3.5-flash-lite`, budget 64 | 0.67 / 0.85 / 1.16 / 1.18 s | 60/60 |
+| `gemini-3.1-flash-lite`, budget 0 | 1.0 / 1.3 / 1.5 / 1.7 s | 60/60 |
+| `gemini-3.5-flash` | 1.1 / 1.9 / 3.3 / 5.7 s | 60/60 |
+| `gemini-flash-latest` (`gemini-3.8-flash`) | 6.7 / 19.5 / 49.1 / 62.2 s | 60/60 |
+| `gemini-2.5-flash-lite` | 0.4 / 0.7 / 0.9 / 1.0 s | 0/60 (drops the date of birth) |
+
+`gemini-flash-latest` is a rolling alias: it served `gemini-3.8-flash` when
+this was measured, and its latency changes when the alias moves. With three
+turns at a time it took 3.3 s at the median and 9 s at most; under load its
+tail reaches the 49 and 58 s turns seen in live runs. Every call succeeded
+on the first try: the time is the model's.
+
+Run the probe against your own extractors before switching:
+
+```text
+EXTRACTION_MODELS=gemini-3.5-flash-lite EXTRACTION_THINKING_BUDGET=64 \
+  cargo test -p gemini-adk-fluent-rs --test extraction_latency -- --ignored --nocapture
+```
+
+### `gemini-3.5-flash-lite`
+
+- **Thinking.** It rejects `thinkingBudget: 0` ("Request contains an invalid
+  argument") and accepts budgets from 1. Below about 1024 it does not think
+  at all (0 thought tokens at 1, 64, 128, 512, 768 and 1000); from 1024 it
+  thinks about 550 tokens and takes about 2 s. `thinkingLevel` `minimal` and
+  `low` do not think either; `medium` thinks about 520 tokens (2 s) and
+  `high` about 1,400 (4.6 s). Send 64: it keeps thinking off at the smallest
+  budget the model accepts. Without a configured budget the extractor sends
+  0, and on the rejection resends at 64, then with none, once per
+  extractor.
+- **Instructions are read literally without thinking.** The pharmacy
+  fixture once said "Leave it out until they have picked one." The caller
+  said "I need a refill of my lisinopril", and the agent replied "I found
+  two prescriptions: Lisinopril and Atorvastatin. Which one would you like
+  to refill today?" Without thinking the model took the agent's question as
+  proof that nothing had been picked: lisinopril in 6 of 20 runs (0 of 20 at
+  budgets 64 to 1000). Without the agent's question, or with the agent
+  acknowledging the pick, it was right 20 of 20; with medium thinking, 20 of
+  20, and its thought summary weighed exactly that question. Saying what
+  counts fixed it at 64, 30 of 30: "A medication the caller named counts
+  even if the assistant then asks which one; use null only if the caller
+  has not named one." `gemini-3.1-flash-lite` was right 20 of 20 with either
+  wording, so it is the more forgiving choice when instructions are not
+  tested.
+- **Known values are re-stated without thinking.** Told to return a known
+  field "only if the user's latest turn changes it", it returned the known
+  slot on "Yes, that's all correct. Please book it." in 17 of 20 runs, 7 of
+  them in other words ("tomorrow at 7:00 PM" for "tomorrow at 7 pm"), which
+  read as a correction and sent a live booking back to the availability
+  stage. `gemini-3.1-flash-lite` and `gemini-flash-latest` did it in none of
+  20. Quoting the latest turn after the transcript, as the extractor now
+  does, brought it to 0 of 30, and every model still caught a real change
+  ("make that eight o'clock instead") in all runs.
+- **Picks read as agreement.** One live run took "Seven is fine." as
+  agreeing to book. Offline it did not recur for `gemini-3.5-flash-lite` (0
+  of 40), but `gemini-3.1-flash-lite` marked "Seven o'clock is perfect" as a
+  yes in 3 of 20, and `gemini-flash-lite-latest` did in earlier testing.
+  Signals that gate a commit belong to a [decision model](decisions.md) or
+  need explicit criteria.
 
 ## Schema Definition
 
@@ -357,7 +442,12 @@ Live::builder()
 
 Turn-end extraction runs on the control lane, and so do tool calls. A tool
 call that arrives while an extraction is running waits for it, so the
-extraction model's latency adds directly to the tool's response time.
+extraction model's latency adds directly to the tool's response time. In a
+live run on `gemini-flash-latest`, two pharmacy tool calls waited 49 and
+58 s behind the previous turn's extraction. Pinned to
+`gemini-3.5-flash-lite` at a thinking budget of 64, the slowest tool wait
+across the same 44 runs was 1.4 s (see
+[Choosing the extraction model](#choosing-the-extraction-model)).
 
 A commit guard often reads a key an extractor writes, such as a caller's
 confirmation. The caller says "yes" and the model calls the commit tool in
@@ -369,6 +459,10 @@ promotion rule targets it, or, without rules, when its schema has a field of
 that name. Extractors with another trigger keep their own moment. Each extractor reads its usual number of turns, ending
 with the turn in progress, so an older "yes" outside that window is not
 read again.
+
+A confirmation, an intent or a pick among offered options can instead go to a
+[decision model](decisions.md), which answers typed questions with
+probabilities instead of text.
 
 ## Extraction to State to Watchers
 

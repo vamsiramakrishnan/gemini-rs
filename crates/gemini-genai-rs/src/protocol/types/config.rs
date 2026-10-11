@@ -1591,6 +1591,15 @@ impl SessionConfig {
         self.model_profile().context_update
     }
 
+    /// Whether the target accepts the built-in `codeExecution` tool. Gemini
+    /// 3.8 Live and 2.5 native audio on Google AI close the session at setup
+    /// over it, so the setup message leaves it off for them (see
+    /// [`ignored_settings`](Self::ignored_settings)). Vertex AI is assumed to
+    /// accept it: it was not measured there.
+    pub fn supports_code_execution(&self) -> bool {
+        self.is_vertex() || self.model_profile().code_execution
+    }
+
     /// Settings in this config that the target does not accept and that
     /// [`to_setup_message`](Self::to_setup_message) therefore leaves off the
     /// wire, by their wire names. Empty when everything configured is sent.
@@ -1640,6 +1649,10 @@ impl SessionConfig {
         }
         if self.explicit_vad_signal.is_some() && !self.is_vertex() {
             ignored.push("explicitVadSignal");
+        }
+        if !self.supports_code_execution() && self.tools.iter().any(|t| t.code_execution.is_some())
+        {
+            ignored.push("tools.codeExecution");
         }
         if !self.supports_async_tools()
             && self.tools.iter().any(|t| {
@@ -1891,7 +1904,10 @@ mod tests {
 
     #[test]
     fn session_config_convenience_tools() {
+        // A model whose setup takes code execution (see
+        // `code_execution_is_left_off_where_google_ai_refuses_it`).
         let config = SessionConfig::new("key")
+            .model(ModelId::from_static("models/gemini-2.0-flash-live-001"))
             .with_url_context()
             .with_google_search()
             .with_code_execution();
@@ -2074,6 +2090,45 @@ mod tests {
             decl.behavior,
             Some(FunctionCallingBehavior::NonBlocking),
             "Google AI should preserve behavior"
+        );
+    }
+
+    #[test]
+    fn code_execution_is_left_off_where_google_ai_refuses_it() {
+        use crate::protocol::types::{FunctionDeclaration, Tool};
+        let tools = |c: SessionConfig| {
+            c.add_tool(Tool::code_execution())
+                .add_tool(Tool::functions(vec![FunctionDeclaration {
+                    name: "lookup".into(),
+                    description: "Look up".into(),
+                    parameters: None,
+                    behavior: None,
+                }]))
+        };
+        let sent = |c: &SessionConfig| {
+            serde_json::to_value(c.to_setup_message()).unwrap()["setup"]["tools"].clone()
+        };
+
+        for model in [ModelId::LIVE_3_8, ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO] {
+            let config = tools(SessionConfig::new("key").model(model));
+            assert!(!config.supports_code_execution());
+            assert_eq!(config.ignored_settings(), ["tools.codeExecution"]);
+            let wire = sent(&config);
+            assert_eq!(wire.as_array().unwrap().len(), 1, "{wire}");
+            assert!(wire[0].get("codeExecution").is_none());
+            assert_eq!(wire[0]["functionDeclarations"][0]["name"], "lookup");
+        }
+
+        // Not measured on Vertex AI: sent as configured.
+        let vertex =
+            tools(SessionConfig::from_vertex("p", "us-central1", "t").model(ModelId::LIVE_3_8));
+        assert!(vertex.supports_code_execution());
+        assert!(
+            sent(&vertex)
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t.get("codeExecution").is_some())
         );
     }
 }

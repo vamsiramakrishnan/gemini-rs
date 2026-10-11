@@ -25,6 +25,8 @@ target
 *.swp
 *.swo
 .env
+.env.local
+.env*.local
 .worktrees/
 
 # Claude Code local session/worktree state

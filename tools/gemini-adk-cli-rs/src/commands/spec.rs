@@ -174,6 +174,8 @@ pub async fn call(spec_path: &str, tool: &str, args: Option<&str>) -> CliResult 
 /// terminal REPL; audio specs use the microphone and speakers when `adk` is
 /// built with the `voice` feature.
 pub async fn run(spec_path: &str) -> CliResult {
+    // `.env.local` first: dotenvy never overrides a variable already set.
+    dotenvy::from_filename(".env.local").ok();
     dotenvy::dotenv().ok();
     let spec = load(spec_path)?;
     if spec.requires_memory() {
@@ -184,8 +186,24 @@ pub async fn run(spec_path: &str) -> CliResult {
         );
     }
     let mut resources = SpecResources::default();
-    if spec.requires_extraction() {
+    // Extraction that names its model is resolved by the spec itself.
+    if spec.requires_extraction() && spec.uses_default_extraction_model() {
         resources.extraction_llm = Some(Arc::new(GeminiLlm::from_env()?));
+    }
+    if !spec.decisions.is_empty() {
+        resources.decision_model = Some(Arc::new(
+            gemini_adk_rs::decision::GatewayDecisionModel::from_env()?,
+        ));
+    }
+    // Programs run in Monty worker processes when MONTY_BIN names the
+    // worker binary, and in this process otherwise.
+    #[cfg(feature = "code-pool")]
+    if spec.code.is_some()
+        && let Some(binary) = std::env::var_os("MONTY_BIN")
+    {
+        resources.code_sandbox = Some(Arc::new(
+            gemini_adk_rs::code_mode::MontyPool::spawn(binary, 4).await?,
+        ));
     }
     let state = State::new();
     let live = spec.apply(Live::builder(), &state, &resources)?;
