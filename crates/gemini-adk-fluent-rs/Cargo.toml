@@ -19,7 +19,7 @@ readme = "README.md"
 # build time and the docs.rs builder has none. `talk()` therefore has no
 # docs.rs page; the book covers it instead.
 [package.metadata.docs.rs]
-features = ["templates", "default", "gemini-llm", "http-tools", "gcs-store", "denoise", "dsp", "sip", "tracing-support", "vad-wavekat", "tls-native", "tls-rustls", "otel", "otel-otlp", "otel-gcp", "ai-gateway"]
+features = ["templates", "default", "gemini-llm", "http-tools", "gcs-store", "denoise", "dsp", "sip", "tracing-support", "vad-wavekat", "tls-native", "tls-rustls", "otel", "otel-otlp", "otel-gcp", "ai-gateway", "code-mode", "code-pool"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
@@ -84,13 +84,13 @@ parking_lot = "0.12"
 # use. Both keep `tls-native`; pick `tls-rustls` with `--no-default-features`
 # and name the pieces instead.
 voice = ["voice-io", "denoise", "dsp", "vad-wavekat"]
-full = ["voice", "sip", "http-tools", "gcs-store", "templates", "gemini-llm", "tls-native", "otel-otlp", "ai-gateway"]
+full = ["voice", "sip", "http-tools", "gcs-store", "templates", "gemini-llm", "tls-native", "otel-otlp", "ai-gateway", "code-mode"]
 templates = ["gemini-adk-rs/templates"]
 # One TLS backend and text generation are on by default: `AgentBuilder::build`
 # runs on `GeminiLlm`, which is pure Rust, so a plain `cargo add` answers a
 # question. Swap the TLS backend with `--no-default-features --features
 # tls-rustls,gemini-llm`.
-default = ["tls-native", "gemini-llm"]
+default = ["tls-native", "gemini-llm", "code-mode"]
 # Also the HTTP client that fetches Vertex tokens from the metadata server.
 gemini-llm = ["gemini-adk-rs/gemini-llm", "gemini-genai-rs/http"]
 # HTTP tool bindings in `spec` (SessionSpec `tools[].http`).
@@ -112,6 +112,10 @@ dsp = ["dep:realfft", "dep:rubato"]
 sip = ["dep:rsipstack", "dep:tokio-util", "dep:aes", "dep:hmac", "dep:sha1", "dep:getrandom", "tokio/net", "tokio/rt-multi-thread"]
 # No-op passthrough (tracing is always compiled); kept for manifest compatibility.
 tracing-support = ["gemini-adk-rs/tracing-support"]
+# Code mode: the model's programs run in Monty in this process (`code-mode`)
+# or in Monty worker processes (`code-pool`, needs the `monty` binary).
+code-mode = ["gemini-adk-rs/code-mode"]
+code-pool = ["gemini-adk-rs/code-pool"]
 # Passthroughs so applications don't need lower-layer dependencies.
 vad-wavekat = ["gemini-adk-rs/vad-wavekat"]
 tls-native = ["gemini-adk-rs/tls-native", "gemini-genai-rs/tls-native"]

@@ -110,6 +110,13 @@ pub mod tools {
     pub use gemini_adk_rs::toolset::*;
 }
 
+/// Code mode: a tool through which the model runs a short Python program
+/// whose functions are the session's own tools, each call governed like a
+/// direct call. See [`Live::code_mode`](crate::live::Live::code_mode).
+pub mod code_mode {
+    pub use gemini_adk_rs::code_mode::*;
+}
+
 /// LLM abstraction: params, requests/responses, and the registry.
 pub mod llm {
     pub use gemini_adk_rs::llm::*;

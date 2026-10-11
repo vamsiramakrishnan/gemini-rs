@@ -294,6 +294,9 @@ impl Live {
         if let Some(decisions) = self.decisions {
             builder = builder.decisions(decisions);
         }
+        if let Some(code) = self.code_mode {
+            builder = builder.code_mode(code);
+        }
         for ext in self.extractors {
             builder = builder.extractor(ext);
         }

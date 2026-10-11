@@ -392,6 +392,7 @@ impl SkillSpec {
                         parameters: implementation
                             .and_then(gemini_adk_rs::ToolFunction::parameters),
                         response: Some(json!({"fixture":true})),
+                        returns: None,
                         set_state: BTreeMap::new(),
                         save_response_as: None,
                         http: None,

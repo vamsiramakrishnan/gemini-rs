@@ -78,6 +78,14 @@ impl SessionSpec {
         if !self.computed.is_empty() {
             out.push_str("use gemini_adk_fluent_rs::gemini_adk_rs::expr::Expr;\n");
         }
+        if let Some(code) = &self.code {
+            if code.limits.is_some() {
+                out.push_str("use gemini_adk_fluent_rs::code_mode::{CodeLimits, CodeMode};\n");
+                out.push_str("use std::time::Duration;\n");
+            } else {
+                out.push_str("use gemini_adk_fluent_rs::code_mode::CodeMode;\n");
+            }
+        }
         if let Some(runtime) = &self.runtime {
             let mut live_imports = Vec::new();
             if runtime.steering.is_some() {
@@ -258,6 +266,9 @@ impl SessionSpec {
         }
         if !self.decisions.is_empty() {
             out.push_str(&gen_decisions(self));
+        }
+        if self.code.is_some() {
+            out.push_str(&gen_code(self));
         }
         for phase in &self.phases {
             out.push_str(&gen_phase(phase));
@@ -594,6 +605,56 @@ fn gen_extract(extract: &super::ExtractSpec, models: &super::ModelsSpec) -> Stri
         out.push_str("            ])\n");
     }
     out.push_str("        ))\n");
+    out
+}
+
+/// The code tool: `.code_mode(CodeMode::new()…)`. Programs run in this
+/// process; swap in a `MontyPool` sandbox for worker processes.
+fn gen_code(spec: &SessionSpec) -> String {
+    let Some(code) = spec.compile_code_mode(None) else {
+        return String::new();
+    };
+    let mut out = String::from("        .code_mode(\n            CodeMode::new()\n");
+    if code.tool() != gemini_adk_rs::code_mode::DEFAULT_TOOL {
+        let _ = writeln!(out, "                .tool_name({})", rust_str(code.tool()));
+    }
+    for function in code.function_list() {
+        match &function.returns {
+            Some(returns) => {
+                let _ = writeln!(
+                    out,
+                    "                .function_returning({}, {})",
+                    rust_str(&function.name),
+                    rust_str(returns)
+                );
+            }
+            None => {
+                let _ = writeln!(
+                    out,
+                    "                .function({})",
+                    rust_str(&function.name)
+                );
+            }
+        }
+    }
+    if !code.is_direct() {
+        out.push_str("                .direct(false)\n");
+    }
+    if spec.code.as_ref().is_some_and(|c| c.limits.is_some()) {
+        let l = code.limit();
+        let _ = writeln!(
+            out,
+            "                .limits(CodeLimits {{\n                    calls: {},\n                    \
+             cpu: Duration::from_millis({}),\n                    wall: Duration::from_millis({}),\n                    \
+             output_chars: {},\n                    memory: {},\n                }})",
+            l.calls,
+            l.cpu.as_millis(),
+            l.wall.as_millis(),
+            l.output_chars,
+            l.memory
+        );
+    }
+    out.push_str("        )\n");
     out
 }
 
@@ -1298,6 +1359,35 @@ mod tests {
 
         let unnamed = spec().to_rust();
         assert!(unnamed.contains("GeminiLlm::new(Default::default())"));
+    }
+
+    #[test]
+    fn a_code_tool_lowers_to_code_mode_with_its_functions_and_limits() {
+        let spec = SessionSpec::from_value(json!({
+            "name": "teller",
+            "tools": [
+                { "name": "lookup", "response": { "payments": [{ "amount": 1.5 }] } },
+                { "name": "pay" }
+            ],
+            "flow": { "steps": [{ "id": "pay", "allow": ["lookup", "pay"], "terminal": true }],
+                      "constraints": [{ "never_until": { "tool": "pay", "until": { "is_true": "ok" } } }] },
+            "code": { "direct": false, "limits": { "calls": 5 } }
+        }))
+        .expect("valid spec");
+        let code = spec.to_rust();
+        for fragment in [
+            "use gemini_adk_fluent_rs::code_mode::{CodeLimits, CodeMode};",
+            ".code_mode(",
+            r#".function_returning("lookup", "{\"payments\": [{\"amount\": float}]}")"#,
+            ".direct(false)",
+            "calls: 5,",
+        ] {
+            assert!(code.contains(fragment), "missing {fragment}\n---\n{code}");
+        }
+        assert!(
+            !code.contains(r#".function("pay")"#),
+            "the commit is left out"
+        );
     }
 
     #[test]

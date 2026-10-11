@@ -157,6 +157,7 @@ pub struct Live {
     pub(crate) tasks: Option<gemini_adk_rs::tasks::TaskRuntime>,
     pub(crate) extractors: Vec<Arc<dyn TurnExtractor>>,
     pub(crate) decisions: Option<Arc<gemini_adk_rs::decision::Decisions>>,
+    pub(crate) code_mode: Option<gemini_adk_rs::code_mode::CodeMode>,
     // L1 registries
     pub(crate) computed: ComputedRegistry,
     pub(crate) phases: Vec<Phase>,
@@ -295,6 +296,7 @@ impl Live {
             tasks: None,
             extractors: Vec::new(),
             decisions: None,
+            code_mode: None,
             computed: ComputedRegistry::new(),
             phases: Vec::new(),
             initial_phase: None,

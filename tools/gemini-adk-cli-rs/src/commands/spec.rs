@@ -195,6 +195,16 @@ pub async fn run(spec_path: &str) -> CliResult {
             gemini_adk_rs::decision::GatewayDecisionModel::from_env()?,
         ));
     }
+    // Programs run in Monty worker processes when MONTY_BIN names the
+    // worker binary, and in this process otherwise.
+    #[cfg(feature = "code-pool")]
+    if spec.code.is_some()
+        && let Some(binary) = std::env::var_os("MONTY_BIN")
+    {
+        resources.code_sandbox = Some(Arc::new(
+            gemini_adk_rs::code_mode::MontyPool::spawn(binary, 4).await?,
+        ));
+    }
     let state = State::new();
     let live = spec.apply(Live::builder(), &state, &resources)?;
     match spec.modality {

@@ -200,6 +200,92 @@
       },
       "type": "object"
     },
+    "CodeLimitsSpec": {
+      "description": "Bounds on each program; unset fields keep the defaults.",
+      "properties": {
+        "calls": {
+          "description": "Function calls per program. Default 20.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cpu_ms": {
+          "description": "Interpreter time per program, excluding its calls, in ms. Default 2000.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "memory_mb": {
+          "description": "Memory per program in MiB, enforced by worker-process sandboxes. Default 64.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "output_chars": {
+          "description": "Characters of a program's result the model reads. Default 4000.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "wall_ms": {
+          "description": "Wall-clock time per program, its calls included, in ms. Default 30000.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CodeSpec": {
+      "description": "The code tool of a spec.",
+      "properties": {
+        "direct": {
+          "description": "Keep the functions declared as tools of their own too, so the model can make a single lookup without writing a program. Default `true`.",
+          "type": "boolean"
+        },
+        "functions": {
+          "description": "The declared tools a program can call. Empty: every declared tool except commits and background tools.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limits": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CodeLimitsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Bounds on each program."
+        },
+        "tool": {
+          "description": "The code tool's name. Default `run_code`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "CommitSpec": {
       "description": "A confirm-before-act tool, gated by `when`.",
       "properties": {
@@ -2759,6 +2845,9 @@
         "response": {
           "description": "Canned JSON response (mock tools). Default `{\"ok\": true}`."
         },
+        "returns": {
+          "description": "JSON Schema of what the tool returns. Code mode shows it in the function's docstring, so a program reads the right keys; a mock tool without it shows the shape of its `response`."
+        },
         "save_response_as": {
           "description": "Store the tool's full response under this state key.",
           "type": [
@@ -4157,6 +4246,9 @@
         "response": {
           "description": "Canned JSON response (mock tools). Default `{\"ok\": true}`."
         },
+        "returns": {
+          "description": "JSON Schema of what the tool returns. Code mode shows it in the function's docstring, so a program reads the right keys; a mock tool without it shows the shape of its `response`."
+        },
         "save_response_as": {
           "description": "Store the tool's full response under this state key.",
           "type": [
@@ -4517,6 +4609,17 @@
   },
   "description": "A complete Live session as one JSON document. See the module docs.",
   "properties": {
+    "code": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CodeSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A code tool: the model runs a short Python program whose functions are the declared tools, each call governed like a direct call. Use it for reads the model would otherwise add up, sort or join itself."
+    },
     "computed": {
       "description": "Computed (derived) state variables.",
       "items": {

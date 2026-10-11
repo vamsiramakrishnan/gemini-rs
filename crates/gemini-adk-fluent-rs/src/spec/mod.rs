@@ -21,6 +21,7 @@
 //!   before; the spec never pretends to serialize them.
 
 pub mod authoring;
+mod code;
 mod codegen;
 mod decisions;
 pub mod project;
@@ -28,6 +29,7 @@ mod simulate;
 mod skills;
 pub mod store;
 
+pub use code::{CodeLimitsSpec, CodeSpec, schema_shape, value_shape};
 pub use decisions::{BooleanCriteriaSpec, DecisionKind, DecisionSpec};
 pub use project::{ProjectFile, ProjectLanguage, ProjectOptions, SdkSource};
 pub use store::{BundleRef, BundleStore, BundleVersion, StoreError, open_store};
@@ -124,6 +126,11 @@ pub struct ToolSpec {
     /// Canned JSON response (mock tools). Default `{"ok": true}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response: Option<Value>,
+    /// JSON Schema of what the tool returns. Code mode shows it in the
+    /// function's docstring, so a program reads the right keys; a mock tool
+    /// without it shows the shape of its `response`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub returns: Option<Value>,
     /// State keys written when the tool runs — how a tool latches guards.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub set_state: BTreeMap<String, Value>,
@@ -868,6 +875,11 @@ pub struct SessionSpec {
     /// Requires [`SpecResources::decision_model`].
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub decisions: BTreeMap<String, DecisionSpec>,
+    /// A code tool: the model runs a short Python program whose functions
+    /// are the declared tools, each call governed like a direct call. Use it
+    /// for reads the model would otherwise add up, sort or join itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<CodeSpec>,
     /// Declared state keys — the session's data dictionary.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub state: BTreeMap<String, StateFieldSpec>,
@@ -1086,6 +1098,10 @@ pub struct SpecResources {
     /// The memory engine honoring the spec's `memory` section. Required when
     /// that section is present.
     pub memory: Option<Arc<dyn MemoryBinding>>,
+    /// Where the spec's `code` runs programs, such as a
+    /// [`MontyPool`](gemini_adk_rs::code_mode) of worker processes. Unset:
+    /// in this process, which cannot bound a program's memory.
+    pub code_sandbox: Option<Arc<dyn gemini_adk_rs::code_mode::CodeSandbox>>,
     /// In-process implementations of declared tools, by name. A declared
     /// tool with an implementation calls it instead of its mock response,
     /// HTTP or MCP binding; its declaration (what the model sees) and its
@@ -2002,6 +2018,11 @@ impl SessionSpec {
         errors.extend(decision_errors);
         warnings.extend(decision_warnings);
 
+        // Code mode.
+        let (code_errors, code_warnings) = self.code_problems();
+        errors.extend(code_errors);
+        warnings.extend(code_warnings);
+
         SpecValidation {
             valid: errors.is_empty(),
             errors,
@@ -2297,6 +2318,9 @@ impl SessionSpec {
             && !self.decisions.is_empty()
         {
             live = live.decisions(self.compile_decisions(model.clone()));
+        }
+        if let Some(code) = self.compile_code_mode(resources.code_sandbox.clone()) {
+            live = live.code_mode(code);
         }
 
         // Phases.

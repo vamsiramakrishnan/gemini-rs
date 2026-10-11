@@ -23,7 +23,7 @@ serde_json = "1"
 
 # Every feature is the fluent crate's feature of the same name, plus `memory`.
 [features]
-default = ["tls-native", "gemini-llm"]
+default = ["tls-native", "gemini-llm", "code-mode"]
 # The Gemini text model client (`GeminiLlm`).
 gemini-llm = ["gemini-adk-fluent-rs/gemini-llm"]
 # TLS backend: exactly one.
@@ -37,6 +37,9 @@ vad-wavekat = ["gemini-adk-fluent-rs/vad-wavekat"]
 voice = ["gemini-adk-fluent-rs/voice"]
 # Telephony over SIP.
 sip = ["gemini-adk-fluent-rs/sip"]
+# Code mode: Monty in this process, or in worker processes.
+code-mode = ["gemini-adk-fluent-rs/code-mode"]
+code-pool = ["gemini-adk-fluent-rs/code-pool"]
 # Spec-driven HTTP tools.
 http-tools = ["gemini-adk-fluent-rs/http-tools"]
 # Handlebars-style instruction templates.
@@ -52,7 +55,7 @@ full = ["gemini-adk-fluent-rs/full", "memory"]
 # Everything except `voice-io` and the bundles that include it: cpal needs
 # ALSA headers the docs.rs builder does not have.
 [package.metadata.docs.rs]
-features = ["default", "gemini-llm", "tls-native", "tls-rustls", "denoise", "dsp", "vad-wavekat", "sip", "http-tools", "templates", "otel", "otel-otlp", "otel-gcp", "memory"]
+features = ["default", "gemini-llm", "tls-native", "tls-rustls", "denoise", "dsp", "vad-wavekat", "sip", "http-tools", "templates", "otel", "otel-otlp", "otel-gcp", "memory", "code-mode", "code-pool"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dev-dependencies]
