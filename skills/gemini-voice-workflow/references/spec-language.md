@@ -18,7 +18,7 @@ names. This page is the part you need to write a voice agent.
 | `greeting` | An instruction for the first thing the agent says; without it the agent waits for the caller |
 | `modality` | `"audio"` for voice |
 | `voice` | A prebuilt voice from the catalog. Change it only when asked |
-| `runtime` | `{"steering": "context_update"}` offers the model only the tools the active stage allows (Gemini 3.8 Live). Without it, other tools are still offered but refused |
+| `runtime` | `{"steering": "context_update"}` offers the model only the tools the active stage allows, plus those of stages and digressions one `decided` guard away, which the gate decides when called (Gemini 3.8 Live). Without it, other tools are still offered but refused. A spec with `skills` does this on its own on Gemini 3.8 Live: each skill gets a typed `start_{skill}`, and its tools are declared while its task is in the foreground |
 | `tools` | Declared tools: what the model sees. See [Tools](#tools) |
 | `extract` | Out-of-band extractors that fill state from what the caller says |
 | `decisions` | Questions a decision model (Jev on Vercel AI Gateway) answers about the conversation, named by `decided` guards: confirmations, intents, picks among offered options, stage routing. See [Decisions](#decisions) |

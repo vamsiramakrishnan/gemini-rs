@@ -24,6 +24,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resume, and its effect on prompt tokens.
 - **Breaking:** `SessionCommand` has a new variant, `UpdateContext`. A
   `match` over `SessionCommand` outside this crate needs an arm for it.
+- **Skills declare only what the foreground task needs.** On a model that
+  accepts `contextUpdate`, a session of skills declares `task_control` and
+  each skill's typed `start_{skill}` at connect; starting or resuming a task
+  declares its skill's flow-offered tools and adds its instruction to the
+  system instruction before the call's response, so the model uses them in
+  the same turn. The task context turn no longer repeats the skill
+  instruction. Setting another steering mode keeps every tool declared. See
+  [skills and tasks](docs/user-guide/skills-and-tasks.md#what-the-model-is-offered).
+- **Typed skill entry points.** Every skill has `start_{skill}`, its inputs
+  as parameters. Given only `task_control`'s free-form `input`, Gemini 3.8
+  Live left it out and retried the same failing start in a loop.
+- **A flow offers what one decision could open.** Under `ContextUpdate`
+  steering, the tools of steps one `decided` atom away, and of digressions
+  whose trigger is a decision, are declared with the active steps'; the gate
+  asks those questions when such a tool is called and admits it only if the
+  step opened. `Guard::possible` evaluates a guard with decisions unknown;
+  `FlowMonitor::frontier_steps` lists the steps. A tool declared after the
+  caller's turn ended was not used in that turn's reply (0 of 15 on Gemini
+  3.8 Live). See
+  [steering modes](docs/user-guide/steering-modes.md#what-a-flow-offers).
+- **Breaking:** `FlowStack::gate_scope` takes the session state, to find the
+  steps a called tool would open.
 
 ## [4.0.0] - 2026-10-02
 
