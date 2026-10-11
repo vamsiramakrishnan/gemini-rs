@@ -758,6 +758,18 @@ fn unknown_fields(doc: &Value, out: &mut Vec<Diagnostic>) {
     {
         unknown_in(d, &format!("/decisions/{}", escape(id)), &decision, out);
     }
+    if let Some(code) = doc.get("code").filter(|c| c.is_object()) {
+        unknown_in(
+            code,
+            "/code",
+            &schema_fields(&schema, Some("CodeSpec")),
+            out,
+        );
+        if let Some(limits) = code.get("limits").filter(|l| l.is_object()) {
+            let fields = schema_fields(&schema, Some("CodeLimitsSpec"));
+            unknown_in(limits, "/code/limits", &fields, out);
+        }
+    }
     let Some(conv) = doc.get("conversation").filter(|c| c.is_object()) else {
         return;
     };
@@ -2273,6 +2285,27 @@ mod tests {
         let fixed = apply_patch(&doc, &fix(&report, "unknown_field")).unwrap();
         assert_eq!(fixed["instruction"], "Book tables for Trattoria Rustica.");
         assert!(fixed.get("instructions").is_none());
+    }
+
+    #[test]
+    fn a_misspelled_code_field_is_reported_with_a_rename() {
+        let mut doc = booking();
+        doc["code"] = json!({ "fucntions": [], "limits": { "call": 5 } });
+        let report = check(&doc);
+        let unknown: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "unknown_field")
+            .map(|d| d.path.clone().unwrap())
+            .collect();
+        assert_eq!(unknown, ["/code/fucntions", "/code/limits/call"]);
+        let renames: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter_map(|d| d.fix.as_ref().map(|f| f.description.clone()))
+            .collect();
+        assert!(renames.contains(&"rename 'fucntions' to 'functions'".to_string()));
+        assert!(renames.contains(&"rename 'call' to 'calls'".to_string()));
     }
 
     #[test]
