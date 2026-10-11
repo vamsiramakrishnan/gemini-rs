@@ -15,7 +15,7 @@ gemini-adk-rs = { workspace = true, default-features = true, features = ["gemini
 gemini-genai-rs = { workspace = true, default-features = true, features = ["metrics"] }
 gemini-adk-fluent-rs = { workspace = true, default-features = true, features = ["http-tools", "denoise", "gcs-store"] }
 axum = { version = "0.8", features = ["macros", "ws"] }
-tower-http = { version = "0.5", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
