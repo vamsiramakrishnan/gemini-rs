@@ -1,0 +1,521 @@
+[
+  {
+    "arm": "sdk-hybrid-voice",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 2075,
+    "ms": 6604,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1827,
+        "first_output_ms": 984,
+        "heard": "Is there a table for four on the second Friday of next month at 7:30 in the evening or later? What's the earliest?",
+        "ms": 6604,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2075,
+        "round_trips": 1,
+        "said": "The earliest availability for four people on Friday, November 13th, is at 8:00 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 22167,
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "sdk-hybrid-voice",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 2079,
+    "ms": 8063,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1674,
+        "first_output_ms": 878,
+        "heard": "Is there a table for four on the second Friday of next month at 7:30 in the evening or later? What's the earliest?",
+        "ms": 8063,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2079,
+        "round_trips": 1,
+        "said": "The earliest available table for four on November 13th, starting at 7:30 PM, is at 8:00 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 18931,
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "sdk-hybrid-voice",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "computed argument",
+    "max_prompt_tokens": 2079,
+    "ms": 7502,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t1-date",
+    "turns": [
+      {
+        "caller": "Is there a table for 4 on the second Friday of next month, at 7:30 in the evening or later? What's the earliest?",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1893,
+        "first_output_ms": 922,
+        "heard": "Is there a table for four on the second Friday of next month at 7:30 in the evening or later? What's the earliest?",
+        "ms": 7502,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2079,
+        "round_trips": 1,
+        "said": "There's no table at 7:30 PM, but the earliest available time that evening is at 8:00 PM."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 18333,
+    "why": "checked 2026-11-13 for 4: true; said 20:00: true"
+  },
+  {
+    "arm": "sdk-hybrid-voice",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 2380,
+    "ms": 6669,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "calls": [
+          "list_prescriptions",
+          "check_refills"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 2494,
+        "first_output_ms": 1002,
+        "heard": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "ms": 6669,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2380,
+        "round_trips": 2,
+        "said": "There are two refills remaining on your Atorvastatin cholesterol medication."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 32956,
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "sdk-hybrid-voice",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 2381,
+    "ms": 5986,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "calls": [
+          "list_prescriptions",
+          "check_refills"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 2858,
+        "first_output_ms": 1041,
+        "heard": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "ms": 5986,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2381,
+        "round_trips": 2,
+        "said": "You have 2 refills remaining on your Atorvastatin prescription."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 16620,
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "sdk-hybrid-voice",
+    "bookings": [],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "dependent chain",
+    "max_prompt_tokens": 2381,
+    "ms": 12399,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t5-chain",
+    "turns": [
+      {
+        "caller": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "calls": [
+          "list_prescriptions",
+          "check_refills"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 2905,
+        "first_output_ms": 1300,
+        "heard": "I'm Jordan Ellis, born March 14th, 1988. How many refills are left on my cholesterol medication?",
+        "ms": 12399,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2381,
+        "round_trips": 2,
+        "said": "You have two refills remaining on your Atorvastatin prescription. This information is not medical advice or diagnosis; please consult a healthcare professional for medical care."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 23111,
+    "why": "checked RX-1002: true; checked another: false; said two for atorvastatin: true"
+  },
+  {
+    "arm": "sdk-hybrid-voice",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 10130,
+    "ms": 19650,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "lookup_payment_history",
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 6225,
+        "first_output_ms": 947,
+        "heard": "For account Acme 9000 in calendar year 2025, what did I pay in total to the cent? How many payments were late? And what was the largest single payment?",
+        "ms": 19650,
+        "program_results": [
+          "{\"printed\":\"Total: 2588.70\\nLate: 22\\nMax: 79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "import json\nfrom datetime import datetime\n\ndata = {'account_id': 'ACME-9000', 'payments': [{'amount': 20, 'due': '2024-07-01', 'paid': '2024-06-28'}, {'amount': 73.29, 'due': '2024-07-08', 'paid': '2024-07-10'}, {'amount': 65.58, 'due': '2024-07-15', 'paid': '2024-07-15'}, {'amount': 57.87, 'due': '2024-07-22', 'paid': '2024-07-20'}, {'amount': 49.16, 'due': '2024-07-29', 'paid': '2024-08-01'}, {'amount': 41.45, 'due': '2024-08-05', 'paid': '2024-08-06'}, {'amount': 33.74, 'due': '2024-08-12', 'paid': '2024-08-11'}, {'amount': 25.03, 'due': '2024-08-19', 'paid': '2024-08-16'}, {'amount': 78.32, 'due': '2024-08-26', 'paid': '2024-08-28'}, {'amount': 70.61, 'due': '2024-09-02', 'paid': '2024-09-02'}, {'amount': 62.9, 'due': '2024-09-09', 'paid': '2024-09-07'}, {'amount': 54.19, 'due': '2024-09-16', 'paid': '2024-09-19'}, {'amount': 46.48, 'due': '2024-09-23', 'paid': '2024-09-24'}, {'amount': 38.77, 'due': '2024-09-30', 'paid': '2024-09-29'}, {'amount': 30.06, 'due': '2024-10-07', 'paid': '2024-10-04'}, {'amount': 22.35, 'due': '2024-10-14', 'paid': '2024-10-16'}, {'amount': 75.64, 'due': '2024-10-21', 'paid': '2024-10-21'}, {'amount': 67.93, 'due': '2024-10-28', 'paid': '2024-10-26'}, {'amount': 59.22, 'due': '2024-11-04', 'paid': '2024-11-07'}, {'amount': 51.51, 'due': '2024-11-11', 'paid': '2024-11-12'}, {'amount': 43.8, 'due': '2024-11-18', 'paid': '2024-11-17'}, {'amount': 35.09, 'due': '2024-11-25', 'paid': '2024-11-22'}, {'amount': 27.38, 'due': '2024-12-02', 'paid': '2024-12-04'}, {'amount': 80.67, 'due': '2024-12-09', 'paid': '2024-12-09'}, {'amount': 72.96, 'due': '2024-12-16', 'paid': '2024-12-14'}, {'amount': 64.25, 'due': '2024-12-23', 'paid': '2024-12-26'}, {'amount': 56.54, 'due': '2024-12-30', 'paid': '2024-12-31'}, {'amount': 48.83, 'due': '2025-01-06', 'paid': '2025-01-05'}, {'amount': 40.12, 'due': '2025-01-13', 'paid': '2025-01-10'}, {'amount': 32.41, 'due': '2025-01-20', 'paid': '2025-01-22'}, {'amount': 24.7, 'due': '2025-01-27', 'paid': '2025-01-27'}, {'amount': 77.99, 'due': '2025-02-03', 'paid': '2025-02-01'}, {'amount': 69.28, 'due': '2025-02-10', 'paid': '2025-02-13'}, {'amount': 61.57, 'due': '2025-02-17', 'paid': '2025-02-18'}, {'amount': 53.86, 'due': '2025-02-24', 'paid': '2025-02-23'}, {'amount': 45.15, 'due': '2025-03-03', 'paid': '2025-02-28'}, {'amount': 37.44, 'due': '2025-03-10', 'paid': '2025-03-12'}, {'amount': 29.73, 'due': '2025-03-17', 'paid': '2025-03-17'}, {'amount': 21.02, 'due': '2025-03-24', 'paid': '2025-03-22'}, {'amount': 74.31, 'due': '2025-03-31', 'paid': '2025-04-03'}, {'amount': 66.6, 'due': '2025-04-07', 'paid': '2025-04-08'}, {'amount': 58.89, 'due': '2025-04-14', 'paid': '2025-04-13'}, {'amount': 50.18, 'due': '2025-04-21', 'paid': '2025-04-18'}, {'amount': 42.47, 'due': '2025-04-28', 'paid': '2025-04-30'}, {'amount': 34.76, 'due': '2025-05-05', 'paid': '2025-05-05'}, {'amount': 26.05, 'due': '2025-05-12', 'paid': '2025-05-10'}, {'amount': 79.34, 'due': '2025-05-19', 'paid': '2025-05-22'}, {'amount': 71.63, 'due': '2025-05-26', 'paid': '2025-05-27'}, {'amount': 63.92, 'due': '2025-06-02', 'paid': '2025-06-01'}, {'amount': 55.21, 'due': '2025-06-09', 'paid': '2025-06-06'}, {'amount': 47.5, 'due': '2025-06-16', 'paid': '2025-06-18'}, {'amount': 39.79, 'due': '2025-06-23', 'paid': '2025-06-23'}, {'amount': 31.08, 'due': '2025-06-30', 'paid': '2025-06-28'}, {'amount': 23.37, 'due': '2025-07-07', 'paid': '2025-07-10'}, {'amount': 76.66, 'due': '2025-07-14', 'paid': '2025-07-15'}, {'amount': 68.95, 'due': '2025-07-21', 'paid': '2025-07-20'}, {'amount': 60.24, 'due': '2025-07-28', 'paid': '2025-07-25'}, {'amount': 52.53, 'due': '2025-08-04', 'paid': '2025-08-06'}, {'amount': 44.82, 'due': '2025-08-11', 'paid': '2025-08-11'}, {'amount': 36.11, 'due': '2025-08-18', 'paid': '2025-08-16'}, {'amount': 28.4, 'due': '2025-08-25', 'paid': '2025-08-28'}, {'amount': 20.69, 'due': '2025-09-01', 'paid': '2025-09-02'}, {'amount': 73.98, 'due': '2025-09-08', 'paid': '2025-09-07'}, {'amount': 65.27, 'due': '2025-09-15', 'paid': '2025-09-12'}, {'amount': 57.56, 'due': '2025-09-22', 'paid': '2025-09-24'}, {'amount': 49.85, 'due': '2025-09-29', 'paid': '2025-09-29'}, {'amount': 41.14, 'due': '2025-10-06', 'paid': '2025-10-04'}, {'amount': 33.43, 'due': '2025-10-13', 'paid': '2025-10-16'}, {'amount': 25.72, 'due': '2025-10-20', 'paid': '2025-10-21'}, {'amount': 78.01, 'due': '2025-10-27', 'paid': '2025-10-26'}, {'amount': 70.3, 'due': '2025-11-03', 'paid': '2025-10-31'}, {'amount': 62.59, 'due': '2025-11-10', 'paid': '2025-11-12'}, {'amount': 54.88, 'due': '2025-11-17', 'paid': '2025-11-17'}, {'amount': 46.17, 'due': '2025-11-24', 'paid': '2025-11-22'}, {'amount': 38.46, 'due': '2025-12-01', 'paid': '2025-12-04'}, {'amount': 30.75, 'due': '2025-12-08', 'paid': '2025-12-09'}, {'amount': 22.04, 'due': '2025-12-15', 'paid': '2025-12-14'}, {'amount': 75.33, 'due': '2025-12-22', 'paid': '2025-12-19'}, {'amount': 67.62, 'due': '2025-12-29', 'paid': '2025-12-31'}]}\n\ntotal_paid = 0.0\nlate_count = 0\nmax_payment = 0.0\n\nfor p in data['payments']:\n    paid_date = datetime.strptime(p['paid'], '%Y-%m-%d')\n    if paid_date.year == 2025:\n        total_paid += p['amount']\n        \n        due_date = datetime.strptime(p['due'], '%Y-%m-%d')\n        if paid_date > due_date:\n            late_count += 1\n            \n        if p['amount'] > max_payment:\n            max_payment = p['amount']\n\nprint(f\"Total: {total_paid:.2f}\")\nprint(f\"Late: {late_count}\")\nprint(f\"Max: {max_payment:.2f}\")\n"
+        ],
+        "prompt_tokens": 10130,
+        "round_trips": 2,
+        "said": "For account ACME-9000 in calendar year 2025, you paid a total of $2,588.70. There were 22 late payments, and the largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 36364,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-hybrid-voice",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 9592,
+    "ms": 19010,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "lookup_payment_history",
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 6038,
+        "first_output_ms": 951,
+        "heard": "For account Acme 9000 in calendar year 2025, what did I pay in total to the cent? How many payments were late? And what was the largest single payment?",
+        "ms": 19010,
+        "program_results": [
+          "{\"printed\":\"Total: 2588.70, Late: 22, Max: 79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "import json\ndata = {\"account_id\": \"ACME-9000\", \"payments\": [{\"amount\":20,\"due\":\"2024-07-01\",\"paid\":\"2024-06-28\"},{\"amount\":73.29,\"due\":\"2024-07-08\",\"paid\":\"2024-07-10\"},{\"amount\":65.58,\"due\":\"2024-07-15\",\"paid\":\"2024-07-15\"},{\"amount\":57.87,\"due\":\"2024-07-22\",\"paid\":\"2024-07-20\"},{\"amount\":49.16,\"due\":\"2024-07-29\",\"paid\":\"2024-08-01\"},{\"amount\":41.45,\"due\":\"2024-08-05\",\"paid\":\"2024-08-06\"},{\"amount\":33.74,\"due\":\"2024-08-12\",\"paid\":\"2024-08-11\"},{\"amount\":25.03,\"due\":\"2024-08-19\",\"paid\":\"2024-08-16\"},{\"amount\":78.32,\"due\":\"2024-08-26\",\"paid\":\"2024-08-28\"},{\"amount\":70.61,\"due\":\"2024-09-02\",\"paid\":\"2024-09-02\"},{\"amount\":62.9,\"due\":\"2024-09-09\",\"paid\":\"2024-09-07\"},{\"amount\":54.19,\"due\":\"2024-09-16\",\"paid\":\"2024-09-19\"},{\"amount\":46.48,\"due\":\"2024-09-23\",\"paid\":\"2024-09-24\"},{\"amount\":38.77,\"due\":\"2024-09-30\",\"paid\":\"2024-09-29\"},{\"amount\":30.06,\"due\":\"2024-10-07\",\"paid\":\"2024-10-04\"},{\"amount\":22.35,\"due\":\"2024-10-14\",\"paid\":\"2024-10-16\"},{\"amount\":75.64,\"due\":\"2024-10-21\",\"paid\":\"2024-10-21\"},{\"amount\":67.93,\"due\":\"2024-10-28\",\"paid\":\"2024-10-26\"},{\"amount\":59.22,\"due\":\"2024-11-04\",\"paid\":\"2024-11-07\"},{\"amount\":51.51,\"due\":\"2024-11-11\",\"paid\":\"2024-11-12\"},{\"amount\":43.8,\"due\":\"2024-11-18\",\"paid\":\"2024-11-17\"},{\"amount\":35.09,\"due\":\"2024-11-25\",\"paid\":\"2024-11-22\"},{\"amount\":27.38,\"due\":\"2024-12-02\",\"paid\":\"2024-12-04\"},{\"amount\":80.67,\"due\":\"2024-12-09\",\"paid\":\"2024-12-09\"},{\"amount\":72.96,\"due\":\"2024-12-16\",\"paid\":\"2024-12-14\"},{\"amount\":64.25,\"due\":\"2024-12-23\",\"paid\":\"2024-12-26\"},{\"amount\":56.54,\"due\":\"2024-12-30\",\"paid\":\"2024-12-31\"},{\"amount\":48.83,\"due\":\"2025-01-06\",\"paid\":\"2025-01-05\"},{\"amount\":40.12,\"due\":\"2025-01-13\",\"paid\":\"2025-01-10\"},{\"amount\":32.41,\"due\":\"2025-01-20\",\"paid\":\"2025-01-22\"},{\"amount\":24.7,\"due\":\"2025-01-27\",\"paid\":\"2025-01-27\"},{\"amount\":77.99,\"due\":\"2025-02-03\",\"paid\":\"2025-02-01\"},{\"amount\":69.28,\"due\":\"2025-02-10\",\"paid\":\"2025-02-13\"},{\"amount\":61.57,\"due\":\"2025-02-17\",\"paid\":\"2025-02-18\"},{\"amount\":53.86,\"due\":\"2025-02-24\",\"paid\":\"2025-02-23\"},{\"amount\":45.15,\"due\":\"2025-03-03\",\"paid\":\"2025-02-28\"},{\"amount\":37.44,\"due\":\"2025-03-10\",\"paid\":\"2025-03-12\"},{\"amount\":29.73,\"due\":\"2025-03-17\",\"paid\":\"2025-03-17\"},{\"amount\":21.02,\"due\":\"2025-03-24\",\"paid\":\"2025-03-22\"},{\"amount\":74.31,\"due\":\"2025-03-31\",\"paid\":\"2025-04-03\"},{\"amount\":66.6,\"due\":\"2025-04-07\",\"paid\":\"2025-04-08\"},{\"amount\":58.89,\"due\":\"2025-04-14\",\"paid\":\"2025-04-13\"},{\"amount\":50.18,\"due\":\"2025-04-21\",\"paid\":\"2025-04-18\"},{\"amount\":42.47,\"due\":\"2025-04-28\",\"paid\":\"2025-04-30\"},{\"amount\":34.76,\"due\":\"2025-05-05\",\"paid\":\"2025-05-05\"},{\"amount\":26.05,\"due\":\"2025-05-12\",\"paid\":\"2025-05-10\"},{\"amount\":79.34,\"due\":\"2025-05-19\",\"paid\":\"2025-05-22\"},{\"amount\":71.63,\"due\":\"2025-05-26\",\"paid\":\"2025-05-27\"},{\"amount\":63.92,\"due\":\"2025-06-02\",\"paid\":\"2025-06-01\"},{\"amount\":55.21,\"due\":\"2025-06-09\",\"paid\":\"2025-06-06\"},{\"amount\":47.5,\"due\":\"2025-06-16\",\"paid\":\"2025-06-18\"},{\"amount\":39.79,\"due\":\"2025-06-23\",\"paid\":\"2025-06-23\"},{\"amount\":31.08,\"due\":\"2025-06-30\",\"paid\":\"2025-06-28\"},{\"amount\":23.37,\"due\":\"2025-07-07\",\"paid\":\"2025-07-10\"},{\"amount\":76.66,\"due\":\"2025-07-14\",\"paid\":\"2025-07-15\"},{\"amount\":68.95,\"due\":\"2025-07-21\",\"paid\":\"2025-07-20\"},{\"amount\":60.24,\"due\":\"2025-07-28\",\"paid\":\"2025-07-25\"},{\"amount\":52.53,\"due\":\"2025-08-04\",\"paid\":\"2025-08-06\"},{\"amount\":44.82,\"due\":\"2025-08-11\",\"paid\":\"2025-08-11\"},{\"amount\":36.11,\"due\":\"2025-08-18\",\"paid\":\"2025-08-16\"},{\"amount\":28.4,\"due\":\"2025-08-25\",\"paid\":\"2025-08-28\"},{\"amount\":20.69,\"due\":\"2025-09-01\",\"paid\":\"2025-09-02\"},{\"amount\":73.98,\"due\":\"2025-09-08\",\"paid\":\"2025-09-07\"},{\"amount\":65.27,\"due\":\"2025-09-15\",\"paid\":\"2025-09-12\"},{\"amount\":57.56,\"due\":\"2025-09-22\",\"paid\":\"2025-09-24\"},{\"amount\":49.85,\"due\":\"2025-09-29\",\"paid\":\"2025-09-29\"},{\"amount\":41.14,\"due\":\"2025-10-06\",\"paid\":\"2025-10-04\"},{\"amount\":33.43,\"due\":\"2025-10-13\",\"paid\":\"2025-10-16\"},{\"amount\":25.72,\"due\":\"2025-10-20\",\"paid\":\"2025-10-21\"},{\"amount\":78.01,\"due\":\"2025-10-27\",\"paid\":\"2025-10-26\"},{\"amount\":70.3,\"due\":\"2025-11-03\",\"paid\":\"2025-10-31\"},{\"amount\":62.59,\"due\":\"2025-11-10\",\"paid\":\"2025-11-12\"},{\"amount\":54.88,\"due\":\"2025-11-17\",\"paid\":\"2025-11-17\"},{\"amount\":46.17,\"due\":\"2025-11-24\",\"paid\":\"2025-11-22\"},{\"amount\":38.46,\"due\":\"2025-12-01\",\"paid\":\"2025-12-04\"},{\"amount\":30.75,\"due\":\"2025-12-08\",\"paid\":\"2025-12-09\"},{\"amount\":22.04,\"due\":\"2025-12-15\",\"paid\":\"2025-12-14\"},{\"amount\":75.33,\"due\":\"2025-12-22\",\"paid\":\"2025-12-19\"},{\"amount\":67.62,\"due\":\"2025-12-29\",\"paid\":\"2025-12-31\"}]}\n\npayments_2025 = [p for p in data['payments'] if p['paid'].startswith('2025')]\n\ntotal_paid = sum(p['amount'] for p in payments_2025)\nlate_payments = sum(1 for p in payments_2025 if p['paid'] > p['due'])\nmax_payment = max(p['amount'] for p in payments_2025)\n\nprint(f\"Total: {total_paid:.2f}, Late: {late_payments}, Max: {max_payment}\")\n"
+        ],
+        "prompt_tokens": 9592,
+        "round_trips": 2,
+        "said": "For account ACME-9000 in 2025, you paid a total of $2,588.70, with 22 late payments and a largest single payment of $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 35742,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-hybrid-voice",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 9654,
+    "ms": 17810,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "lookup_payment_history",
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 6503,
+        "first_output_ms": 1170,
+        "heard": "For account Acme 9000 in calendar year 2025, what did I pay in total to the cent? How many payments were late? And what was the largest single payment?",
+        "ms": 17810,
+        "program_results": [
+          "{\"printed\":\"Total: 2588.70, Late: 22, Max: 79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "import datetime\n\ndata = [\n{\"amount\":20,\"due\":\"2024-07-01\",\"paid\":\"2024-06-28\"},{\"amount\":73.29,\"due\":\"2024-07-08\",\"paid\":\"2024-07-10\"},\n{\"amount\":65.58,\"due\":\"2024-07-15\",\"paid\":\"2024-07-15\"},{\"amount\":57.87,\"due\":\"2024-07-22\",\"paid\":\"2024-07-20\"},\n{\"amount\":49.16,\"due\":\"2024-07-29\",\"paid\":\"2024-08-01\"},{\"amount\":41.45,\"due\":\"2024-08-05\",\"paid\":\"2024-08-06\"},\n{\"amount\":33.74,\"due\":\"2024-08-12\",\"paid\":\"2024-08-11\"},{\"amount\":25.03,\"due\":\"2024-08-19\",\"paid\":\"2024-08-16\"},\n{\"amount\":78.32,\"due\":\"2024-08-26\",\"paid\":\"2024-08-28\"},{\"amount\":70.61,\"due\":\"2024-09-02\",\"paid\":\"2024-09-02\"},\n{\"amount\":62.9,\"due\":\"2024-09-09\",\"paid\":\"2024-09-07\"},{\"amount\":54.19,\"due\":\"2024-09-16\",\"paid\":\"2024-09-19\"},\n{\"amount\":46.48,\"due\":\"2024-09-23\",\"paid\":\"2024-09-24\"},{\"amount\":38.77,\"due\":\"2024-09-30\",\"paid\":\"2024-09-29\"},\n{\"amount\":30.06,\"due\":\"2024-10-07\",\"paid\":\"2024-10-04\"},{\"amount\":22.35,\"due\":\"2024-10-14\",\"paid\":\"2024-10-16\"},\n{\"amount\":75.64,\"due\":\"2024-10-21\",\"paid\":\"2024-10-21\"},{\"amount\":67.93,\"due\":\"2024-10-28\",\"paid\":\"2024-10-26\"},\n{\"amount\":59.22,\"due\":\"2024-11-04\",\"paid\":\"2024-11-07\"},{\"amount\":51.51,\"due\":\"2024-11-11\",\"paid\":\"2024-11-12\"},\n{\"amount\":43.8,\"due\":\"2024-11-18\",\"paid\":\"2024-11-17\"},{\"amount\":35.09,\"due\":\"2024-11-25\",\"paid\":\"2024-11-22\"},\n{\"amount\":27.38,\"due\":\"2024-12-02\",\"paid\":\"2024-12-04\"},{\"amount\":80.67,\"due\":\"2024-12-09\",\"paid\":\"2024-12-09\"},\n{\"amount\":72.96,\"due\":\"2024-12-16\",\"paid\":\"2024-12-14\"},{\"amount\":64.25,\"due\":\"2024-12-23\",\"paid\":\"2024-12-26\"},\n{\"amount\":56.54,\"due\":\"2024-12-30\",\"paid\":\"2024-12-31\"},{\"amount\":48.83,\"due\":\"2025-01-06\",\"paid\":\"2025-01-05\"},\n{\"amount\":40.12,\"due\":\"2025-01-13\",\"paid\":\"2025-01-10\"},{\"amount\":32.41,\"due\":\"2025-01-20\",\"paid\":\"2025-01-22\"},\n{\"amount\":24.7,\"due\":\"2025-01-27\",\"paid\":\"2025-01-27\"},{\"amount\":77.99,\"due\":\"2025-02-03\",\"paid\":\"2025-02-01\"},\n{\"amount\":69.28,\"due\":\"2025-02-10\",\"paid\":\"2025-02-13\"},{\"amount\":61.57,\"due\":\"2025-02-17\",\"paid\":\"2025-02-18\"},\n{\"amount\":53.86,\"due\":\"2025-02-24\",\"paid\":\"2025-02-23\"},{\"amount\":45.15,\"due\":\"2025-03-03\",\"paid\":\"2025-02-28\"},\n{\"amount\":37.44,\"due\":\"2025-03-10\",\"paid\":\"2025-03-12\"},{\"amount\":29.73,\"due\":\"2025-03-17\",\"paid\":\"2025-03-17\"},\n{\"amount\":21.02,\"due\":\"2025-03-24\",\"paid\":\"2025-03-22\"},{\"amount\":74.31,\"due\":\"2025-03-31\",\"paid\":\"2025-04-03\"},\n{\"amount\":66.6,\"due\":\"2025-04-07\",\"paid\":\"2025-04-08\"},{\"amount\":58.89,\"due\":\"2025-04-14\",\"paid\":\"2025-04-13\"},\n{\"amount\":50.18,\"due\":\"2025-04-21\",\"paid\":\"2025-04-18\"},{\"amount\":42.47,\"due\":\"2025-04-28\",\"paid\":\"2025-04-30\"},\n{\"amount\":34.76,\"due\":\"2025-05-05\",\"paid\":\"2025-05-05\"},{\"amount\":26.05,\"due\":\"2025-05-12\",\"paid\":\"2025-05-10\"},\n{\"amount\":79.34,\"due\":\"2025-05-19\",\"paid\":\"2025-05-22\"},{\"amount\":71.63,\"due\":\"2025-05-26\",\"paid\":\"2025-05-27\"},\n{\"amount\":63.92,\"due\":\"2025-06-02\",\"paid\":\"2025-06-01\"},{\"amount\":55.21,\"due\":\"2025-06-09\",\"paid\":\"2025-06-06\"},\n{\"amount\":47.5,\"due\":\"2025-06-16\",\"paid\":\"2025-06-18\"},{\"amount\":39.79,\"due\":\"2025-06-23\",\"paid\":\"2025-06-23\"},\n{\"amount\":31.08,\"due\":\"2025-06-30\",\"paid\":\"2025-06-28\"},{\"amount\":23.37,\"due\":\"2025-07-07\",\"paid\":\"2025-07-10\"},\n{\"amount\":76.66,\"due\":\"2025-07-14\",\"paid\":\"2025-07-15\"},{\"amount\":68.95,\"due\":\"2025-07-21\",\"paid\":\"2025-07-20\"},\n{\"amount\":60.24,\"due\":\"2025-07-28\",\"paid\":\"2025-07-25\"},{\"amount\":52.53,\"due\":\"2025-08-04\",\"paid\":\"2025-08-06\"},\n{\"amount\":44.82,\"due\":\"2025-08-11\",\"paid\":\"2025-08-11\"},{\"amount\":36.11,\"due\":\"2025-08-18\",\"paid\":\"2025-08-16\"},\n{\"amount\":28.4,\"due\":\"2025-08-25\",\"paid\":\"2025-08-28\"},{\"amount\":20.69,\"due\":\"2025-09-01\",\"paid\":\"2025-09-02\"},\n{\"amount\":73.98,\"due\":\"2025-09-08\",\"paid\":\"2025-09-07\"},{\"amount\":65.27,\"due\":\"2025-09-15\",\"paid\":\"2025-09-12\"},\n{\"amount\":57.56,\"due\":\"2025-09-22\",\"paid\":\"2025-09-24\"},{\"amount\":49.85,\"due\":\"2025-09-29\",\"paid\":\"2025-09-29\"},\n{\"amount\":41.14,\"due\":\"2025-10-06\",\"paid\":\"2025-10-04\"},{\"amount\":33.43,\"due\":\"2025-10-13\",\"paid\":\"2025-10-16\"},\n{\"amount\":25.72,\"due\":\"2025-10-20\",\"paid\":\"2025-10-21\"},{\"amount\":78.01,\"due\":\"2025-10-27\",\"paid\":\"2025-10-26\"},\n{\"amount\":70.3,\"due\":\"2025-11-03\",\"paid\":\"2025-10-31\"},{\"amount\":62.59,\"due\":\"2025-11-10\",\"paid\":\"2025-11-12\"},\n{\"amount\":54.88,\"due\":\"2025-11-17\",\"paid\":\"2025-11-17\"},{\"amount\":46.17,\"due\":\"2025-11-24\",\"paid\":\"2025-11-22\"},\n{\"amount\":38.46,\"due\":\"2025-12-01\",\"paid\":\"2025-12-04\"},{\"amount\":30.75,\"due\":\"2025-12-08\",\"paid\":\"2025-12-09\"},\n{\"amount\":22.04,\"due\":\"2025-12-15\",\"paid\":\"2025-12-14\"},{\"amount\":75.33,\"due\":\"2025-12-22\",\"paid\":\"2025-12-19\"},\n{\"amount\":67.62,\"due\":\"2025-12-29\",\"paid\":\"2025-12-31\"}\n]\n\ntotal_paid = 0\nlate_count = 0\nmax_payment = 0\n\nfor p in data:\n    if p['paid'].startswith('2025'):\n        total_paid += p['amount']\n        if p['paid'] > p['due']:\n            late_count += 1\n        if p['amount'] > max_payment:\n            max_payment = p['amount']\n\nprint(f\"Total: {total_paid:.2f}, Late: {late_count}, Max: {max_payment:.2f}\")\n"
+        ],
+        "prompt_tokens": 9654,
+        "round_trips": 2,
+        "said": "For account ACME-9000 in 2025, you paid a total of $2,588.70, with 22 late payments and a largest single payment of $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 34609,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-hybrid-voice",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 2406,
+    "ms": 17186,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1531,
+        "first_output_ms": 844,
+        "heard": "Please book a table for two on the second Friday of next month at 7:00 p.m. under Ellis.",
+        "ms": 8599,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2029,
+        "round_trips": 1,
+        "said": "I can book a table for two on Friday, November 13th at 7:00 p.m. under Ellis. Shall I go ahead and book this for you?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1389,
+        "first_output_ms": 909,
+        "heard": "Yes, that's right. Please book it.",
+        "ms": 8587,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2406,
+        "round_trips": 1,
+        "said": "I've booked your table for two on Friday, November 13th at 7:00 p.m. under Ellis, reference number TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 34132,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-hybrid-voice",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 2405,
+    "ms": 17415,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1498,
+        "first_output_ms": 855,
+        "heard": "Please book a table for two on the second Friday of next month at 7:00 p.m. under Ellis.",
+        "ms": 8603,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2029,
+        "round_trips": 1,
+        "said": "I have a table available for two on Friday, November 13th at 7:00 P.M. Shall I book this for you under Ellis?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1697,
+        "first_output_ms": 925,
+        "heard": "Yes, that's right. Please book it.",
+        "ms": 8812,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2405,
+        "round_trips": 1,
+        "said": "Your table for two is booked for Friday, November 13th at 7:00 P.M. Your reference number is TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 31487,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  },
+  {
+    "arm": "sdk-hybrid-voice",
+    "bookings": [
+      {
+        "date": "2026-11-13",
+        "name": "Ellis",
+        "party_size": 2,
+        "time": "19:00"
+      }
+    ],
+    "code_blocks": 0,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 2,
+    "kind": "governed commit",
+    "max_prompt_tokens": 2402,
+    "ms": 17692,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t6-commit",
+    "turns": [
+      {
+        "caller": "Please book a table for 2 on the second Friday of next month at 7pm, under Ellis.",
+        "calls": [
+          "check_availability"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1795,
+        "first_output_ms": 847,
+        "heard": "Please book a table for two on the second Friday of next month at 7:00 p.m. under Ellis.",
+        "ms": 8675,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2029,
+        "round_trips": 1,
+        "said": "I have a table available for two at 7 00 PM on Friday, November 13th under Ellis. Would you like me to book this for you?"
+      },
+      {
+        "caller": "Yes, that's right, please book it.",
+        "calls": [
+          "book_table"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": 1517,
+        "first_output_ms": 1046,
+        "heard": "Yes, that's right. Please book it.",
+        "ms": 9017,
+        "program_results": [],
+        "programs": [],
+        "prompt_tokens": 2402,
+        "round_trips": 1,
+        "said": "Your table for two on Friday, November 13th at 7 00 PM is confirmed under Ellis. Your booking reference is TR-2041."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 31768,
+    "why": "booked once: true; right details: true; gate refusals: 0"
+  }
+]

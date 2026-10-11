@@ -1,0 +1,408 @@
+[
+  {
+    "arm": "sdk-hybrid",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 2074,
+    "ms": 10204,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 1058,
+        "heard": "",
+        "ms": 10204,
+        "program_results": [
+          "{\"printed\":\"Total paid 2026: 1530.45\\nLate payments 2026: 5\",\"result\":null}"
+        ],
+        "programs": [
+          "from datetime import datetime\nimport json\n\naccount_id = \"ACME-7300\"\npayment_data = lookup_payment_history(account_id=account_id)\npayments = payment_data.get(\"payments\", [])\n\ntotal_paid_2026 = 0.0\nlate_payments_2026 = 0\n\nfor payment in payments:\n    paid_date = datetime.strptime(payment[\"paid\"], \"%Y-%m-%d\")\n    due_date = datetime.strptime(payment[\"due\"], \"%Y-%m-%d\")\n    \n    if paid_date.year == 2026:\n        total_paid_2026 += payment[\"amount\"]\n        if paid_date > due_date:\n            late_payments_2026 += 1\n\nprint(f\"Total paid 2026: {total_paid_2026:.2f}\")\nprint(f\"Late payments 2026: {late_payments_2026}\")\n"
+        ],
+        "prompt_tokens": 2074,
+        "round_trips": 1,
+        "said": "For account ACME-7300, you have paid a total of $1530.45 in 2026, and 5 of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 12756,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-hybrid",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 3235,
+    "ms": 10507,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "lookup_payment_history",
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 681,
+        "heard": "",
+        "ms": 10507,
+        "program_results": [
+          "{\"printed\":\"Total: 1530.45\\nLate: 5\",\"result\":null}"
+        ],
+        "programs": [
+          "payments = [\n    {\"amount\": 184.56, \"due\": \"2026-01-05\", \"paid\": \"2026-01-05\"},\n    {\"amount\": 131.69, \"due\": \"2026-02-05\", \"paid\": \"2026-02-03\"},\n    {\"amount\": 168.82, \"due\": \"2026-03-05\", \"paid\": \"2026-03-10\"},\n    {\"amount\": 115.95, \"due\": \"2026-04-05\", \"paid\": \"2026-04-08\"},\n    {\"amount\": 152.08, \"due\": \"2026-05-05\", \"paid\": \"2026-05-06\"},\n    {\"amount\": 189.21, \"due\": \"2026-06-05\", \"paid\": \"2026-06-04\"},\n    {\"amount\": 136.34, \"due\": \"2026-07-05\", \"paid\": \"2026-07-02\"},\n    {\"amount\": 173.47, \"due\": \"2026-08-05\", \"paid\": \"2026-08-09\"},\n    {\"amount\": 120.60, \"due\": \"2026-09-05\", \"paid\": \"2026-09-07\"},\n    {\"amount\": 157.73, \"due\": \"2026-10-05\", \"paid\": \"2026-10-05\"}\n]\n\ntotal_amount = sum(p['amount'] for p in payments)\nlate_count = sum(1 for p in payments if p['paid'] > p['due'])\n\nprint(f\"Total: {total_amount:.2f}\")\nprint(f\"Late: {late_count}\")\n"
+        ],
+        "prompt_tokens": 3235,
+        "round_trips": 2,
+        "said": "You paid a total of $1,530.45 in 2026 so far, and five of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 13048,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-hybrid",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 2046,
+    "ms": 7877,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 728,
+        "heard": "",
+        "ms": 7877,
+        "program_results": [
+          "{\"printed\":\"Total paid in 2026: 1530.45\\nLate payments in 2026: 5\",\"result\":null}"
+        ],
+        "programs": [
+          "import datetime\nfrom functions import lookup_payment_history\n\ndata = lookup_payment_history(\"ACME-7300\")\npayments = data.get(\"payments\", [])\n\ntotal_2026 = 0.0\nlate_2026 = 0\n\nfor p in payments:\n    paid_date = datetime.date.fromisoformat(p[\"paid\"])\n    due_date = datetime.date.fromisoformat(p[\"due\"])\n    \n    if paid_date.year == 2026:\n        total_2026 += p[\"amount\"]\n        if paid_date > due_date:\n            late_2026 += 1\n\nprint(f\"Total paid in 2026: {total_2026:.2f}\")\nprint(f\"Late payments in 2026: {late_2026}\")\n"
+        ],
+        "prompt_tokens": 2046,
+        "round_trips": 1,
+        "said": "You paid a total of $1,530.45 in 2026, and five of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 10425,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-hybrid",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 2005,
+    "ms": 9713,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 1343,
+        "heard": "",
+        "ms": 9713,
+        "program_results": [
+          "{\"printed\":\"Total: 1530.45, Late: 5\",\"result\":null}"
+        ],
+        "programs": [
+          "import datetime\nfrom functions import lookup_payment_history\n\ndata = lookup_payment_history(account_id=\"ACME-7300\")\ntotal_paid = 0.0\nlate_count = 0\n\nfor p in data['payments']:\n    paid_date = datetime.datetime.strptime(p['paid'], '%Y-%m-%d').date()\n    due_date = datetime.datetime.strptime(p['due'], '%Y-%m-%d').date()\n    \n    if paid_date.year == 2026:\n        total_paid += p['amount']\n        if paid_date > due_date:\n            late_count += 1\n\nprint(f\"Total: {total_paid:.2f}, Late: {late_count}\")\n"
+        ],
+        "prompt_tokens": 2005,
+        "round_trips": 1,
+        "said": "You paid a total of $1,530.45 in 2026 so far, and five of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 12254,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-hybrid",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 3789,
+    "ms": 11171,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "lookup_payment_history",
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 484,
+        "heard": "",
+        "ms": 11171,
+        "program_results": [
+          "{\"printed\":\"Total: 1530.45\\nLate: 5\",\"result\":null}"
+        ],
+        "programs": [
+          "payments = [\n    {\"amount\": 100, \"due\": \"2025-01-05\", \"paid\": \"2025-01-02\"},\n    {\"amount\": 137.13, \"due\": \"2025-02-05\", \"paid\": \"2025-02-09\"},\n    {\"amount\": 174.26, \"due\": \"2025-03-05\", \"paid\": \"2025-03-07\"},\n    {\"amount\": 121.39, \"due\": \"2025-04-05\", \"paid\": \"2025-04-05\"},\n    {\"amount\": 158.52, \"due\": \"2025-05-05\", \"paid\": \"2025-05-03\"},\n    {\"amount\": 105.65, \"due\": \"2025-06-05\", \"paid\": \"2025-06-10\"},\n    {\"amount\": 142.78, \"due\": \"2025-07-05\", \"paid\": \"2025-07-08\"},\n    {\"amount\": 179.91, \"due\": \"2025-08-05\", \"paid\": \"2025-08-06\"},\n    {\"amount\": 126.04, \"due\": \"2025-09-05\", \"paid\": \"2025-09-04\"},\n    {\"amount\": 163.17, \"due\": \"2025-10-05\", \"paid\": \"2025-10-02\"},\n    {\"amount\": 110.3, \"due\": \"2025-11-05\", \"paid\": \"2025-11-09\"},\n    {\"amount\": 147.43, \"due\": \"2025-12-05\", \"paid\": \"2025-12-07\"},\n    {\"amount\": 184.56, \"due\": \"2026-01-05\", \"paid\": \"2026-01-05\"},\n    {\"amount\": 131.69, \"due\": \"2026-02-05\", \"paid\": \"2026-02-03\"},\n    {\"amount\": 168.82, \"due\": \"2026-03-05\", \"paid\": \"2026-03-10\"},\n    {\"amount\": 115.95, \"due\": \"2026-04-05\", \"paid\": \"2026-04-08\"},\n    {\"amount\": 152.08, \"due\": \"2026-05-05\", \"paid\": \"2026-05-06\"},\n    {\"amount\": 189.21, \"due\": \"2026-06-05\", \"paid\": \"2026-06-04\"},\n    {\"amount\": 136.34, \"due\": \"2026-07-05\", \"paid\": \"2026-07-02\"},\n    {\"amount\": 173.47, \"due\": \"2026-08-05\", \"paid\": \"2026-08-09\"},\n    {\"amount\": 120.6, \"due\": \"2026-09-05\", \"paid\": \"2026-09-07\"},\n    {\"amount\": 157.73, \"due\": \"2026-10-05\", \"paid\": \"2026-10-05\"}\n]\n\ntotal_2026 = 0\nlate_2026 = 0\n\nfor p in payments:\n    if p[\"paid\"].startswith(\"2026\"):\n        total_2026 += p[\"amount\"]\n        if p[\"paid\"] > p[\"due\"]:\n            late_2026 += 1\n\nprint(f\"Total: {total_2026:.2f}\")\nprint(f\"Late: {late_2026}\")"
+        ],
+        "prompt_tokens": 3789,
+        "round_trips": 2,
+        "said": "The total paid in 2026 so far is 1,530.45, and 5 of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 13772,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-hybrid",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 9735,
+    "ms": 17172,
+    "ok": false,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "lookup_payment_history",
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 603,
+        "heard": "",
+        "ms": 17172,
+        "program_results": [
+          "{\"printed\":\"Total Paid: $2588.70\\nLate Payments: 22\\nLargest Payment: $79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "history = [\n{'amount': 20, 'due': '2024-07-01', 'paid': '2024-06-28'}, {'amount': 73.29, 'due': '2024-07-08', 'paid': '2024-07-10'}, {'amount': 65.58, 'due': '2024-07-15', 'paid': '2024-07-15'}, {'amount': 57.87, 'due': '2024-07-22', 'paid': '2024-07-20'}, {'amount': 49.16, 'due': '2024-07-29', 'paid': '2024-08-01'}, {'amount': 41.45, 'due': '2024-08-05', 'paid': '2024-08-06'}, {'amount': 33.74, 'due': '2024-08-12', 'paid': '2024-08-11'}, {'amount': 25.03, 'due': '2024-08-19', 'paid': '2024-08-16'}, {'amount': 78.32, 'due': '2024-08-26', 'paid': '2024-08-28'}, {'amount': 70.61, 'due': '2024-09-02', 'paid': '2024-09-02'}, {'amount': 62.9, 'due': '2024-09-09', 'paid': '2024-09-07'}, {'amount': 54.19, 'due': '2024-09-16', 'paid': '2024-09-19'}, {'amount': 46.48, 'due': '2024-09-23', 'paid': '2024-09-24'}, {'amount': 38.77, 'due': '2024-09-30', 'paid': '2024-09-29'}, {'amount': 30.06, 'due': '2024-10-07', 'paid': '2024-10-04'}, {'amount': 22.35, 'due': '2024-10-14', 'paid': '2024-10-16'}, {'amount': 75.64, 'due': '2024-10-21', 'paid': '2024-10-21'}, {'amount': 67.93, 'due': '2024-10-28', 'paid': '2024-10-26'}, {'amount': 59.22, 'due': '2024-11-04', 'paid': '2024-11-07'}, {'amount': 51.51, 'due': '2024-11-11', 'paid': '2024-11-12'}, {'amount': 43.8, 'due': '2024-11-18', 'paid': '2024-11-17'}, {'amount': 35.09, 'due': '2024-11-25', 'paid': '2024-11-22'}, {'amount': 27.38, 'due': '2024-12-02', 'paid': '2024-12-04'}, {'amount': 80.67, 'due': '2024-12-09', 'paid': '2024-12-09'}, {'amount': 72.96, 'due': '2024-12-16', 'paid': '2024-12-14'}, {'amount': 64.25, 'due': '2024-12-23', 'paid': '2024-12-26'}, {'amount': 56.54, 'due': '2024-12-30', 'paid': '2024-12-31'}, {'amount': 48.83, 'due': '2025-01-06', 'paid': '2025-01-05'}, {'amount': 40.12, 'due': '2025-01-13', 'paid': '2025-01-10'}, {'amount': 32.41, 'due': '2025-01-20', 'paid': '2025-01-22'}, {'amount': 24.7, 'due': '2025-01-27', 'paid': '2025-01-27'}, {'amount': 77.99, 'due': '2025-02-03', 'paid': '2025-02-01'}, {'amount': 69.28, 'due': '2025-02-10', 'paid': '2025-02-13'}, {'amount': 61.57, 'due': '2025-02-17', 'paid': '2025-02-18'}, {'amount': 53.86, 'due': '2025-02-24', 'paid': '2025-02-23'}, {'amount': 45.15, 'due': '2025-03-03', 'paid': '2025-02-28'}, {'amount': 37.44, 'due': '2025-03-10', 'paid': '2025-03-12'}, {'amount': 29.73, 'due': '2025-03-17', 'paid': '2025-03-17'}, {'amount': 21.02, 'due': '2025-03-24', 'paid': '2025-03-22'}, {'amount': 74.31, 'due': '2025-03-31', 'paid': '2025-04-03'}, {'amount': 66.6, 'due': '2025-04-07', 'paid': '2025-04-08'}, {'amount': 58.89, 'due': '2025-04-14', 'paid': '2025-04-13'}, {'amount': 50.18, 'due': '2025-04-21', 'paid': '2025-04-18'}, {'amount': 42.47, 'due': '2025-04-28', 'paid': '2025-04-30'}, {'amount': 34.76, 'due': '2025-05-05', 'paid': '2025-05-05'}, {'amount': 26.05, 'due': '2025-05-12', 'paid': '2025-05-10'}, {'amount': 79.34, 'due': '2025-05-19', 'paid': '2025-05-22'}, {'amount': 71.63, 'due': '2025-05-26', 'paid': '2025-05-27'}, {'amount': 63.92, 'due': '2025-06-02', 'paid': '2025-06-01'}, {'amount': 55.21, 'due': '2025-06-09', 'paid': '2025-06-06'}, {'amount': 47.5, 'due': '2025-06-16', 'paid': '2025-06-18'}, {'amount': 39.79, 'due': '2025-06-23', 'paid': '2025-06-23'}, {'amount': 31.08, 'due': '2025-06-30', 'paid': '2025-06-28'}, {'amount': 23.37, 'due': '2025-07-07', 'paid': '2025-07-10'}, {'amount': 76.66, 'due': '2025-07-14', 'paid': '2025-07-15'}, {'amount': 68.95, 'due': '2025-07-21', 'paid': '2025-07-20'}, {'amount': 60.24, 'due': '2025-07-28', 'paid': '2025-07-25'}, {'amount': 52.53, 'due': '2025-08-04', 'paid': '2025-08-06'}, {'amount': 44.82, 'due': '2025-08-11', 'paid': '2025-08-11'}, {'amount': 36.11, 'due': '2025-08-18', 'paid': '2025-08-16'}, {'amount': 28.4, 'due': '2025-08-25', 'paid': '2025-08-28'}, {'amount': 20.69, 'due': '2025-09-01', 'paid': '2025-09-02'}, {'amount': 73.98, 'due': '2025-09-08', 'paid': '2025-09-07'}, {'amount': 65.27, 'due': '2025-09-15', 'paid': '2025-09-12'}, {'amount': 57.56, 'due': '2025-09-22', 'paid': '2025-09-24'}, {'amount': 49.85, 'due': '2025-09-29', 'paid': '2025-09-29'}, {'amount': 41.14, 'due': '2025-10-06', 'paid': '2025-10-04'}, {'amount': 33.43, 'due': '2025-10-13', 'paid': '2025-10-16'}, {'amount': 25.72, 'due': '2025-10-20', 'paid': '2025-10-21'}, {'amount': 78.01, 'due': '2025-10-27', 'paid': '2025-10-26'}, {'amount': 70.3, 'due': '2025-11-03', 'paid': '2025-10-31'}, {'amount': 62.59, 'due': '2025-11-10', 'paid': '2025-11-12'}, {'amount': 54.88, 'due': '2025-11-17', 'paid': '2025-11-17'}, {'amount': 46.17, 'due': '2025-11-24', 'paid': '2025-11-22'}, {'amount': 38.46, 'due': '2025-12-01', 'paid': '2025-12-04'}, {'amount': 30.75, 'due': '2025-12-08', 'paid': '2025-12-09'}, {'amount': 22.04, 'due': '2025-12-15', 'paid': '2025-12-14'}, {'amount': 75.33, 'due': '2025-12-22', 'paid': '2025-12-19'}, {'amount': 67.62, 'due': '2025-12-29', 'paid': '2025-12-31'}\n]\n\npayments_2025 = [p for p in history if p['paid'].startswith('2025')]\n\ntotal_paid = sum(p['amount'] for p in payments_2025)\nlate_payments = sum(1 for p in payments_2025 if p['paid'] > p['due'])\nlargest_payment = max(p['amount'] for p in payments_2025)\n\nprint(f\"Total Paid: ${total_paid:.2f}\")\nprint(f\"Late Payments: {late_payments}\")\nprint(f\"Largest Payment: ${largest_payment:.2f}\")\n"
+        ],
+        "prompt_tokens": 9735,
+        "round_trips": 2,
+        "said": "In 2025, you paid a total of $2,588.70. Twenty-two payments were late, and the largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 19749,
+    "why": "looked up: true; total 2588.70: true; 22 late: false; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-hybrid",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 2023,
+    "ms": 11019,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 788,
+        "heard": "",
+        "ms": 11019,
+        "program_results": [
+          "{\"printed\":\"Total paid: 2588.70\\nLate payments: 22\\nLargest payment: 79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "details = lookup_payment_history(account_id=\"ACME-9000\")\npayments_2025 = [\n    p for p in details['payments']\n    if p['paid'].startswith('2025')\n]\n\ntotal_paid = sum(p['amount'] for p in payments_2025)\nlate_payments = sum(1 for p in payments_2025 if p['paid'] > p['due'])\nmax_payment = max(p['amount'] for p in payments_2025) if payments_2025 else 0\n\nprint(f\"Total paid: {total_paid:.2f}\")\nprint(f\"Late payments: {late_payments}\")\nprint(f\"Largest payment: {max_payment:.2f}\")\n"
+        ],
+        "prompt_tokens": 2023,
+        "round_trips": 1,
+        "said": "You paid a total of $2,588.70 with 22 late payments, and the largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 13578,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-hybrid",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 11419,
+    "ms": 17455,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "lookup_payment_history",
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 486,
+        "heard": "",
+        "ms": 17455,
+        "program_results": [
+          "{\"printed\":\"Total Paid: 2588.70\\nLate Payments: 22\\nMax Payment: 79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "payments = [\n    {\"amount\": 20.00, \"due\": \"2024-07-01\", \"paid\": \"2024-06-28\"}, {\"amount\": 73.29, \"due\": \"2024-07-08\", \"paid\": \"2024-07-10\"}, {\"amount\": 65.58, \"due\": \"2024-07-15\", \"paid\": \"2024-07-15\"}, {\"amount\": 57.87, \"due\": \"2024-07-22\", \"paid\": \"2024-07-20\"}, {\"amount\": 49.16, \"due\": \"2024-07-29\", \"paid\": \"2024-08-01\"}, {\"amount\": 41.45, \"due\": \"2024-08-05\", \"paid\": \"2024-08-06\"}, {\"amount\": 33.74, \"due\": \"2024-08-12\", \"paid\": \"2024-08-11\"}, {\"amount\": 25.03, \"due\": \"2024-08-19\", \"paid\": \"2024-08-16\"}, {\"amount\": 78.32, \"due\": \"2024-08-26\", \"paid\": \"2024-08-28\"}, {\"amount\": 70.61, \"due\": \"2024-09-02\", \"paid\": \"2024-09-02\"}, {\"amount\": 62.90, \"due\": \"2024-09-09\", \"paid\": \"2024-09-07\"}, {\"amount\": 54.19, \"due\": \"2024-09-16\", \"paid\": \"2024-09-19\"}, {\"amount\": 46.48, \"due\": \"2024-09-23\", \"paid\": \"2024-09-24\"}, {\"amount\": 38.77, \"due\": \"2024-09-30\", \"paid\": \"2024-09-29\"}, {\"amount\": 30.06, \"due\": \"2024-10-07\", \"paid\": \"2024-10-04\"}, {\"amount\": 22.35, \"due\": \"2024-10-14\", \"paid\": \"2024-10-16\"}, {\"amount\": 75.64, \"due\": \"2024-10-21\", \"paid\": \"2024-10-21\"}, {\"amount\": 67.93, \"due\": \"2024-10-28\", \"paid\": \"2024-10-26\"}, {\"amount\": 59.22, \"due\": \"2024-11-04\", \"paid\": \"2024-11-07\"}, {\"amount\": 51.51, \"due\": \"2024-11-11\", \"paid\": \"2024-11-12\"}, {\"amount\": 43.80, \"due\": \"2024-11-18\", \"paid\": \"2024-11-17\"}, {\"amount\": 35.09, \"due\": \"2024-11-25\", \"paid\": \"2024-11-22\"}, {\"amount\": 27.38, \"due\": \"2024-12-02\", \"paid\": \"2024-12-04\"}, {\"amount\": 80.67, \"due\": \"2024-12-09\", \"paid\": \"2024-12-09\"}, {\"amount\": 72.96, \"due\": \"2024-12-16\", \"paid\": \"2024-12-14\"}, {\"amount\": 64.25, \"due\": \"2024-12-23\", \"paid\": \"2024-12-26\"}, {\"amount\": 56.54, \"due\": \"2024-12-30\", \"paid\": \"2024-12-31\"},\n    {\"amount\": 48.83, \"due\": \"2025-01-06\", \"paid\": \"2025-01-05\"}, {\"amount\": 40.12, \"due\": \"2025-01-13\", \"paid\": \"2025-01-10\"}, {\"amount\": 32.41, \"due\": \"2025-01-20\", \"paid\": \"2025-01-22\"}, {\"amount\": 24.70, \"due\": \"2025-01-27\", \"paid\": \"2025-01-27\"}, {\"amount\": 77.99, \"due\": \"2025-02-03\", \"paid\": \"2025-02-01\"}, {\"amount\": 69.28, \"due\": \"2025-02-10\", \"paid\": \"2025-02-13\"}, {\"amount\": 61.57, \"due\": \"2025-02-17\", \"paid\": \"2025-02-18\"}, {\"amount\": 53.86, \"due\": \"2025-02-24\", \"paid\": \"2025-02-23\"}, {\"amount\": 45.15, \"due\": \"2025-03-03\", \"paid\": \"2025-02-28\"}, {\"amount\": 37.44, \"due\": \"2025-03-10\", \"paid\": \"2025-03-12\"}, {\"amount\": 29.73, \"due\": \"2025-03-17\", \"paid\": \"2025-03-17\"}, {\"amount\": 21.02, \"due\": \"2025-03-24\", \"paid\": \"2025-03-22\"}, {\"amount\": 74.31, \"due\": \"2025-03-31\", \"paid\": \"2025-04-03\"}, {\"amount\": 66.60, \"due\": \"2025-04-07\", \"paid\": \"2025-04-08\"}, {\"amount\": 58.89, \"due\": \"2025-04-14\", \"paid\": \"2025-04-13\"}, {\"amount\": 50.18, \"due\": \"2025-04-21\", \"paid\": \"2025-04-18\"}, {\"amount\": 42.47, \"due\": \"2025-04-28\", \"paid\": \"2025-04-30\"}, {\"amount\": 34.76, \"due\": \"2025-05-05\", \"paid\": \"2025-05-05\"}, {\"amount\": 26.05, \"due\": \"2025-05-12\", \"paid\": \"2025-05-10\"}, {\"amount\": 79.34, \"due\": \"2025-05-19\", \"paid\": \"2025-05-22\"}, {\"amount\": 71.63, \"due\": \"2025-05-26\", \"paid\": \"2025-05-27\"}, {\"amount\": 63.92, \"due\": \"2025-06-02\", \"paid\": \"2025-06-01\"}, {\"amount\": 55.21, \"due\": \"2025-06-09\", \"paid\": \"2025-06-06\"}, {\"amount\": 47.50, \"due\": \"2025-06-16\", \"paid\": \"2025-06-18\"}, {\"amount\": 39.79, \"due\": \"2025-06-23\", \"paid\": \"2025-06-23\"}, {\"amount\": 31.08, \"due\": \"2025-06-30\", \"paid\": \"2025-06-28\"}, {\"amount\": 23.37, \"due\": \"2025-07-07\", \"paid\": \"2025-07-10\"}, {\"amount\": 76.66, \"due\": \"2025-07-14\", \"paid\": \"2025-07-15\"}, {\"amount\": 68.95, \"due\": \"2025-07-21\", \"paid\": \"2025-07-20\"}, {\"amount\": 60.24, \"due\": \"2025-07-28\", \"paid\": \"2025-07-25\"}, {\"amount\": 52.53, \"due\": \"2025-08-04\", \"paid\": \"2025-08-06\"}, {\"amount\": 44.82, \"due\": \"2025-08-11\", \"paid\": \"2025-08-11\"}, {\"amount\": 36.11, \"due\": \"2025-08-18\", \"paid\": \"2025-08-16\"}, {\"amount\": 28.40, \"due\": \"2025-08-25\", \"paid\": \"2025-08-28\"}, {\"amount\": 20.69, \"due\": \"2025-09-01\", \"paid\": \"2025-09-02\"}, {\"amount\": 73.98, \"due\": \"2025-09-08\", \"paid\": \"2025-09-07\"}, {\"amount\": 65.27, \"due\": \"2025-09-15\", \"paid\": \"2025-09-12\"}, {\"amount\": 57.56, \"due\": \"2025-09-22\", \"paid\": \"2025-09-24\"}, {\"amount\": 49.85, \"due\": \"2025-09-29\", \"paid\": \"2025-09-29\"}, {\"amount\": 41.14, \"due\": \"2025-10-06\", \"paid\": \"2025-10-04\"}, {\"amount\": 33.43, \"due\": \"2025-10-13\", \"paid\": \"2025-10-16\"}, {\"amount\": 25.72, \"due\": \"2025-10-20\", \"paid\": \"2025-10-21\"}, {\"amount\": 78.01, \"due\": \"2025-10-27\", \"paid\": \"2025-10-26\"}, {\"amount\": 70.30, \"due\": \"2025-11-03\", \"paid\": \"2025-10-31\"}, {\"amount\": 62.59, \"due\": \"2025-11-10\", \"paid\": \"2025-11-12\"}, {\"amount\": 54.88, \"due\": \"2025-11-17\", \"paid\": \"2025-11-17\"}, {\"amount\": 46.17, \"due\": \"2025-11-24\", \"paid\": \"2025-11-22\"}, {\"amount\": 38.46, \"due\": \"2025-12-01\", \"paid\": \"2025-12-04\"}, {\"amount\": 30.75, \"due\": \"2025-12-08\", \"paid\": \"2025-12-09\"}, {\"amount\": 22.04, \"due\": \"2025-12-15\", \"paid\": \"2025-12-14\"}, {\"amount\": 75.33, \"due\": \"2025-12-22\", \"paid\": \"2025-12-19\"}, {\"amount\": 67.62, \"due\": \"2025-12-29\", \"paid\": \"2025-12-31\"},\n    {\"amount\": 59.91, \"due\": \"2026-01-05\", \"paid\": \"2026-01-05\"}, {\"amount\": 51.20, \"due\": \"2026-01-12\", \"paid\": \"2026-01-10\"}, {\"amount\": 43.49, \"due\": \"2026-01-19\", \"paid\": \"2026-01-22\"}, {\"amount\": 35.78, \"due\": \"2026-01-26\", \"paid\": \"2026-01-27\"}, {\"amount\": 27.07, \"due\": \"2026-02-02\", \"paid\": \"2026-02-01\"}, {\"amount\": 80.36, \"due\": \"2026-02-09\", \"paid\": \"2026-02-06\"}, {\"amount\": 72.65, \"due\": \"2026-02-16\", \"paid\": \"2026-02-18\"}, {\"amount\": 64.94, \"due\": \"2026-02-23\", \"paid\": \"2026-02-23\"}, {\"amount\": 56.23, \"due\": \"2026-03-02\", \"paid\": \"2026-02-28\"}, {\"amount\": 48.52, \"due\": \"2026-03-09\", \"paid\": \"2026-03-12\"}, {\"amount\": 40.81, \"due\": \"2026-03-16\", \"paid\": \"2026-03-17\"}, {\"amount\": 32.10, \"due\": \"2026-03-23\", \"paid\": \"2026-03-22\"}, {\"amount\": 24.39, \"due\": \"2026-03-30\", \"paid\": \"2026-03-27\"}, {\"amount\": 77.68, \"due\": \"2026-04-06\", \"paid\": \"2026-04-08\"}, {\"amount\": 69.97, \"due\": \"2026-04-13\", \"paid\": \"2026-04-13\"}, {\"amount\": 61.26, \"due\": \"2026-04-20\", \"paid\": \"2026-04-18\"}, {\"amount\": 53.55, \"due\": \"2026-04-27\", \"paid\": \"2026-04-30\"}, {\"amount\": 45.84, \"due\": \"2026-05-04\", \"paid\": \"2026-05-05\"}, {\"amount\": 37.13, \"due\": \"2026-05-11\", \"paid\": \"2026-05-10\"}, {\"amount\": 29.42, \"due\": \"2026-05-18\", \"paid\": \"2026-05-15\"}, {\"amount\": 21.71, \"due\": \"2026-05-25\", \"paid\": \"2026-05-27\"}, {\"amount\": 74.00, \"due\": \"2026-06-01\", \"paid\": \"2026-06-01\"}, {\"amount\": 66.29, \"due\": \"2026-06-08\", \"paid\": \"2026-06-06\"}, {\"amount\": 58.58, \"due\": \"2026-06-15\", \"paid\": \"2026-06-18\"}, {\"amount\": 50.87, \"due\": \"2026-06-22\", \"paid\": \"2026-06-23\"}, {\"amount\": 42.16, \"due\": \"2026-06-29\", \"paid\": \"2026-06-28\"}, {\"amount\": 34.45, \"due\": \"2026-07-06\", \"paid\": \"2026-07-03\"}, {\"amount\": 26.74, \"due\": \"2026-07-13\", \"paid\": \"2026-07-15\"}, {\"amount\": 79.03, \"due\": \"2026-07-20\", \"paid\": \"2026-07-20\"}, {\"amount\": 71.32, \"due\": \"2026-07-27\", \"paid\": \"2026-07-25\"}, {\"amount\": 63.61, \"due\": \"2026-08-03\", \"paid\": \"2026-08-06\"}, {\"amount\": 55.90, \"due\": \"2026-08-10\", \"paid\": \"2026-08-11\"}, {\"amount\": 47.19, \"due\": \"2026-08-17\", \"paid\": \"2026-08-16\"}, {\"amount\": 39.48, \"due\": \"2026-08-24\", \"paid\": \"2026-08-21\"}, {\"amount\": 31.77, \"due\": \"2026-08-31\", \"paid\": \"2026-09-02\"}, {\"amount\": 23.06, \"due\": \"2026-09-07\", \"paid\": \"2026-09-07\"}, {\"amount\": 76.35, \"due\": \"2026-09-14\", \"paid\": \"2026-09-12\"}, {\"amount\": 68.64, \"due\": \"2026-09-21\", \"paid\": \"2026-09-24\"}, {\"amount\": 60.93, \"due\": \"2026-09-28\", \"paid\": \"2026-09-29\"}, {\"amount\": 52.22, \"due\": \"2026-10-05\", \"paid\": \"2026-10-04\"}, {\"amount\": 44.51, \"due\": \"2026-10-12\", \"paid\": \"2026-10-09\"}\n]\n\npayments_2025 = [p for p in payments if p[\"paid\"].startswith(\"2025\")]\n\ntotal_paid_2025 = sum(p[\"amount\"] for p in payments_2025)\nlate_payments_2025 = sum(1 for p in payments_2025 if p[\"paid\"] > p[\"due\"])\nmax_payment_2025 = max(p[\"amount\"] for p in payments_2025)\n\nprint(f\"Total Paid: {total_paid_2025:.2f}\")\nprint(f\"Late Payments: {late_payments_2025}\")\nprint(f\"Max Payment: {max_payment_2025:.2f}\")"
+        ],
+        "prompt_tokens": 11419,
+        "round_trips": 2,
+        "said": "In 2025, you paid a total of $2588.70, had 22 late payments, and your largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 20047,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-hybrid",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 9740,
+    "ms": 17307,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "lookup_payment_history",
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 620,
+        "heard": "",
+        "ms": 17307,
+        "program_results": [
+          "{\"printed\":\"Total: 2588.70, Late: 22, Max: 79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "import json\n\npayments_data = {'account_id': 'ACME-9000', 'payments': [{'amount': 20, 'due': '2024-07-01', 'paid': '2024-06-28'}, {'amount': 73.29, 'due': '2024-07-08', 'paid': '2024-07-10'}, {'amount': 65.58, 'due': '2024-07-15', 'paid': '2024-07-15'}, {'amount': 57.87, 'due': '2024-07-22', 'paid': '2024-07-20'}, {'amount': 49.16, 'due': '2024-07-29', 'paid': '2024-08-01'}, {'amount': 41.45, 'due': '2024-08-05', 'paid': '2024-08-06'}, {'amount': 33.74, 'due': '2024-08-12', 'paid': '2024-08-11'}, {'amount': 25.03, 'due': '2024-08-19', 'paid': '2024-08-16'}, {'amount': 78.32, 'due': '2024-08-26', 'paid': '2024-08-28'}, {'amount': 70.61, 'due': '2024-09-02', 'paid': '2024-09-02'}, {'amount': 62.9, 'due': '2024-09-09', 'paid': '2024-09-07'}, {'amount': 54.19, 'due': '2024-09-16', 'paid': '2024-09-19'}, {'amount': 46.48, 'due': '2024-09-23', 'paid': '2024-09-24'}, {'amount': 38.77, 'due': '2024-09-30', 'paid': '2024-09-29'}, {'amount': 30.06, 'due': '2024-10-07', 'paid': '2024-10-04'}, {'amount': 22.35, 'due': '2024-10-14', 'paid': '2024-10-16'}, {'amount': 75.64, 'due': '2024-10-21', 'paid': '2024-10-21'}, {'amount': 67.93, 'due': '2024-10-28', 'paid': '2024-10-26'}, {'amount': 59.22, 'due': '2024-11-04', 'paid': '2024-11-07'}, {'amount': 51.51, 'due': '2024-11-11', 'paid': '2024-11-12'}, {'amount': 43.8, 'due': '2024-11-18', 'paid': '2024-11-17'}, {'amount': 35.09, 'due': '2024-11-25', 'paid': '2024-11-22'}, {'amount': 27.38, 'due': '2024-12-02', 'paid': '2024-12-04'}, {'amount': 80.67, 'due': '2024-12-09', 'paid': '2024-12-09'}, {'amount': 72.96, 'due': '2024-12-16', 'paid': '2024-12-14'}, {'amount': 64.25, 'due': '2024-12-23', 'paid': '2024-12-26'}, {'amount': 56.54, 'due': '2024-12-30', 'paid': '2024-12-31'}, {'amount': 48.83, 'due': '2025-01-06', 'paid': '2025-01-05'}, {'amount': 40.12, 'due': '2025-01-13', 'paid': '2025-01-10'}, {'amount': 32.41, 'due': '2025-01-20', 'paid': '2025-01-22'}, {'amount': 24.7, 'due': '2025-01-27', 'paid': '2025-01-27'}, {'amount': 77.99, 'due': '2025-02-03', 'paid': '2025-02-01'}, {'amount': 69.28, 'due': '2025-02-10', 'paid': '2025-02-13'}, {'amount': 61.57, 'due': '2025-02-17', 'paid': '2025-02-18'}, {'amount': 53.86, 'due': '2025-02-24', 'paid': '2025-02-23'}, {'amount': 45.15, 'due': '2025-03-03', 'paid': '2025-02-28'}, {'amount': 37.44, 'due': '2025-03-10', 'paid': '2025-03-12'}, {'amount': 29.73, 'due': '2025-03-17', 'paid': '2025-03-17'}, {'amount': 21.02, 'due': '2025-03-24', 'paid': '2025-03-22'}, {'amount': 74.31, 'due': '2025-03-31', 'paid': '2025-04-03'}, {'amount': 66.6, 'due': '2025-04-07', 'paid': '2025-04-08'}, {'amount': 58.89, 'due': '2025-04-14', 'paid': '2025-04-13'}, {'amount': 50.18, 'due': '2025-04-21', 'paid': '2025-04-18'}, {'amount': 42.47, 'due': '2025-04-28', 'paid': '2025-04-30'}, {'amount': 34.76, 'due': '2025-05-05', 'paid': '2025-05-05'}, {'amount': 26.05, 'due': '2025-05-12', 'paid': '2025-05-10'}, {'amount': 79.34, 'due': '2025-05-19', 'paid': '2025-05-22'}, {'amount': 71.63, 'due': '2025-05-26', 'paid': '2025-05-27'}, {'amount': 63.92, 'due': '2025-06-02', 'paid': '2025-06-01'}, {'amount': 55.21, 'due': '2025-06-09', 'paid': '2025-06-06'}, {'amount': 47.5, 'due': '2025-06-16', 'paid': '2025-06-18'}, {'amount': 39.79, 'due': '2025-06-23', 'paid': '2025-06-23'}, {'amount': 31.08, 'due': '2025-06-30', 'paid': '2025-06-28'}, {'amount': 23.37, 'due': '2025-07-07', 'paid': '2025-07-10'}, {'amount': 76.66, 'due': '2025-07-14', 'paid': '2025-07-15'}, {'amount': 68.95, 'due': '2025-07-21', 'paid': '2025-07-20'}, {'amount': 60.24, 'due': '2025-07-28', 'paid': '2025-07-25'}, {'amount': 52.53, 'due': '2025-08-04', 'paid': '2025-08-06'}, {'amount': 44.82, 'due': '2025-08-11', 'paid': '2025-08-11'}, {'amount': 36.11, 'due': '2025-08-18', 'paid': '2025-08-16'}, {'amount': 28.4, 'due': '2025-08-25', 'paid': '2025-08-28'}, {'amount': 20.69, 'due': '2025-09-01', 'paid': '2025-09-02'}, {'amount': 73.98, 'due': '2025-09-08', 'paid': '2025-09-07'}, {'amount': 65.27, 'due': '2025-09-15', 'paid': '2025-09-12'}, {'amount': 57.56, 'due': '2025-09-22', 'paid': '2025-09-24'}, {'amount': 49.85, 'due': '2025-09-29', 'paid': '2025-09-29'}, {'amount': 41.14, 'due': '2025-10-06', 'paid': '2025-10-04'}, {'amount': 33.43, 'due': '2025-10-13', 'paid': '2025-10-16'}, {'amount': 25.72, 'due': '2025-10-20', 'paid': '2025-10-21'}, {'amount': 78.01, 'due': '2025-10-27', 'paid': '2025-10-26'}, {'amount': 70.3, 'due': '2025-11-03', 'paid': '2025-10-31'}, {'amount': 62.59, 'due': '2025-11-10', 'paid': '2025-11-12'}, {'amount': 54.88, 'due': '2025-11-17', 'paid': '2025-11-17'}, {'amount': 46.17, 'due': '2025-11-24', 'paid': '2025-11-22'}, {'amount': 38.46, 'due': '2025-12-01', 'paid': '2025-12-04'}, {'amount': 30.75, 'due': '2025-12-08', 'paid': '2025-12-09'}, {'amount': 22.04, 'due': '2025-12-15', 'paid': '2025-12-14'}, {'amount': 75.33, 'due': '2025-12-22', 'paid': '2025-12-19'}, {'amount': 67.62, 'due': '2025-12-29', 'paid': '2025-12-31'}]}\n\ntotal_paid = 0\nlate_payments = 0\nmax_payment = 0\n\nfor p in payments_data['payments']:\n    if p['paid'].startswith('2025'):\n        total_paid += p['amount']\n        if p['paid'] > p['due']:\n            late_payments += 1\n        if p['amount'] > max_payment:\n            max_payment = p['amount']\n\nprint(f\"Total: {total_paid:.2f}, Late: {late_payments}, Max: {max_payment:.2f}\")\n"
+        ],
+        "prompt_tokens": 9740,
+        "round_trips": 2,
+        "said": "For account ACME-9000 in 2025, you paid a total of $2,588.70, with 22 late payments and a largest single payment of $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 19839,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-hybrid",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 9367,
+    "ms": 16425,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "lookup_payment_history",
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 529,
+        "heard": "",
+        "ms": 16425,
+        "program_results": [
+          "{\"printed\":\"Total: 2588.70, Late: 22, Largest: 79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "import json\nfrom datetime import datetime\n\ndata = {'account_id': 'ACME-9000', 'payments': [{'amount':20,'due':'2024-07-01','paid':'2024-06-28'},{'amount':73.29,'due':'2024-07-08','paid':'2024-07-10'},{'amount':65.58,'due':'2024-07-15','paid':'2024-07-15'},{'amount':57.87,'due':'2024-07-22','paid':'2024-07-20'},{'amount':49.16,'due':'2024-07-29','paid':'2024-08-01'},{'amount':41.45,'due':'2024-08-05','paid':'2024-08-06'},{'amount':33.74,'due':'2024-08-12','paid':'2024-08-11'},{'amount':25.03,'due':'2024-08-19','paid':'2024-08-16'},{'amount':78.32,'due':'2024-08-26','paid':'2024-08-28'},{'amount':70.61,'due':'2024-09-02','paid':'2024-09-02'},{'amount':62.9,'due':'2024-09-09','paid':'2024-09-07'},{'amount':54.19,'due':'2024-09-16','paid':'2024-09-19'},{'amount':46.48,'due':'2024-09-23','paid':'2024-09-24'},{'amount':38.77,'due':'2024-09-30','paid':'2024-09-29'},{'amount':30.06,'due':'2024-10-07','paid':'2024-10-04'},{'amount':22.35,'due':'2024-10-14','paid':'2024-10-16'},{'amount':75.64,'due':'2024-10-21','paid':'2024-10-21'},{'amount':67.93,'due':'2024-10-28','paid':'2024-10-26'},{'amount':59.22,'due':'2024-11-04','paid':'2024-11-07'},{'amount':51.51,'due':'2024-11-11','paid':'2024-11-12'},{'amount':43.8,'due':'2024-11-18','paid':'2024-11-17'},{'amount':35.09,'due':'2024-11-25','paid':'2024-11-22'},{'amount':27.38,'due':'2024-12-02','paid':'2024-12-04'},{'amount':80.67,'due':'2024-12-09','paid':'2024-12-09'},{'amount':72.96,'due':'2024-12-16','paid':'2024-12-14'},{'amount':64.25,'due':'2024-12-23','paid':'2024-12-26'},{'amount':56.54,'due':'2024-12-30','paid':'2024-12-31'},{'amount':48.83,'due':'2025-01-06','paid':'2025-01-05'},{'amount':40.12,'due':'2025-01-13','paid':'2025-01-10'},{'amount':32.41,'due':'2025-01-20','paid':'2025-01-22'},{'amount':24.7,'due':'2025-01-27','paid':'2025-01-27'},{'amount':77.99,'due':'2025-02-03','paid':'2025-02-01'},{'amount':69.28,'due':'2025-02-10','paid':'2025-02-13'},{'amount':61.57,'due':'2025-02-17','paid':'2025-02-18'},{'amount':53.86,'due':'2025-02-24','paid':'2025-02-23'},{'amount':45.15,'due':'2025-03-03','paid':'2025-02-28'},{'amount':37.44,'due':'2025-03-10','paid':'2025-03-12'},{'amount':29.73,'due':'2025-03-17','paid':'2025-03-17'},{'amount':21.02,'due':'2025-03-24','paid':'2025-03-22'},{'amount':74.31,'due':'2025-03-31','paid':'2025-04-03'},{'amount':66.6,'due':'2025-04-07','paid':'2025-04-08'},{'amount':58.89,'due':'2025-04-14','paid':'2025-04-13'},{'amount':50.18,'due':'2025-04-21','paid':'2025-04-18'},{'amount':42.47,'due':'2025-04-28','paid':'2025-04-30'},{'amount':34.76,'due':'2025-05-05','paid':'2025-05-05'},{'amount':26.05,'due':'2025-05-12','paid':'2025-05-10'},{'amount':79.34,'due':'2025-05-19','paid':'2025-05-22'},{'amount':71.63,'due':'2025-05-26','paid':'2025-05-27'},{'amount':63.92,'due':'2025-06-02','paid':'2025-06-01'},{'amount':55.21,'due':'2025-06-09','paid':'2025-06-06'},{'amount':47.5,'due':'2025-06-16','paid':'2025-06-18'},{'amount':39.79,'due':'2025-06-23','paid':'2025-06-23'},{'amount':31.08,'due':'2025-06-30','paid':'2025-06-28'},{'amount':23.37,'due':'2025-07-07','paid':'2025-07-10'},{'amount':76.66,'due':'2025-07-14','paid':'2025-07-15'},{'amount':68.95,'due':'2025-07-21','paid':'2025-07-20'},{'amount':60.24,'due':'2025-07-28','paid':'2025-07-25'},{'amount':52.53,'due':'2025-08-04','paid':'2025-08-06'},{'amount':44.82,'due':'2025-08-11','paid':'2025-08-11'},{'amount':36.11,'due':'2025-08-18','paid':'2025-08-16'},{'amount':28.4,'due':'2025-08-25','paid':'2025-08-28'},{'amount':20.69,'due':'2025-09-01','paid':'2025-09-02'},{'amount':73.98,'due':'2025-09-08','paid':'2025-09-07'},{'amount':65.27,'due':'2025-09-15','paid':'2025-09-12'},{'amount':57.56,'due':'2025-09-22','paid':'2025-09-24'},{'amount':49.85,'due':'2025-09-29','paid':'2025-09-29'},{'amount':41.14,'due':'2025-10-06','paid':'2025-10-04'},{'amount':33.43,'due':'2025-10-13','paid':'2025-10-16'},{'amount':25.72,'due':'2025-10-20','paid':'2025-10-21'},{'amount':78.01,'due':'2025-10-27','paid':'2025-10-26'},{'amount':70.3,'due':'2025-11-03','paid':'2025-10-31'},{'amount':62.59,'due':'2025-11-10','paid':'2025-11-12'},{'amount':54.88,'due':'2025-11-17','paid':'2025-11-17'},{'amount':46.17,'due':'2025-11-24','paid':'2025-11-22'},{'amount':38.46,'due':'2025-12-01','paid':'2025-12-04'},{'amount':30.75,'due':'2025-12-08','paid':'2025-12-09'},{'amount':22.04,'due':'2025-12-15','paid':'2025-12-14'},{'amount':75.33,'due':'2025-12-22','paid':'2025-12-19'},{'amount':67.62,'due':'2025-12-29','paid':'2025-12-31'}]}\n\ntotal_paid = 0\nlate_payments = 0\nlargest_payment = 0\n\nfor p in data['payments']:\n    paid_date = datetime.strptime(p['paid'], '%Y-%m-%d')\n    if paid_date.year == 2025:\n        total_paid += p['amount']\n        if p['paid'] > p['due']:\n            late_payments += 1\n        if p['amount'] > largest_payment:\n            largest_payment = p['amount']\n\nprint(f\"Total: {total_paid:.2f}, Late: {late_payments}, Largest: {largest_payment:.2f}\")"
+        ],
+        "prompt_tokens": 9367,
+        "round_trips": 2,
+        "said": "In 2025, you paid a total of $2,588.70, with 22 late payments and a largest single payment of $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 18947,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  }
+]

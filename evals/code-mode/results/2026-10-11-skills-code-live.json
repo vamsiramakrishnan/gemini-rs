@@ -1,0 +1,165 @@
+[
+  {
+    "answer": "That's still processing. I'll let you know once the information is ready.For calendar year 2025, you paid a total of $4,740.00, and 12 of your payments were returned. Is there anything else I can help you with?",
+    "calls": [
+      "start_payment_history",
+      "payment_history__verify_identity",
+      "payment_history__run_code",
+      "task_control"
+    ],
+    "declared_at_end": [
+      "start_account_dispute",
+      "start_hardship_request",
+      "start_payment_help",
+      "start_payment_history",
+      "start_payment_resolution",
+      "task_control"
+    ],
+    "programs": [
+      "payments = []\nfor quarter in [\"Q1\", \"Q2\", \"Q3\", \"Q4\"]:\n    period = f\"2025-{quarter}\"\n    res = lookup_payment_history(\"ACME-4821\", period)\n    payments.extend(res[\"payments\"])\n\ntotal_paid = sum(p[\"amount_usd\"] for p in payments if p[\"status\"] == \"posted\")\nreturned_count = sum(1 for p in payments if p[\"status\"] == \"returned\")\nprint(f\"Total Paid: ${total_paid:.2f}\")\nprint(f\"Returned Payments: {returned_count}\")"
+    ],
+    "prompt_tokens": 5515,
+    "right_returned": false,
+    "right_total": false,
+    "succeeded": [
+      "verify_identity",
+      "lookup_payment_history",
+      "lookup_payment_history",
+      "lookup_payment_history",
+      "lookup_payment_history"
+    ],
+    "truth": {
+      "returned": 3,
+      "total": "1185.00"
+    }
+  },
+  {
+    "answer": "For calendar year 2025, you paid a total of one thousand one hundred eighty-five dollars, and three of your payments were returned.",
+    "calls": [
+      "start_payment_history",
+      "payment_history__verify_identity",
+      "payment_history__run_code",
+      "task_control",
+      "task_control"
+    ],
+    "declared_at_end": [
+      "start_account_dispute",
+      "start_hardship_request",
+      "start_payment_help",
+      "start_payment_history",
+      "start_payment_resolution",
+      "task_control"
+    ],
+    "programs": [
+      "print(lookup_payment_history(account_id=\"ACME-4821\", period=\"2025\"))"
+    ],
+    "prompt_tokens": 4955,
+    "right_returned": true,
+    "right_total": true,
+    "succeeded": [
+      "verify_identity",
+      "lookup_payment_history"
+    ],
+    "truth": {
+      "returned": 3,
+      "total": "1185.00"
+    }
+  },
+  {
+    "answer": "Still working on verifying your details. One moment.For the calendar year 2025, you paid a total of one thousand one hundred eighty-five dollars, and you had three payments returned.",
+    "calls": [
+      "start_payment_history",
+      "payment_history__verify_identity",
+      "payment_history__run_code",
+      "task_control",
+      "task_control"
+    ],
+    "declared_at_end": [
+      "start_account_dispute",
+      "start_hardship_request",
+      "start_payment_help",
+      "start_payment_history",
+      "start_payment_resolution",
+      "task_control"
+    ],
+    "programs": [
+      "print(lookup_payment_history(account_id=\"ACME-4821\", period=\"2025\"))"
+    ],
+    "prompt_tokens": 5099,
+    "right_returned": true,
+    "right_total": true,
+    "succeeded": [
+      "verify_identity",
+      "lookup_payment_history"
+    ],
+    "truth": {
+      "returned": 3,
+      "total": "1185.00"
+    }
+  },
+  {
+    "answer": "For the 2025 calendar year, you paid a total of $1,185.00, and you had 3 payments returned.",
+    "calls": [
+      "start_payment_history",
+      "payment_history__run_code",
+      "task_control"
+    ],
+    "declared_at_end": [
+      "start_account_dispute",
+      "start_hardship_request",
+      "start_payment_help",
+      "start_payment_history",
+      "start_payment_resolution",
+      "task_control"
+    ],
+    "programs": [
+      "identity = verify_identity(account_id=\"ACME-4821\", name=\"Jordan Ellis\", date_of_birth=\"1988-03-14\")\nif identity.get(\"verified\"):\n    history = lookup_payment_history(account_id=\"ACME-4821\", period=\"2025\")\n    print(f\"Identity Verified: Yes\")\n    print(f\"History: {history}\")\nelse:\n    print(\"Identity Not Verified\")\n"
+    ],
+    "prompt_tokens": 4115,
+    "right_returned": true,
+    "right_total": true,
+    "succeeded": [
+      "verify_identity",
+      "lookup_payment_history"
+    ],
+    "truth": {
+      "returned": 3,
+      "total": "1185.00"
+    }
+  },
+  {
+    "answer": "Waiting on response.Waiting on response.For the calendar year 2025, you paid a total of $1,185.00, and you had 3 payments returned.",
+    "calls": [
+      "start_payment_history",
+      "payment_history__verify_identity",
+      "payment_history__run_code",
+      "payment_history__run_code"
+    ],
+    "declared_at_end": [
+      "payment_history__run_code",
+      "payment_history__verify_identity",
+      "start_account_dispute",
+      "start_hardship_request",
+      "start_payment_help",
+      "start_payment_history",
+      "start_payment_resolution",
+      "task_control"
+    ],
+    "programs": [
+      "print(lookup_payment_history(account_id=\"ACME-4821\", period=\"2025\"))",
+      "print(lookup_payment_history(account_id=\"ACME-4821\", period=\"2025\"))"
+    ],
+    "prompt_tokens": 6198,
+    "right_returned": true,
+    "right_total": true,
+    "succeeded": [
+      "verify_identity",
+      "lookup_payment_history",
+      "lookup_payment_history"
+    ],
+    "truth": {
+      "returned": 3,
+      "total": "1185.00"
+    }
+  }
+]

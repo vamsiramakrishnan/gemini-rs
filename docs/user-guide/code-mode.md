@@ -216,7 +216,64 @@ to reads that return quickly.
 
 ## What it measured
 
-<!-- SDK_RESULTS -->
+Measured on Gemini 3.8 Live through the SDK as shipped (`Live` sessions with
+the tools registered and the booking gated by a governed flow), ten tasks
+with computed answers, five runs each, typed callers; harness and raw runs in
+[`evals/code-mode`](../../evals/code-mode/README.md).
+
+| Configuration | Right | 120 payment rows: right, reply time, prompt tokens |
+|---|---|---|
+| Function calls only | 46/50 | 2/5, 19.3 s, 5,796 |
+| Code only (`direct(false)`) | 49/50 | 5/5, 13.3 s, 4,225 |
+| Hybrid (the default) | 50/50 | 5/5, 18.1 s, 9,782 |
+| Hybrid, history `only_in_code` | 48/50 | 5/5, 12.0 s, 1,959 |
+
+- **The win is where the data is large.** Over 120 rows, function calls gave
+  a wrong total in 3 of 5 runs, said as confidently as the right ones; every
+  code configuration was right in every run. On dates, fan-out over a few
+  days, chains and bookings, function calls were already right.
+- **Where the tool sits matters as much as having code mode.** Given the
+  history as a direct tool too, the model fetched all 120 rows and then
+  pasted them into a program: right, but the most tokens of all. Marked
+  `only_in_code`, it called the history only inside a program, mostly in one
+  round trip: a third of the tokens of function calls and 7 s faster.
+- **On small tasks the hybrid costs little.** It mostly made direct calls,
+  and its first action came within about 100 ms of function calls', except
+  where it chose a program (fourteen days to check: 1.1 s against 0.5 s). Its
+  declaration adds about 550 to 600 prompt tokens per turn. Code only was
+  about 130 ms slower to its first action at the median, and up to 520 ms.
+- **Programs bring their own mistakes.** Programs counted weekdays from the
+  wrong origin (checking a Wednesday for a Tuesday), searched medication names
+  for "cholesterol" and missed a statin, and picked the first evening with a
+  slot rather than the earliest slot. The description now covers the first
+  two; the model reading four short lists made none of them.
+- **Governance held.** No configuration booked before the caller's yes or
+  claimed a booking that had not happened, in 40 booking runs.
+
+With the final defaults (oversized printouts refused, 2,000 characters), the
+two large-data tasks were right in 30 of 30 runs across the three code
+configurations, and code only fell to 1,700 prompt tokens on the 120 rows:
+refused a printout, the model computed in the program instead.
+
+**Spoken callers** (Gemini TTS, streamed in real time; three runs each of a
+date, a chain, a booking and the 120 rows): function calls 11/12, the hybrid
+12/12, the tuned hybrid 12/12. Speech recognition heard "ACME-9000" as "Acme
+9000" and every configuration still looked up the right account. On the 120
+rows the caller waited 8.3 s for the first audio with function calls, 6.2 s
+with the hybrid and 2.1 s with the history `only_in_code`, at 6,125, 9,654
+and 2,280 prompt tokens.
+
+**In a skill** (collections spec, `payment_history` with 36 months reachable
+only through `payment_history__run_code`): 4 of 5 runs right. Every lookup
+ran as an operation of the skill's task; in one run the program verified and
+looked up in one go, the skill's flow admitting the lookup once the
+verification's receipt landed. The miss asked for the four quarters
+separately from a stand-in tool that read each as the whole year.
+
+What live runs changed in the SDK: the description's wording (above), a
+guard against copied stubs, refusing an oversized printout whole (cut, the
+model answered from what was left), and a parser fix after a malformed stub
+panicked the control lane.
 
 ## Gemini's own code execution
 

@@ -1,0 +1,420 @@
+[
+  {
+    "arm": "sdk-code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 1598,
+    "ms": 7771,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 856,
+        "heard": "",
+        "ms": 7771,
+        "program_results": [
+          "{\"printed\":\"Total Paid 2026: 1530.45\\nLate Payments 2026: 5\",\"result\":null}"
+        ],
+        "programs": [
+          "account_id = \"ACME-7300\"\nhistory = lookup_payment_history(account_id=account_id)\npayments = history.get('payments', [])\n\ntotal_paid_2026 = 0.0\nlate_payments_2026 = 0\n\nfor p in payments:\n    if p['paid'].startswith('2026'):\n        total_paid_2026 += p['amount']\n        if p['paid'] > p['due']:\n            late_payments_2026 += 1\n\nprint(f\"Total Paid 2026: {total_paid_2026:.2f}\")\nprint(f\"Late Payments 2026: {late_payments_2026}\")"
+        ],
+        "prompt_tokens": 1598,
+        "round_trips": 1,
+        "said": "You paid a total of 1,530.45 dollars in 2026, of which 5 payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 10324,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-code",
+    "bookings": [],
+    "code_blocks": 2,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 3449,
+    "ms": 14713,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "run_code",
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 468,
+        "heard": "",
+        "ms": 14713,
+        "program_results": [
+          "{\"printed\":\"{'account_id': 'ACME-7300', 'payments': [{'amount': 100.0, 'due': '2025-01-05', 'paid': '2025-01-02'}, {'amount': 137.13, 'due': '2025-02-05', 'paid': '2025-02-09'}, {'amount': 174.26, 'due': '2025-03-05', 'paid': '2025-03-07'}, {'amount': 121.39, 'due': '2025-04-05', 'paid': '2025-04-05'}, {'amount': 158.52, 'due': '2025-05-05', 'paid': '2025-05-03'}, {'amount': 105.65, 'due': '2025-06-05', 'paid': '2025-06-10'}, {'amount': 142.78, 'due': '2025-07-05', 'paid': '2025-07-08'}, {'amount': 179.91, 'due': '2025-08-05', 'paid': '2025-08-06'}, {'amount': 126.04, 'due': '2025-09-05', 'pai…",
+          "{\"printed\":\"Total: 1530.45, Late: 5\",\"result\":null}"
+        ],
+        "programs": [
+          "print(lookup_payment_history(\"ACME-7300\"))",
+          "import datetime\n\nhistory = {'account_id': 'ACME-7300', 'payments': [{'amount': 100.0, 'due': '2025-01-05', 'paid': '2025-01-02'}, {'amount': 137.13, 'due': '2025-02-05', 'paid': '2025-02-09'}, {'amount': 174.26, 'due': '2025-03-05', 'paid': '2025-03-07'}, {'amount': 121.39, 'due': '2025-04-05', 'paid': '2025-04-05'}, {'amount': 158.52, 'due': '2025-05-05', 'paid': '2025-05-03'}, {'amount': 105.65, 'due': '2025-06-05', 'paid': '2025-06-10'}, {'amount': 142.78, 'due': '2025-07-05', 'paid': '2025-07-08'}, {'amount': 179.91, 'due': '2025-08-05', 'paid': '2025-08-06'}, {'amount': 126.04, 'due': '2025-09-05', 'paid': '2025-09-04'}, {'amount': 163.17, 'due': '2025-10-05', 'paid': '2025-10-02'}, {'amount': 110.3, 'due': '2025-11-05', 'paid': '2025-11-09'}, {'amount': 147.43, 'due': '2025-12-05', 'paid': '2025-12-07'}, {'amount': 184.56, 'due': '2026-01-05', 'paid': '2026-01-05'}, {'amount': 131.69, 'due': '2026-02-05', 'paid': '2026-02-03'}, {'amount': 168.82, 'due': '2026-03-05', 'paid': '2026-03-10'}, {'amount': 115.95, 'due': '2026-04-05', 'paid': '2026-04-08'}, {'amount': 152.08, 'due': '2026-05-05', 'paid': '2026-05-06'}, {'amount': 189.21, 'due': '2026-06-05', 'paid': '2026-06-04'}, {'amount': 136.34, 'due': '2026-07-05', 'paid': '2026-07-02'}, {'amount': 173.47, 'due': '2026-08-05', 'paid': '2026-08-09'}, {'amount': 120.6, 'due': '2026-09-05', 'paid': '2026-09-07'}, {'amount': 157.73, 'due': '2026-10-05', 'paid': '2026-10-05'}]}\n\ntotal_paid_2026 = 0.0\nlate_payments_2026 = 0\n\nfor p in history['payments']:\n    paid_date = datetime.date.fromisoformat(p['paid'])\n    due_date = datetime.date.fromisoformat(p['due'])\n    if paid_date.year == 2026:\n        total_paid_2026 += p['amount']\n        if paid_date > due_date:\n            late_payments_2026 += 1\n\nprint(f\"Total: {total_paid_2026:.2f}, Late: {late_payments_2026}\")\n"
+        ],
+        "prompt_tokens": 3449,
+        "round_trips": 2,
+        "said": "For account ACME-7300, you have paid a total of 1,530.45 in 2026 so far. Five of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 17215,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-code",
+    "bookings": [],
+    "code_blocks": 2,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 2831,
+    "ms": 10556,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "run_code",
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 381,
+        "heard": "",
+        "ms": 10556,
+        "program_results": [
+          "{\"printed\":\"{'account_id': 'ACME-7300', 'payments': [{'amount': 100.0, 'due': '2025-01-05', 'paid': '2025-01-02'}, {'amount': 137.13, 'due': '2025-02-05', 'paid': '2025-02-09'}, {'amount': 174.26, 'due': '2025-03-05', 'paid': '2025-03-07'}, {'amount': 121.39, 'due': '2025-04-05', 'paid': '2025-04-05'}, {'amount': 158.52, 'due': '2025-05-05', 'paid': '2025-05-03'}, {'amount': 105.65, 'due': '2025-06-05', 'paid': '2025-06-10'}, {'amount': 142.78, 'due': '2025-07-05', 'paid': '2025-07-08'}, {'amount': 179.91, 'due': '2025-08-05', 'paid': '2025-08-06'}, {'amount': 126.04, 'due': '2025-09-05', 'pai…",
+          "{\"printed\":\"Total: 1530.45, Late: 5\",\"result\":null}"
+        ],
+        "programs": [
+          "print(lookup_payment_history(\"ACME-7300\"))",
+          "payments = [{'amount': 184.56, 'due': '2026-01-05', 'paid': '2026-01-05'}, {'amount': 131.69, 'due': '2026-02-05', 'paid': '2026-02-03'}, {'amount': 168.82, 'due': '2026-03-05', 'paid': '2026-03-10'}, {'amount': 115.95, 'due': '2026-04-05', 'paid': '2026-04-08'}, {'amount': 152.08, 'due': '2026-05-05', 'paid': '2026-05-06'}, {'amount': 189.21, 'due': '2026-06-05', 'paid': '2026-06-04'}, {'amount': 136.34, 'due': '2026-07-05', 'paid': '2026-07-02'}, {'amount': 173.47, 'due': '2026-08-05', 'paid': '2026-08-09'}, {'amount': 120.6, 'due': '2026-09-05', 'paid': '2026-09-07'}, {'amount': 157.73, 'due': '2026-10-05', 'paid': '2026-10-05'}]\ntotal = sum(p['amount'] for p in payments)\nlate = sum(1 for p in payments if p['paid'] > p['due'])\nprint(f\"Total: {total}, Late: {late}\")"
+        ],
+        "prompt_tokens": 2831,
+        "round_trips": 2,
+        "said": "You paid a total of $1,530.45 in 2026, and five of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 13159,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 2333,
+    "ms": 9027,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 551,
+        "heard": "",
+        "ms": 9027,
+        "program_results": [
+          "{\"printed\":\"{'account_id': 'ACME-7300', 'payments': [{'amount': 100.0, 'due': '2025-01-05', 'paid': '2025-01-02'}, {'amount': 137.13, 'due': '2025-02-05', 'paid': '2025-02-09'}, {'amount': 174.26, 'due': '2025-03-05', 'paid': '2025-03-07'}, {'amount': 121.39, 'due': '2025-04-05', 'paid': '2025-04-05'}, {'amount': 158.52, 'due': '2025-05-05', 'paid': '2025-05-03'}, {'amount': 105.65, 'due': '2025-06-05', 'paid': '2025-06-10'}, {'amount': 142.78, 'due': '2025-07-05', 'paid': '2025-07-08'}, {'amount': 179.91, 'due': '2025-08-05', 'paid': '2025-08-06'}, {'amount': 126.04, 'due': '2025-09-05', 'pai…"
+        ],
+        "programs": [
+          "print(lookup_payment_history(account_id=\"ACME-7300\"))"
+        ],
+        "prompt_tokens": 2333,
+        "round_trips": 1,
+        "said": "In 2026, you paid a total of $1,530.45, and 5 of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 11543,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 22 rows",
+    "max_prompt_tokens": 1595,
+    "ms": 8074,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t7-aggregate-large",
+    "turns": [
+      {
+        "caller": "For account ACME-7300, what's the total I paid in 2026 so far, to the cent, and how many of those 2026 payments were late?",
+        "calls": [
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 860,
+        "heard": "",
+        "ms": 8074,
+        "program_results": [
+          "{\"printed\":\"(1530.45, 5)\",\"result\":null}"
+        ],
+        "programs": [
+          "def get_payment_info():\n    from datetime import datetime\n    payment_data = lookup_payment_history(\"ACME-7300\")\n    total_2026 = 0.0\n    late_2026 = 0\n    for payment in payment_data['payments']:\n        paid_date = datetime.strptime(payment['paid'], \"%Y-%m-%d\")\n        due_date = datetime.strptime(payment['due'], \"%Y-%m-%d\")\n        if paid_date.year == 2026:\n            total_2026 += float(payment['amount'])\n            if paid_date > due_date:\n                late_2026 += 1\n    return total_2026, late_2026\n\nprint(get_payment_info())"
+        ],
+        "prompt_tokens": 1595,
+        "round_trips": 1,
+        "said": "You paid a total of $1530.45 in 2026, and 5 of those payments were late."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 10628,
+    "why": "looked up: true; said 1530.45: true; said 5 late: true"
+  },
+  {
+    "arm": "sdk-code",
+    "bookings": [],
+    "code_blocks": 2,
+    "code_errors": 1,
+    "errors": [],
+    "executions": 2,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 1683,
+    "ms": 10016,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "run_code",
+          "run_code"
+        ],
+        "code_errors": 1,
+        "first_audio_ms": null,
+        "first_output_ms": 643,
+        "heard": "",
+        "ms": 10016,
+        "program_results": [
+          "{\"error\":\"The program printed 7469 characters, over the limit of 2000, so none of it is shown. Print only the values you need: compute the answer in the program.\"}",
+          "{\"printed\":\"Total paid: $2588.70\\nLate payments: 22\\nLargest payment: $79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "print(lookup_payment_history(account_id=\"ACME-9000\"))",
+          "import json\n\ndata = lookup_payment_history(account_id=\"ACME-9000\")\npayments = data['payments']\n\ntotal_paid = 0.0\nlate_payments = 0\nmax_payment = 0.0\n\nfor p in payments:\n    if p['paid'].startswith('2025'):\n        amount = p['amount']\n        total_paid += amount\n        if max_payment < amount:\n            max_payment = amount\n        if p['paid'] > p['due']:\n            late_payments += 1\n\nprint(f\"Total paid: ${total_paid:.2f}\")\nprint(f\"Late payments: {late_payments}\")\nprint(f\"Largest payment: ${max_payment:.2f}\")\n"
+        ],
+        "prompt_tokens": 1683,
+        "round_trips": 2,
+        "said": "In 2025, you paid a total of $2588.70, with 22 late payments and a largest payment of $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 12549,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 1700,
+    "ms": 14131,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 995,
+        "heard": "",
+        "ms": 14131,
+        "program_results": [
+          "{\"printed\":\"Total Paid: $2588.70\\nLate Payments: 22\\nLargest Payment: $79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "import json\nfrom datetime import datetime\n\n# Function call mock/implementation is not needed here as we use the provided tools.\n# Wait, I need to call the provided function lookup_payment_history.\npayment_history = lookup_payment_history(account_id=\"ACME-9000\")\n\npayments_2025 = []\ntotal_paid = 0.0\nlate_payments = 0\nlargest_payment = 0.0\n\nfor p in payment_history['payments']:\n    paid_date = datetime.strptime(p['paid'], '%Y-%m-%d')\n    due_date = datetime.strptime(p['due'], '%Y-%m-%d')\n    if paid_date.year == 2025:\n        payments_2025.append(p)\n        total_paid += p['amount']\n        if paid_date > due_date:\n            late_payments += 1\n        if p['amount'] > largest_payment:\n            largest_payment = p['amount']\n\nprint(f\"Total Paid: ${total_paid:.2f}\")\nprint(f\"Late Payments: {late_payments}\")\nprint(f\"Largest Payment: ${largest_payment:.2f}\")\n"
+        ],
+        "prompt_tokens": 1700,
+        "round_trips": 1,
+        "said": "For account ACME-9000 in 2025, you paid a total of $2588.70, had 22 late payments, and your largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 16708,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-code",
+    "bookings": [],
+    "code_blocks": 3,
+    "code_errors": 2,
+    "errors": [],
+    "executions": 3,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 2003,
+    "ms": 12196,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 3,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "run_code",
+          "run_code",
+          "run_code"
+        ],
+        "code_errors": 2,
+        "first_audio_ms": null,
+        "first_output_ms": 540,
+        "heard": "",
+        "ms": 12196,
+        "program_results": [
+          "{\"error\":\"The program printed 7469 characters, over the limit of 2000, so none of it is shown. Print only the values you need: compute the answer in the program.\"}",
+          "{\"error\":\"Traceback (most recent call last):\\n  File \\\"main.py\\\", line 17, in <module>\\n    if paid_payment > largest_payment:\\n       ~~~~~~~~~~~~\\nNameError: name 'paid_payment' is not defined\"}",
+          "{\"printed\":\"Total paid: $2588.70\\nLate payments: 22\\nLargest payment: $79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "print(lookup_payment_history(account_id='ACME-9000'))",
+          "import json\n\ndata = lookup_payment_history(account_id='ACME-9000')\npayments = data['payments']\n\ntotal_paid = 0.0\nlate_payments = 0\nlargest_payment = 0.0\n\nfor p in payments:\n    paid_date = p['paid']\n    due_date = p['due']\n    amount = p['amount']\n    \n    if paid_date.startswith('2025'):\n        total_paid += amount\n        if paid_payment > largest_payment:\n            largest_payment = amount\n        # payment is late if paid after due date (assuming string comparison works for YYYY-MM-DD)\n        if paid_date > due_date:\n            late_payments += 1\n\nprint(f\"Total paid: ${total_paid:.2f}\")\nprint(f\"Late payments: {late_payments}\")\nprint(f\"Largest payment: ${largest_payment:.2f}\")\n",
+          "import json\n\ndata = lookup_payment_history(account_id='ACME-9000')\npayments = data['payments']\n\ntotal_paid = 0.0\nlate_payments = 0\nlargest_payment = 0.0\n\nfor p in payments:\n    paid_date = p['paid']\n    due_date = p['due']\n    amount = p['amount']\n    \n    if paid_date.startswith('2025'):\n        total_paid += amount\n        if amount > largest_payment:\n            largest_payment = amount\n        if paid_date > due_date:\n            late_payments += 1\n\nprint(f\"Total paid: ${total_paid:.2f}\")\nprint(f\"Late payments: {late_payments}\")\nprint(f\"Largest payment: ${largest_payment:.2f}\")\n"
+        ],
+        "prompt_tokens": 2003,
+        "round_trips": 3,
+        "said": "In 2025, you paid a total of $2588.70, with 22 late payments, and your largest single payment was $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 14780,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-code",
+    "bookings": [],
+    "code_blocks": 2,
+    "code_errors": 1,
+    "errors": [],
+    "executions": 2,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 1793,
+    "ms": 13962,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 2,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "run_code",
+          "run_code"
+        ],
+        "code_errors": 1,
+        "first_audio_ms": null,
+        "first_output_ms": 544,
+        "heard": "",
+        "ms": 13962,
+        "program_results": [
+          "{\"error\":\"The program printed 7469 characters, over the limit of 2000, so none of it is shown. Print only the values you need: compute the answer in the program.\"}",
+          "{\"printed\":\"Total Paid: 2588.70\\nLate Payments: 22\\nMax Payment: 79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "print(lookup_payment_history(\"ACME-9000\"))\n",
+          "import datetime\nfrom functions import lookup_payment_history\n\ndata = lookup_payment_history(\"ACME-9000\")\npayments = data.get(\"payments\", [])\n\ntotal_paid = 0.0\nlate_count = 0\nmax_payment = 0.0\n\nfor p in payments:\n    paid_date_str = p.get(\"paid\")\n    if paid_date_str:\n        paid_date = datetime.datetime.strptime(paid_date_str, \"%Y-%m-%d\")\n        if paid_date.year == 2025:\n            amount = p.get(\"amount\", 0.0)\n            total_paid += amount\n            if amount > max_payment:\n                max_payment = amount\n            \n            due_date_str = p.get(\"due\")\n            if due_date_str:\n                due_date = datetime.datetime.strptime(due_date_str, \"%Y-%m-%d\")\n                if paid_date > due_date:\n                    late_count += 1\n\nprint(f\"Total Paid: {total_paid:.2f}\")\nprint(f\"Late Payments: {late_count}\")\nprint(f\"Max Payment: {max_payment:.2f}\")\n"
+        ],
+        "prompt_tokens": 1793,
+        "round_trips": 2,
+        "said": "For account ACME-9000 in 2025, you paid a total of 2,588.70. There were 22 late payments, and your largest single payment was 79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 16496,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  },
+  {
+    "arm": "sdk-code",
+    "bookings": [],
+    "code_blocks": 1,
+    "code_errors": 0,
+    "errors": [],
+    "executions": 1,
+    "kind": "aggregation over 120 rows",
+    "max_prompt_tokens": 1612,
+    "ms": 11594,
+    "ok": true,
+    "refusals": 0,
+    "round_trips": 1,
+    "task": "t9-aggregate-120",
+    "turns": [
+      {
+        "caller": "For account ACME-9000, in calendar year 2025: what did I pay in total, to the cent, how many payments were late, and what was the largest single payment?",
+        "calls": [
+          "run_code"
+        ],
+        "code_errors": 0,
+        "first_audio_ms": null,
+        "first_output_ms": 931,
+        "heard": "",
+        "ms": 11594,
+        "program_results": [
+          "{\"printed\":\"Total Paid: $2588.70\\nLate Payments: 22\\nLargest Payment: $79.34\",\"result\":null}"
+        ],
+        "programs": [
+          "import json\n\naccount_id = \"ACME-9000\"\nhistory = lookup_payment_history(account_id)\n\npayments = history.get('payments', [])\nrelevant_payments = []\n\nfor p in payments:\n    if p['paid'].startswith('2025'):\n        relevant_payments.append(p)\n\ntotal_paid = sum(p['amount'] for p in relevant_payments)\nlate_count = sum(1 for p in relevant_payments if p['paid'] > p['due'])\nlargest_payment = max(p['amount'] for p in relevant_payments) if relevant_payments else 0\n\nprint(f\"Total Paid: ${total_paid:.2f}\")\nprint(f\"Late Payments: {late_count}\")\nprint(f\"Largest Payment: ${largest_payment:.2f}\")\n"
+        ],
+        "prompt_tokens": 1612,
+        "round_trips": 1,
+        "said": "In 2025, you paid a total of $2,588.70, with 22 late payments and a maximum single payment of $79.34."
+      }
+    ],
+    "unbacked_claims": 0,
+    "wall_ms": 14171,
+    "why": "looked up: true; total 2588.70: true; 22 late: true; largest 79.34: true"
+  }
+]

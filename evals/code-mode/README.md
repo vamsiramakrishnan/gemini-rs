@@ -35,6 +35,12 @@ the whole difference at 120 rows (5/5 against 2/5, with 77% fewer prompt
 tokens and 8 s less); no difference on small tasks, where code mode is a
 little slower to its first action.
 
+Through the SDK (`sdk-*` arms, results in `results/2026-10-11-sdk-*.json`):
+function calls 46/50, code only 49/50, the hybrid 50/50, and the hybrid with
+the history `only_in_code` 48/50 at a third of function calls' tokens on the
+120 rows. `--voice` runs and the skill probe are reported in
+[code mode](../../docs/user-guide/code-mode.md#what-it-measured).
+
 ## Run it
 
 Outside the workspace, so that it never runs in CI: every run opens live
