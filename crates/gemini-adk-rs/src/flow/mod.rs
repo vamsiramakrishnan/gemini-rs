@@ -82,7 +82,45 @@ pub enum Pred {
     Not(Box<Pred>),
 }
 
+/// Three-valued conjunction: false if any is false, unknown if any is unknown.
+fn all_of(values: impl IntoIterator<Item = Option<bool>>) -> Option<bool> {
+    let mut unknown = false;
+    for value in values {
+        match value {
+            Some(false) => return Some(false),
+            None => unknown = true,
+            Some(true) => {}
+        }
+    }
+    if unknown { None } else { Some(true) }
+}
+
+/// Three-valued disjunction: true if any is true, unknown if any is unknown.
+fn any_of(values: impl IntoIterator<Item = Option<bool>>) -> Option<bool> {
+    let mut unknown = false;
+    for value in values {
+        match value {
+            Some(true) => return Some(true),
+            None => unknown = true,
+            Some(false) => {}
+        }
+    }
+    if unknown { None } else { Some(false) }
+}
+
 impl Pred {
+    /// [`eval`](Self::eval) with every `decided` atom unknown. See
+    /// [`Guard::possible`].
+    fn possible(&self, ctx: &FlowCtx) -> Option<bool> {
+        match self {
+            Pred::Decided(_) => None,
+            Pred::All(ps) => all_of(ps.iter().map(|p| p.possible(ctx))),
+            Pred::Any(ps) => any_of(ps.iter().map(|p| p.possible(ctx))),
+            Pred::Not(p) => p.possible(ctx).map(|b| !b),
+            other => Some(other.eval(ctx)),
+        }
+    }
+
     fn eval(&self, ctx: &FlowCtx) -> bool {
         match self {
             Pred::Always => true,
@@ -403,6 +441,18 @@ impl Guard {
     /// A bespoke closure over `(state, marking)`. Not serializable.
     pub fn custom(f: impl Fn(&FlowCtx) -> bool + Send + Sync + 'static) -> Self {
         Guard::Custom(Arc::new(f))
+    }
+
+    /// Evaluate the guard as the caller's next words could leave it: every
+    /// `decided` atom unknown, since its question is asked again about each
+    /// turn. `Some(value)` when no decision can change the outcome, `None`
+    /// when one could make the guard hold or fail. A custom guard is
+    /// evaluated as it stands.
+    pub fn possible(&self, ctx: &FlowCtx) -> Option<bool> {
+        match self {
+            Guard::Spec(p) => p.possible(ctx),
+            Guard::Custom(f) => Some(f(ctx)),
+        }
     }
 
     /// Evaluate the guard.
@@ -1787,11 +1837,125 @@ impl FlowMonitor {
 
     /// Whether `tool` would be admitted once every `never(tool).until(..)`
     /// guard on it holds: the active steps allow it and it has not used up a
-    /// `once`. Under `ContextUpdate` steering the model is offered these
-    /// tools, so that it can call one in the turn its guard comes to hold;
+    /// `once`, or a [frontier](Self::frontier_steps) step allows it. Under
+    /// `ContextUpdate` steering the model is offered these tools, so that it
+    /// can call one in the turn its guard comes to hold or its step opens;
     /// the call itself is still decided by [`admits_tool`](Self::admits_tool).
     pub fn offers_tool(&self, tool: &str, state: &State) -> bool {
-        self.admissibility_with(tool, state, false).is_ok()
+        match self.admissibility_with(tool, state, false) {
+            Ok(()) => true,
+            // An active step's `deny` and a spent `once` bind any step.
+            Err(Denial::OnceExhausted | Denial::DeniedByStep(_)) => false,
+            Err(_) => self
+                .frontier_steps(state)
+                .iter()
+                .any(|s| s.allow.iter().any(|a| a == tool)),
+        }
+    }
+
+    /// Evaluate `guard` as the caller's next words could leave it, against
+    /// this flow's marking. See [`Guard::possible`].
+    pub fn possible(&self, guard: &Guard, state: &State) -> Option<bool> {
+        guard.possible(&self.ctx(state))
+    }
+
+    /// The steps one decision away: neither done nor active, but able to
+    /// become active in the caller's next turn because what stands in their
+    /// way is a `decided` atom, in their gate, an incoming edge, or the
+    /// `done` guard of the active step they follow.
+    ///
+    /// A decision made after the caller's turn ends cannot change the tools
+    /// the model has for that turn: measured on Gemini 3.8 Live, a tool
+    /// declared even 0 ms after the turn ended was not used in that turn's
+    /// reply (0 of 15), while one declared before it was (5 of 5). So under
+    /// `ContextUpdate` steering these steps' tools are offered ahead, and a
+    /// call to one is decided at the gate: the questions in its way
+    /// ([`frontier_questions`](Self::frontier_questions)) are asked about the
+    /// turn in progress, the flow relatches, and the call is admitted only if
+    /// the step opened.
+    pub fn frontier_steps(&self, state: &State) -> Vec<&Step> {
+        let ctx = self.ctx(state);
+        let active: BTreeSet<&str> = self
+            .active_steps(state)
+            .into_iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        let could = |g: Option<&Guard>| g.map_or(Some(true), |g| g.possible(&ctx));
+        let source = |id: &str| -> Option<bool> {
+            if self.marking.done.contains(id) {
+                Some(true)
+            } else if active.contains(id) {
+                // An active step completes when its `done` guard holds.
+                self.flow
+                    .step(id)
+                    .and_then(|s| s.done.as_ref())
+                    .map_or(Some(false), |done| done.possible(&ctx))
+            } else {
+                Some(false)
+            }
+        };
+        self.flow
+            .steps
+            .iter()
+            .filter(|step| {
+                if self.marking.done.contains(&step.id) || active.contains(step.id.as_str()) {
+                    return false;
+                }
+                let before_ok = self.flow.constraints.iter().all(|c| match c {
+                    Constraint::Before(a, b) if *b == step.id => self.marking.done.contains(a),
+                    _ => true,
+                });
+                if !before_ok {
+                    return false;
+                }
+                let edges = step
+                    .after
+                    .iter()
+                    .map(|e| all_of([source(&e.step), could(e.when.as_ref())]));
+                let deps = if step.after.is_empty() {
+                    Some(true)
+                } else {
+                    match step.join {
+                        Join::All => all_of(edges),
+                        Join::Any => any_of(edges),
+                    }
+                };
+                // Not eligible now, so only an unknown can open it.
+                all_of([deps, could(step.gate.as_ref())]).is_none()
+            })
+            .collect()
+    }
+
+    /// The questions that decide whether a [frontier](Self::frontier_steps)
+    /// step allowing `tool` opens, with the state keys their guards read:
+    /// the step's gate, its incoming edges, and the `done` guards of the
+    /// active steps it follows. Empty when no frontier step allows `tool`.
+    pub fn frontier_questions(&self, tool: &str, state: &State) -> DecisionScope {
+        let active: BTreeSet<String> = self
+            .active_steps(state)
+            .into_iter()
+            .map(|s| s.id.clone())
+            .collect();
+        let mut scope = DecisionScope::default();
+        for step in self.frontier_steps(state) {
+            if !step.allow.iter().any(|a| a == tool) {
+                continue;
+            }
+            let mut add = |g: &Guard| {
+                scope.questions.extend(g.decisions());
+                scope.reads.extend(g.state_keys());
+            };
+            step.gate.iter().for_each(&mut add);
+            for edge in &step.after {
+                edge.when.iter().for_each(&mut add);
+                if active.contains(&edge.step)
+                    && let Some(done) = self.flow.step(&edge.step).and_then(|s| s.done.as_ref())
+                {
+                    add(done);
+                }
+            }
+        }
+        scope
     }
 
     /// The state keys read by the `never(tool).until(..)` guards that refuse
@@ -3323,5 +3487,37 @@ mod tests {
         // The Guard schema must surface the Pred atoms.
         assert!(text.contains("is_true"));
         assert!(text.contains("never_until"));
+    }
+
+    #[test]
+    fn possible_leaves_a_decision_unknown_and_settles_the_rest() {
+        let state = State::new();
+        let _ = state.set("yes", true);
+        let marking = Marking::default();
+        let ctx = FlowCtx {
+            state: &state,
+            marking: &marking,
+        };
+        let decided = Guard::decided("q");
+        assert_eq!(decided.possible(&ctx), None);
+        assert_eq!(Guard::not(decided.clone()).possible(&ctx), None);
+        assert_eq!(Guard::is_true("yes").possible(&ctx), Some(true));
+        // A false conjunct settles a conjunction; a true disjunct a disjunction.
+        assert_eq!(
+            Guard::all([decided.clone(), Guard::is_true("no")]).possible(&ctx),
+            Some(false)
+        );
+        assert_eq!(
+            Guard::any([decided.clone(), Guard::is_true("yes")]).possible(&ctx),
+            Some(true)
+        );
+        assert_eq!(
+            Guard::all([decided.clone(), Guard::is_true("yes")]).possible(&ctx),
+            None
+        );
+        assert_eq!(
+            Guard::any([decided, Guard::is_true("no")]).possible(&ctx),
+            None
+        );
     }
 }

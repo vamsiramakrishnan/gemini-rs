@@ -912,19 +912,26 @@ fn jev_model() -> Result<GatewayDecisionModel, String> {
 /// How long each tool call waited between the model asking and the gate
 /// deciding (admitted or refused).
 fn tool_waits(timeline: &[(u128, String)], mutations: &[Mutation]) -> Vec<(String, u128)> {
+    // The session event and the gate's verdict are recorded by different
+    // tasks, so a call admitted at once can be journaled a millisecond or two
+    // before its event. Each verdict answers one call.
+    const SKEW_MS: u128 = 50;
+    let mut used = std::collections::BTreeSet::new();
     let mut out = Vec::new();
     for (asked, line) in timeline {
         let Some(names) = line.strip_prefix("tool_call: ") else {
             continue;
         };
         for name in names.split(", ") {
-            let decided = mutations.iter().find(|m| {
-                m.ms >= *asked
+            let decided = mutations.iter().enumerate().find(|(i, m)| {
+                !used.contains(i)
+                    && m.ms + SKEW_MS >= *asked
                     && (m.key == "flow:tool_call" || m.key == "flow:tool_denied")
                     && m.value.as_ref().is_some_and(|v| v["tool"] == name)
             });
-            if let Some(m) = decided {
-                out.push((name.to_string(), m.ms - asked));
+            if let Some((i, m)) = decided {
+                used.insert(i);
+                out.push((name.to_string(), m.ms.saturating_sub(*asked)));
             }
         }
     }

@@ -36,7 +36,7 @@ pub(super) async fn decision_round(
             let stack = stack.lock();
             let scope = match point {
                 DecisionPoint::TurnEnd => stack.decision_scope(state),
-                DecisionPoint::ToolGate(tools) => stack.gate_scope(tools),
+                DecisionPoint::ToolGate(tools) => stack.gate_scope(tools, state),
             };
             let active: Vec<String> = stack
                 .active_steps(state)
