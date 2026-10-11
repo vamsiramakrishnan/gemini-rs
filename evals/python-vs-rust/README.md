@@ -107,10 +107,13 @@ Rust, and above its post-import size for Python, divided by the line count:
 | Python | 100 | 218/218 | 64.7 | 9.41 | 75 | 254 |
 | Python | 125 | 271/271 | 74.2 | 8.6 | 77 | 221 |
 | Python | 150 | 292/292 | 77 | 7.53 | 85 | 237 |
+| Python | 200 | 114/306 | 85.4 | 19.5 | 122 | 365 |
 | Python + uvloop | 25 | 55/55 | 19.6 | 11.24 | 66 | 641 |
 | Python + uvloop | 50 | 109/109 | 36.6 | 10.6 | 69 | 392 |
 | Python + uvloop | 100 | 218/218 | 63.8 | 9.26 | 77 | 269 |
 | Python + uvloop | 125 | 258/258 | 71.2 | 8.49 | 82 | 261 |
+| Python + uvloop | 150 | 315/315 | 78.6 | 7.35 | 91 | 277 |
+| Python + uvloop | 200 | 125/282 | 85 | 15.13 | 107 | 292 |
 
 Timing. "Mic late" is how late the caller's audio reached the stand-in.
 "Model audio late" is how late the model's audio reached the client's
@@ -132,10 +135,13 @@ callback. "Steering" includes the 400 ms the extraction model takes:
 | Python | 100 | 1.8 / 30 / 47.5 | 1.3 / 28.6 / 46.1 | 425 / 588.1 | 41.5 / 41.7 |
 | Python | 125 | 4.8 / 102.8 / 179.7 | 4 / 109 / 193.9 | 477.3 / 1356 | 41.7 / 43.5 |
 | Python | 150 | 42.2 / 743.9 / 973.4 | 50.7 / 811.2 / 1051 | 1736.8 / 12762.3 | 46.3 / 58.9 |
+| Python | 200 | 883.3 / 6558.4 / 7669.4 | 521.1 / 9841.1 / 13732.9 | 19172.1 / 42241.1 | 66.6 / 68.8 |
 | Python + uvloop | 25 | 0.5 / 2.6 / 89.9 | 0.4 / 2.3 / 30 | 408.5 / 453.3 | 41.5 / 41.7 |
 | Python + uvloop | 50 | 0.7 / 4.5 / 22.2 | 0.5 / 3.5 / 11 | 411.2 / 431.2 | 41.5 / 41.5 |
 | Python + uvloop | 100 | 1.5 / 27.8 / 47.5 | 1.1 / 24.3 / 40.9 | 432.6 / 653.2 | 41.5 / 41.8 |
 | Python + uvloop | 125 | 5.5 / 407.9 / 705 | 3.9 / 419.8 / 813 | 565.3 / 5314.6 | 42.2 / 47.4 |
+| Python + uvloop | 150 | 12.8 / 684.4 / 982.6 | 11 / 792.2 / 1102 | 1179.9 / 7173.8 | 43.2 / 53 |
+| Python + uvloop | 200 | 479.8 / 3716.8 / 4137.4 | 182.9 / 4405.4 / 6959 | 6310.1 / 42657 | 46 / 99.4 |
 
 ### What it shows
 
@@ -150,8 +156,11 @@ callback. "Steering" includes the 400 ms the extraction model takes:
 
   Past that point:
   - Python at 125 lines reaches 0.1–0.4 s at p99, varying run to run; at
-    150 it reaches 0.75–0.8 s, steering waits 1.7 s at the median, and calls
-    stretch by 5 s.
+    150 it reaches 0.7–0.8 s, steering waits 1.2–1.7 s at the median, and
+    calls stretch by 2–5 s.
+  - Python at 200 lines books 114 of 306 calls (125 of 282 on uvloop). The
+    rest time out waiting for `book_table`, with the caller's audio 3.7–6.6 s
+    late at p99.
   - Rust at 1,000 lines reaches about 130 ms at p99 and still books every
     call. At 1,500 it reaches 0.6–0.7 s.
 - **uvloop does not move Python's breaking point.** It is a little cheaper at
