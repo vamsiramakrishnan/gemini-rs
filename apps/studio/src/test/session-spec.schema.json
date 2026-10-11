@@ -231,7 +231,7 @@
           ]
         },
         "output_chars": {
-          "description": "Characters of a program's result the model reads. Default 4000.",
+          "description": "Characters of a program's result (and of its printed output) the model reads. Default 2000.",
           "format": "uint",
           "minimum": 0.0,
           "type": [
