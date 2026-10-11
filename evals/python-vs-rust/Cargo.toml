@@ -12,9 +12,15 @@ description = "The same Live voice agent in Python (google-genai) and Rust (gemi
 [dependencies]
 gemini-genai-rs = { path = "../../crates/gemini-genai-rs", features = ["live", "tls-native"] }
 gemini-adk-rs = { path = "../../crates/gemini-adk-rs" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+gemini-adk-fluent-rs = { path = "../../crates/gemini-adk-fluent-rs" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net"] }
 async-trait = "0.1"
 serde_json = "1"
+parking_lot = "0.12"
+# The stand-in (trattoria_mock): one port for the Live WebSocket and REST.
+axum = { version = "0.8", features = ["ws"] }
+futures-util = "0.3"
+base64 = "0.22"
 
 [profile.release]
 debug = false
