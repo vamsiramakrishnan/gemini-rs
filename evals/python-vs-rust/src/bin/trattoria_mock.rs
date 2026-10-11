@@ -78,10 +78,20 @@ fn now_us() -> u64 {
 }
 
 /// The clock a frame carries in its first 8 bytes, read from the first 12
-/// characters of its base64 (9 bytes).
+/// characters of its base64 (9 bytes). google-genai encodes bytes with the
+/// URL-safe alphabet, Rust with the standard one; both are read.
 fn stamp_of(b64: &str) -> Option<u64> {
+    let head: String = b64
+        .get(..12)?
+        .chars()
+        .map(|c| match c {
+            '-' => '+',
+            '_' => '/',
+            c => c,
+        })
+        .collect();
     let head = base64::engine::general_purpose::STANDARD
-        .decode(b64.get(..12)?)
+        .decode(head)
         .ok()?;
     Some(u64::from_le_bytes(head.get(..8)?.try_into().ok()?))
 }
