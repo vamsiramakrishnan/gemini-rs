@@ -4,6 +4,211 @@ How much CPU, memory and audio timing does a Live voice session cost in
 Python (google-genai) and in Rust (gemini-rs)? Every run here talks to a local
 stand-in for the Live API, so the numbers measure the client, not the model.
 
+Two benchmarks:
+
+- [Trattoria calls](#trattoria-calls-2026-10-11): the same booking agent in
+  both languages, taking whole phone calls. This is the one to quote.
+- [Wire bench](#wire-bench-2026-10-09): sessions with no agent logic, one
+  turn each.
+
+## Trattoria calls (2026-10-11)
+
+### What a call is
+
+`trattoria_mock` (Rust, its own process) stands in for Gemini Live and for
+`generateContent`. Each connection plays one booking call, about 41 seconds
+long:
+
+1. The client sets up and sends the greeting. The model greets the caller,
+   saying the stage's verbatim line ("This call may be recorded").
+2. The caller asks for a table for four on Wednesday at seven, under Rossi,
+   with input transcription as the words land.
+3. The model says it will check and calls `check_availability`, then offers
+   two times.
+4. The caller picks one, and the model reads the booking back.
+5. The caller says "Yes, please book it" and the model calls `book_table`.
+   The client's commit gate admits it only once extraction has heard that
+   yes.
+6. The model gives the reference, and the caller hangs up.
+
+The caller's microphone streams for the whole call: 20 ms frames of 16 kHz
+audio, as from a phone line. The stand-in hears the caller only through those
+frames, so a client that falls behind on its mic stream stretches its own
+calls. Model audio comes back in 40 ms frames of 24 kHz audio, in real time.
+The model answers 500 ms after the caller stops. The extraction model answers
+400 ms after each request.
+
+### The two agents
+
+- `src/bin/trattoria.rs` is the spec-built agent: `trattoria.json` from
+  `crates/gemini-adk-fluent-rs/tests/fixtures/live`, applied with
+  `SessionSpec::apply` and connected over a real WebSocket. Its extraction
+  goes through `GeminiLlm`, with `base_url` pointing at the stand-in.
+- `python/trattoria.py` is the same agent written on google-genai. It has:
+  - the stages and the stage text;
+  - the tool gate and the commit gate, with the second-chance extraction;
+  - both extractors, with the same prompts, schema, thinking budget and
+    promotion policies;
+  - the verbatim check, repair, and the handoff overlay;
+  - `contextUpdate` steering, sent as raw JSON because google-genai has no
+    API for it;
+  - floor holding: silence on the mic while the model speaks the verbatim
+    line.
+
+With the stand-in's `--log`, one call from each sends the same messages in
+the same order, and the same extraction requests.
+
+### What is measured
+
+- **Cost per call.** Client CPU, divided by the total length of the calls
+  that finished: CPU milliseconds per second of call.
+- **Caller audio lateness.** Every mic frame carries the time its 20 ms clock
+  captured it. The stand-in measures how late the frame reached it. This is
+  the delay a model would hear.
+- **Model audio lateness.** Every model frame carries the time the stand-in
+  sent it. The client measures how late the frame reached its audio callback.
+  This is the delay a caller would hear, before any playout.
+- **Steering latency.** From the end of the turn that collects the booking
+  details to the `contextUpdate` that declares `book_table`. That covers both
+  extractions and the stage change.
+- **Outcomes.** Calls booked, and how long each call took (41.4 s when
+  nothing is late).
+- **Memory.** Peak RSS.
+
+Each run uses a fresh stand-in on cores 2–3 and one client on core 0
+(`taskset`). The Rust client runs one Tokio worker; Python runs one asyncio
+loop, or uvloop. Each run lasts 90 s, with the lines' first calls spread over
+40 s and every line taking calls back to back. Python 3.13 with google-genai
+2.29.0, websockets 16.1.1 and uvloop 0.23.0, on a 4-vCPU container.
+
+### Results
+
+Raw runs: `results/2026-10-11-trattoria.jsonl`, one record per run, holding
+everything the client and the stand-in measured. The tables come from
+`python/summarize_trattoria.py`.
+
+Cost and memory. "CPU, % of one core" is averaged over the whole run, ramp-up
+and tail included. "KB per line" is peak RSS above the process's start for
+Rust, and above its post-import size for Python, divided by the line count:
+
+| Client | Lines | Booked | CPU, % of one core | CPU ms per call-second | Peak RSS MB | KB per line |
+|---|---|---|---|---|---|---|
+| Rust | 25 | 55/55 | 4.5 | 2.56 | 28 | 898 |
+| Rust | 50 | 109/109 | 7.1 | 2.07 | 39 | 662 |
+| Rust | 100 | 218/218 | 11.4 | 1.65 | 59 | 539 |
+| Rust | 200 | 436/436 | 19.5 | 1.42 | 100 | 478 |
+| Rust | 400 | 872/872 | 34.6 | 1.26 | 182 | 449 |
+| Rust | 600 | 1307/1307 | 49.1 | 1.19 | 263 | 438 |
+| Rust | 800 | 1743/1743 | 57.9 | 1.05 | 346 | 436 |
+| Rust | 1000 | 2174/2174 | 71.7 | 1.04 | 448 | 452 |
+| Rust | 1500 | 3187/3187 | 80.2 | 0.79 | 715 | 484 |
+| Python | 25 | 55/55 | 21.6 | 12.4 | 64 | 549 |
+| Python | 50 | 109/109 | 39 | 11.29 | 67 | 345 |
+| Python | 100 | 218/218 | 64.7 | 9.41 | 75 | 254 |
+| Python | 125 | 271/271 | 74.2 | 8.6 | 77 | 221 |
+| Python | 150 | 292/292 | 77 | 7.53 | 85 | 237 |
+| Python + uvloop | 25 | 55/55 | 19.6 | 11.24 | 66 | 641 |
+| Python + uvloop | 50 | 109/109 | 36.6 | 10.6 | 69 | 392 |
+| Python + uvloop | 100 | 218/218 | 63.8 | 9.26 | 77 | 269 |
+| Python + uvloop | 125 | 258/258 | 71.2 | 8.49 | 82 | 261 |
+
+Timing. "Mic late" is how late the caller's audio reached the stand-in.
+"Model audio late" is how late the model's audio reached the client's
+callback. "Steering" includes the 400 ms the extraction model takes:
+
+| Client | Lines | Mic late p50 / p99 / p99.9 ms | Model audio late p50 / p99 / p99.9 ms | Steering p50 / p99 ms | Call p50 / p99 s |
+|---|---|---|---|---|---|
+| Rust | 25 | 1.2 / 2.3 / 22.7 | 0.1 / 0.6 / 4.5 | 402.3 / 403.2 | 41.4 / 41.5 |
+| Rust | 50 | 1.2 / 2.3 / 32.2 | 0.1 / 0.6 / 2.5 | 402.3 / 403.5 | 41.4 / 41.5 |
+| Rust | 100 | 1.2 / 2.3 / 7.5 | 0.1 / 0.9 / 2.9 | 402.4 / 404.5 | 41.4 / 41.5 |
+| Rust | 200 | 1.3 / 2.8 / 63.4 | 0.2 / 1.8 / 21.5 | 402.6 / 406.8 | 41.4 / 41.5 |
+| Rust | 400 | 1.3 / 3.2 / 8.9 | 0.3 / 2.3 / 6.3 | 403.2 / 408.3 | 41.5 / 41.5 |
+| Rust | 600 | 1.4 / 5.2 / 28.6 | 0.4 / 4 / 20.5 | 403.2 / 417.2 | 41.4 / 41.5 |
+| Rust | 800 | 1.6 / 34 / 143.7 | 0.6 / 21.6 / 148 | 404.2 / 472.7 | 41.5 / 41.6 |
+| Rust | 1000 | 2.9 / 131.5 / 211.9 | 1.8 / 126.6 / 230.8 | 409.3 / 644.1 | 41.5 / 41.8 |
+| Rust | 1500 | 107.4 / 590.4 / 755.9 | 97.3 / 724.6 / 894.9 | 671.9 / 1638.2 | 41.8 / 43.3 |
+| Python | 25 | 0.9 / 3.4 / 7.2 | 0.4 / 2.6 / 5.3 | 408.1 / 448.1 | 41.5 / 41.5 |
+| Python | 50 | 1 / 4.8 / 22.5 | 0.5 / 4 / 17.4 | 410.8 / 431.5 | 41.5 / 41.5 |
+| Python | 100 | 1.8 / 30 / 47.5 | 1.3 / 28.6 / 46.1 | 425 / 588.1 | 41.5 / 41.7 |
+| Python | 125 | 4.8 / 102.8 / 179.7 | 4 / 109 / 193.9 | 477.3 / 1356 | 41.7 / 43.5 |
+| Python | 150 | 42.2 / 743.9 / 973.4 | 50.7 / 811.2 / 1051 | 1736.8 / 12762.3 | 46.3 / 58.9 |
+| Python + uvloop | 25 | 0.5 / 2.6 / 89.9 | 0.4 / 2.3 / 30 | 408.5 / 453.3 | 41.5 / 41.7 |
+| Python + uvloop | 50 | 0.7 / 4.5 / 22.2 | 0.5 / 3.5 / 11 | 411.2 / 431.2 | 41.5 / 41.5 |
+| Python + uvloop | 100 | 1.5 / 27.8 / 47.5 | 1.1 / 24.3 / 40.9 | 432.6 / 653.2 | 41.5 / 41.8 |
+| Python + uvloop | 125 | 5.5 / 407.9 / 705 | 3.9 / 419.8 / 813 | 565.3 / 5314.6 | 42.2 / 47.4 |
+
+### What it shows
+
+- **A call costs Rust about a fifth to a sixth of the CPU it costs Python.**
+  At loads both hold, Rust takes 1.65–2.56 ms of CPU per second of call, and
+  Python 9.4–12.4 ms (4.8× at 25 lines, 5.7× at 100). uvloop takes Python 1–10%
+  lower.
+- **One core holds about 8× as many calls in Rust.** With the p99 of both
+  audio directions under 50 ms and no call stretched:
+  - Rust holds 800 calls on a core (p99 34 and 22 ms).
+  - Python holds 100 (p99 30 and 29 ms).
+
+  Past that point:
+  - Python at 125 lines reaches 0.1–0.4 s at p99, varying run to run; at
+    150 it reaches 0.75–0.8 s, steering waits 1.7 s at the median, and calls
+    stretch by 5 s.
+  - Rust at 1,000 lines reaches about 130 ms at p99 and still books every
+    call. At 1,500 it reaches 0.6–0.7 s.
+- **uvloop does not move Python's breaking point.** It is a little cheaper at
+  light load. At 125 lines one run did worse than plain asyncio: near
+  saturation, a single run's p99 is noisy.
+- **Rust holds more memory per call; Python starts much higher.**
+  - Rust holds about 440 KB per call on top of about 6 MB at start.
+  - Python holds about 220–270 KB per call on top of about 51 MB after
+    importing google-genai.
+  - Rust's 800 calls on one core fit in 346 MB. Python needs eight
+    single-core processes for the same 800 calls, at about 75 MB each,
+    roughly 600 MB in all.
+  - The Rust runtime's per-session state is the larger of the two, and is
+    worth a look.
+- **Steering stays at the model's pace in Rust.** The stage change lands
+  2–17 ms after the extraction model answers, up to 600 lines. Python adds
+  8–25 ms up to 100 lines, then falls behind.
+- **Every Rust call booked at every load, 1,500 lines included.** Python
+  booked every call up to 150 lines.
+
+### What it does not show
+
+- **The stand-in is not a model.** Its reply and extraction delays are
+  fixed, and real ones vary.
+- **The audio callbacks do nothing with the audio.** A phone deployment
+  would resample it and forward it to the call leg. That costs both
+  languages extra, and costs Python more per byte.
+- **Each client is one process on one core.** Python scales out by running
+  more processes, each paying its import floor. Rust scales across cores
+  within one process with more Tokio workers; that is not measured here.
+- **Cost per call can overstate a failing run.** "CPU ms per call-second"
+  divides by the length of the calls that finished, so it overstates the
+  cost of a run whose calls failed. The CPU share is averaged over a run
+  that ramps up and drains.
+
+### Running it
+
+```bash
+cargo build --release --bin trattoria_mock --bin trattoria
+python3 -m venv .venv && .venv/bin/pip install -r python/requirements.txt
+
+# One sweep: a fresh stand-in per run on cores 2-3, the client on core 0.
+CARGO_TARGET_DIR=target .venv/bin/python python/run_trattoria.py \
+    --impl rust --impl python --impl python-uvloop \
+    --lines 50 --lines 100 --secs 90 --out results/my-run.jsonl
+.venv/bin/python python/summarize_trattoria.py results/my-run.jsonl
+
+# One call, printing every message the client sends (mic audio aside).
+target/release/trattoria_mock --port 8766 --log &
+target/release/trattoria --lines 1 --secs 1 --ramp-secs 0 --port 8766
+.venv/bin/python python/trattoria.py --lines 1 --secs 1 --ramp-secs 0 --port 8766
+```
+
+`trattoria_mock` takes `--reply-ms`, `--extract-ms`, `--end-of-speech-ms` and
+`--caller-gap-ms`. The Rust client reads `TOKIO_WORKERS`, and the Python
+client takes `--uvloop`.
+
 ## Wire bench (2026-10-09)
 
 The thinnest comparison: N concurrent sessions that each open a Live
