@@ -84,9 +84,9 @@ impl MasterKey {
 
     /// A fresh random key and salt from the operating system's generator.
     pub fn generate() -> std::io::Result<Self> {
-        let mut buf = [std::mem::MaybeUninit::<u8>::uninit(); MASTER_KEY_LEN + MASTER_SALT_LEN];
-        let bytes = getrandom::getrandom_uninit(&mut buf).map_err(std::io::Error::other)?;
-        Ok(Self::from_bytes(bytes).expect("the length is right"))
+        let mut bytes = [0u8; MASTER_KEY_LEN + MASTER_SALT_LEN];
+        getrandom::fill(&mut bytes).map_err(std::io::Error::other)?;
+        Ok(Self::from_bytes(&bytes).expect("the length is right"))
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
