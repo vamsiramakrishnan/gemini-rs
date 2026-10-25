@@ -57,6 +57,8 @@ jobs:
       # `voice-io` (cpal) needs system audio headers to compile.
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - run: cargo test --workspace --locked
+      - name: OpenTelemetry SDK and tracing bridge regression
+        run: cargo test -p gemini-genai-rs --no-default-features --features otel-base --lib tracing_layer_preserves_remote_parent_context --locked
       # `cargo test --workspace` uses default features, so every test file
       # behind `#![cfg(feature = "...")]` is invisible to it — a whole suite can
       # stop compiling without CI noticing, which is exactly what happened to
@@ -146,6 +148,36 @@ jobs:
           rust-version: "1.99.0"
           manifest-path: ${{ matrix.manifest }}
           arguments: --all-features --locked --config deny.toml
+
+  # The pool tests need an actual child process. Without MONTY_BIN they return
+  # early, so compilation alone cannot validate the interpreter/pool wire seam.
+  monty-worker:
+    name: Monty worker integration
+    runs-on: ubuntu-latest
+    env:
+      # The worker also builds Monty's type checker. Debug symbols are not
+      # needed for these assertions and can exhaust a hosted runner's disk.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.0"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: Swatinem/rust-cache@v2
+      - name: Build worker matching the locked pool
+        run: |
+          monty_runtime_version="$(python -c 'import pathlib,tomllib; lock=tomllib.loads(pathlib.Path("Cargo.lock").read_text()); print(next(p["version"] for p in lock["package"] if p["name"] == "monty-pool"))')"
+          cargo install monty-runtime --version "=$monty_runtime_version" --locked --debug \
+            --root "$RUNNER_TEMP/monty-runtime" --target-dir target/monty-runtime
+      - name: Exercise real worker lifecycle and limits
+        env:
+          MONTY_BIN: ${{ runner.temp }}/monty-runtime/bin/monty
+        run: cargo test -p gemini-adk-rs --lib --features code-pool code_mode::pool --locked
 
   # Conversation CI: compile every governed conversation spec in `conversations/`
   # and run its model-free scenario tests deterministically. Dogfoods the

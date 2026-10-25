@@ -277,6 +277,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dropping_a_suspended_program_releases_the_only_worker() {
+        let Some(bin) = binary() else { return };
+        let pool = MontyPool::spawn(bin, 1).await.expect("pool");
+        let (run, stop) = pool
+            .start(
+                "pending()",
+                &["pending".to_string()],
+                &CodeLimits::default(),
+            )
+            .await;
+        assert!(matches!(stop, Suspension::Call { .. }), "{stop:?}");
+        drop(run);
+
+        let (_, stop) = tokio::time::timeout(
+            Duration::from_secs(10),
+            pool.start("6 * 7", &[], &CodeLimits::default()),
+        )
+        .await
+        .expect("a cancelled program must not retain the pool's only worker");
+        assert_eq!(
+            stop,
+            Suspension::Finished {
+                result: Ok(serde_json::json!(42)),
+                printed: String::new(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cpu_limit_leaves_the_pool_usable() {
+        let Some(bin) = binary() else { return };
+        let pool = MontyPool::spawn(bin, 1).await.expect("pool");
+        let limits = CodeLimits {
+            cpu: Duration::from_millis(100),
+            ..CodeLimits::default()
+        };
+        let (_, stop) = pool.start("while True:\n    pass", &[], &limits).await;
+        let Suspension::Finished { result: Err(e), .. } = stop else {
+            panic!("expected a timeout, got {stop:?}");
+        };
+        assert!(e.contains("TimeoutError"), "{e}");
+        let (_, stop) = pool.start("6 * 7", &[], &CodeLimits::default()).await;
+        assert_eq!(
+            stop,
+            Suspension::Finished {
+                result: Ok(serde_json::json!(42)),
+                printed: String::new(),
+            }
+        );
+    }
+
+    #[tokio::test]
     async fn a_huge_allocation_kills_only_the_worker() {
         let Some(bin) = binary() else { return };
         let pool = MontyPool::spawn(bin, 1).await.expect("pool");

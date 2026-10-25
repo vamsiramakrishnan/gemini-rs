@@ -17,6 +17,11 @@ updates:
           - "opentelemetry-*"
           - "opentelemetry_*"
           - "tracing-opentelemetry"
+      # The interpreter exhaustively matches the nodes in monty-types.
+      monty:
+        patterns:
+          - "monty"
+          - "monty-*"
       tracing:
         patterns:
           - "tracing"
@@ -29,9 +34,8 @@ updates:
           - patch
 
   # `crates/gemini-adk-py` is excluded from the workspace (maturin builds it,
-  # `cargo build --workspace` does not), so it needs its own entry — and note
-  # that no CI job compiles it, so a bump here is unverified until someone runs
-  # maturin by hand.
+  # `cargo build --workspace` does not), so it needs its own entry. The Python
+  # binding CI job builds this graph with its separate lockfile and smoke tests.
   - package-ecosystem: cargo
     directory: "/crates/gemini-adk-py"
     schedule:
