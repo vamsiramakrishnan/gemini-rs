@@ -236,9 +236,9 @@ jobs:
       - run: npm --prefix apps/studio run build
       - name: The committed build is up to date
         run: |
-          git add -N apps/gemini-adk-web-rs/static/studio
-          git diff --exit-code --stat -- apps/gemini-adk-web-rs/static/studio || {
-            echo "::error::apps/gemini-adk-web-rs/static/studio is stale: run 'npm --prefix apps/studio run build' and commit it"
+          git add -N apps/gemini-adk-web-rs/static/studio tools/gemini-adk-cli-rs/assets/web/studio
+          git diff --exit-code --stat -- apps/gemini-adk-web-rs/static/studio tools/gemini-adk-cli-rs/assets/web/studio || {
+            echo "::error::Studio or its CLI copy is stale: run 'npm --prefix apps/studio run build' and commit it"
             exit 1
           }
 
