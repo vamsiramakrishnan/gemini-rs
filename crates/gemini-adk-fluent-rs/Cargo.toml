@@ -57,7 +57,7 @@ aes = { version = "0.9", optional = true }
 hmac = { version = "0.12", optional = true }
 sha1 = { version = "0.10", optional = true }
 # `std`: SRTP turns a getrandom error into an io::Error.
-getrandom = { version = "0.2", features = ["std"], optional = true }
+getrandom = { version = "0.4", features = ["std"], optional = true }
 tokio-util = { version = "0.7", optional = true }
 thiserror = { version = "2", optional = true }
 
