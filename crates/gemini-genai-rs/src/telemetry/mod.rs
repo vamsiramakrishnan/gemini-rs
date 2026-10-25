@@ -458,4 +458,44 @@ mod tests {
         let _guard = TelemetryGuard::default();
         // Verifies that TelemetryGuard::default() compiles and doesn't panic.
     }
+
+    #[cfg(feature = "otel-base")]
+    #[test]
+    fn tracing_layer_preserves_remote_parent_context() {
+        use opentelemetry::trace::{
+            SpanContext, SpanId, TraceContextExt as _, TraceFlags, TraceId, TraceState,
+            TracerProvider as _,
+        };
+        use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+        use tracing_subscriber::prelude::*;
+
+        // Use a local subscriber and no exporter: exercising propagation must
+        // neither install global providers nor contact a telemetry backend.
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
+            .build();
+        let exporters = Exporters {
+            guard: TelemetryGuard::default(),
+            tracer: Some(provider.tracer("propagation-test")),
+        };
+        let subscriber = tracing_subscriber::registry().with(exporters.layer());
+        let parent = SpanContext::new(
+            TraceId::from_bytes([1; 16]),
+            SpanId::from_bytes([2; 8]),
+            TraceFlags::SAMPLED,
+            true,
+            TraceState::default(),
+        );
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("child");
+            span.set_parent(opentelemetry::Context::new().with_remote_span_context(parent.clone()))
+                .unwrap();
+            let context = span.context();
+            let child = context.span();
+            assert_eq!(child.span_context().trace_id(), parent.trace_id());
+            assert_ne!(child.span_context().span_id(), parent.span_id());
+            assert!(child.span_context().is_sampled());
+        });
+    }
 }

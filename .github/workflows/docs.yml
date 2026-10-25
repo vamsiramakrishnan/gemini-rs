@@ -24,7 +24,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
+  # Serialize deployments on main; independent PR builds must not cancel one
+  # another while pending (GitHub keeps only one pending run per group).
+  group: "pages-${{ github.event_name == 'push' && 'deploy' || github.ref }}"
   cancel-in-progress: false
 
 jobs:
@@ -51,7 +53,10 @@ jobs:
       # ── The website ─────────────────────────────────────────────────────────
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          # Astro 7.4.2 requires the patched Node 22 release. A bare `22`
+          # can select the runner's older cached 22.23.3.
+          node-version: "^22.23.4"
+          check-latest: true
           cache: npm
           cache-dependency-path: apps/docs/package-lock.json
       - name: Install site dependencies

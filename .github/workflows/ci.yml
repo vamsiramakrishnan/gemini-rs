@@ -127,11 +127,25 @@ jobs:
   # Supply chain: RustSec advisories, license allow-list, source whitelist.
   # Configuration lives in deny.toml.
   deny:
-    name: Supply chain (cargo-deny)
+    name: Supply chain (${{ matrix.graph }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - graph: workspace
+            manifest: Cargo.toml
+          - graph: python
+            manifest: crates/gemini-adk-py/Cargo.toml
     steps:
       - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          # This action runs in its own container, so installing Rust on the
+          # host does not select the toolchain used for dependency metadata.
+          rust-version: "1.99.0"
+          manifest-path: ${{ matrix.manifest }}
+          arguments: --all-features --locked --config deny.toml
 
   # Conversation CI: compile every governed conversation spec in `conversations/`
   # and run its model-free scenario tests deterministically. Dogfoods the
@@ -190,9 +204,9 @@ jobs:
       - run: npm --prefix apps/studio run build
       - name: The committed build is up to date
         run: |
-          git add -N apps/gemini-adk-web-rs/static/studio
-          git diff --exit-code --stat -- apps/gemini-adk-web-rs/static/studio || {
-            echo "::error::apps/gemini-adk-web-rs/static/studio is stale: run 'npm --prefix apps/studio run build' and commit it"
+          git add -N apps/gemini-adk-web-rs/static/studio tools/gemini-adk-cli-rs/assets/web/studio
+          git diff --exit-code --stat -- apps/gemini-adk-web-rs/static/studio tools/gemini-adk-cli-rs/assets/web/studio || {
+            echo "::error::Studio or its CLI copy is stale: run 'npm --prefix apps/studio run build' and commit it"
             exit 1
           }
 
