@@ -665,7 +665,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "sha2",
+ "sha2 0.10.9",
  "tokio",
  "tracing",
  "url",
@@ -1391,9 +1391,9 @@ dependencies = [
 
 [[package]]
 name = "monty"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c695cb21c9535024e263084451d767d965f69ef65658f24f3a7507763680b81e"
+checksum = "c7a88714723c0f3a9f162f363f345c92344eb1d26c695047388de453a0424ebc"
 dependencies = [
  "ahash",
  "chrono",
@@ -1421,7 +1421,8 @@ dependencies = [
  "ruff_text_size",
  "serde",
  "serde_bytes",
- "sha2",
+ "sha1",
+ "sha2 0.11.0",
  "smallvec",
  "speedate",
  "strum",
@@ -1432,9 +1433,9 @@ dependencies = [
 
 [[package]]
 name = "monty-macros"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff5176d386cd79f7e181c703e10314375ffd3d550285da672da9ae8e5952b751"
+checksum = "82ae4a49b9211b7ca43b124f95becb0c286af6df49421f5f99c65cd6a6f51f9e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1443,15 +1444,16 @@ dependencies = [
 
 [[package]]
 name = "monty-types"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d80ebea7f98c1e7ad4075c111e03c59ef80d18abd813f1fad8984f8c4827d95d"
+checksum = "09956030c0cd340d5db97b88fd3744f57ed304083093a592ab2a29a3dcab88cb"
 dependencies = [
  "chrono",
  "jiff",
  "monty-macros",
  "num-bigint",
  "num-traits",
+ "ruff_python_stdlib",
  "serde",
  "serde_bytes",
  "strum",
@@ -2315,6 +2317,17 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "digest 0.10.7",
+]
+
+[[package]]
+name = "sha2"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.1",
+ "digest 0.11.3",
 ]
 
 [[package]]
