@@ -24,7 +24,9 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
+  # Serialize deployments on main; independent PR builds must not cancel one
+  # another while pending (GitHub keeps only one pending run per group).
+  group: "pages-${{ github.event_name == 'push' && 'deploy' || github.ref }}"
   cancel-in-progress: false
 
 jobs:
