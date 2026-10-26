@@ -349,6 +349,17 @@ stages run. `SincResampler` (rubato, 128-tap windowed sinc) replaces
 linear interpolation where alias rejection matters — a 12 kHz tone folded
 into the speech band by a linear resampler is crushed below −34 dB.
 
+The Rubato 5 implementation uses fixed-input streaming with borrowed audio
+adapters. It retains the 128-tap Blackman-Harris filter, explicit 0.95 cutoff,
+10 ms input buffering, and cumulative output-rate accounting. Partial chunks
+remain buffered; empty calls do not pad or flush them. `latency_samples()`
+reports output-rate filter delay plus the input-chunk buffering budget.
+Rubato 5 changed its startup alignment: initial output block lengths and
+waveform alignment differ from 0.16.2. Callers must use the returned sample
+count and declared latency rather than assume byte-identical startup output.
+The regression suite checks measured impulse delay, partition-invariant output,
+and bounded sample-count deficit for integer and fractional rate conversions.
+
 ## Turn commitment: holds and sustains, not raw edges
 
 Raw VAD edges are the wrong turn signals, and the error is measurable.
