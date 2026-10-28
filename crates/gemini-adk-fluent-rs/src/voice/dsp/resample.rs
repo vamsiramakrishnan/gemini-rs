@@ -16,14 +16,15 @@
 use std::collections::VecDeque;
 
 use rubato::{
-    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+    Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
+    WindowFunction, audioadapter_buffers::direct::SequentialSliceOfVecs,
 };
 
 use super::{AudioBus, DspStage};
 
 /// High-quality streaming resampler stage.
 pub struct SincResampler {
-    inner: SincFixedIn<f32>,
+    inner: Async<f32>,
     from_hz: u32,
     to_hz: u32,
     chunk: usize,
@@ -45,17 +46,25 @@ impl SincResampler {
         let chunk = (from_hz / 100).max(1) as usize; // 10 ms of input
         let params = SincInterpolationParameters {
             sinc_len: 128,
-            f_cutoff: 0.95,
+            f_cutoff: Some(0.95),
             interpolation: SincInterpolationType::Linear,
             oversampling_factor: 128,
             window: WindowFunction::BlackmanHarris2,
         };
-        let inner =
-            SincFixedIn::<f32>::new(f64::from(to_hz) / f64::from(from_hz), 1.0, params, chunk, 1)
-                .expect("valid resampler parameters");
+        // Fixed input preserves the 10 ms streaming contract. Keep the cutoff
+        // explicit: None asks Rubato to choose a different filter cutoff.
+        let inner = Async::<f32>::new_sinc(
+            f64::from(to_hz) / f64::from(from_hz),
+            1.0,
+            &params,
+            chunk,
+            1,
+            FixedAsync::Input,
+        )
+        .expect("valid resampler parameters");
         let latency_out = inner.output_delay();
         let in_scratch = vec![vec![0.0f32; chunk]];
-        let out_scratch = inner.output_buffer_allocate(true);
+        let out_scratch = vec![vec![0.0f32; inner.output_frames_max()]];
         Self {
             inner,
             from_hz,
@@ -90,10 +99,19 @@ impl DspStage for SincResampler {
             for slot in self.in_scratch[0].iter_mut() {
                 *slot = self.input_fifo.pop_front().unwrap_or(0.0);
             }
-            let (_, out_len) = self
+            // Borrow the preallocated planar buffers. Only the returned frame
+            // count is valid output; the unused capacity may contain old audio.
+            let input = SequentialSliceOfVecs::new(&self.in_scratch, 1, self.chunk)
+                .expect("mono input scratch");
+            let output_capacity = self.out_scratch[0].len();
+            let mut output =
+                SequentialSliceOfVecs::new_mut(&mut self.out_scratch, 1, output_capacity)
+                    .expect("mono output scratch");
+            let (consumed, out_len) = self
                 .inner
-                .process_into_buffer(&self.in_scratch, &mut self.out_scratch, None)
+                .process_into_buffer(&input, &mut output, None)
                 .expect("fixed-size chunk");
+            debug_assert_eq!(consumed, self.chunk);
             self.output_fifo
                 .extend(self.out_scratch[0][..out_len].iter().copied());
         }
@@ -220,5 +238,99 @@ mod tests {
             "len {} vs ~{expected}",
             out.len()
         );
+    }
+
+    fn run_partitioned(from: u32, to: u32, input: &[f32], sizes: &[usize]) -> Vec<f32> {
+        let mut stage = SincResampler::new(from, to);
+        let mut out = Vec::new();
+        let mut offset = 0;
+        let mut call = 0;
+        while offset < input.len() {
+            let end = (offset + sizes[call % sizes.len()]).min(input.len());
+            let mut samples = input[offset..end].to_vec();
+            let mut bus = AudioBus {
+                samples: &mut samples,
+                sample_rate: from,
+            };
+            stage.process(&mut bus);
+            assert_eq!(bus.sample_rate, to);
+            out.extend_from_slice(&samples);
+            offset = end;
+            call += 1;
+            assert_eq!(stage.in_total, offset as u64);
+            assert_eq!(stage.out_total, out.len() as u64);
+            assert!(stage.out_total <= stage.in_total * u64::from(to) / u64::from(from));
+            assert!(stage.input_fifo.len() < stage.chunk);
+            assert!(stage.output_fifo.len() <= stage.inner.output_frames_max());
+
+            // Empty calls must neither pad a partial chunk nor flush filter history.
+            let before = (stage.in_total, stage.out_total, stage.input_fifo.len());
+            let mut empty = Vec::new();
+            stage.process(&mut AudioBus {
+                samples: &mut empty,
+                sample_rate: from,
+            });
+            assert!(empty.is_empty());
+            assert_eq!(
+                before,
+                (stage.in_total, stage.out_total, stage.input_fifo.len())
+            );
+        }
+        let due = input.len() as u64 * u64::from(to) / u64::from(from);
+        assert!(due - stage.out_total <= stage.latency_samples() as u64);
+        out
+    }
+
+    #[test]
+    fn streaming_is_invariant_to_input_partitioning() {
+        // Cover integer decimation, interpolation, fractional ratios and unity.
+        // A final partial chunk is deliberately left pending, never zero-padded.
+        for (from, to) in [
+            (48_000, 16_000),
+            (16_000, 48_000),
+            (44_100, 16_000),
+            (48_000, 44_100),
+            (16_000, 16_000),
+        ] {
+            let mut input = sine(997.0, from, 1.0, 0.5);
+            input.extend([0.2; 37]);
+            let reference = run_partitioned(from, to, &input, &[input.len()]);
+            for sizes in [&[1][..], &[173][..], &[7, 0, 479, 1, 2049, 13][..]] {
+                let actual = run_partitioned(from, to, &input, sizes);
+                assert_eq!(actual, reference, "partition {sizes:?}, {from} -> {to}");
+            }
+        }
+    }
+
+    #[test]
+    fn impulse_delay_and_filter_configuration_are_preserved() {
+        for (from, to) in [(48_000, 16_000), (16_000, 48_000), (44_100, 16_000)] {
+            let mut stage = SincResampler::new(from, to);
+            assert_eq!(stage.inner.input_frames_next(), stage.chunk);
+            let cutoff = 0.95 * (f64::from(to) / f64::from(from)).min(1.0) as f32;
+            assert!((stage.inner.cutoff().unwrap() - cutoff).abs() < 1e-6);
+            let delay = (64.0 * f64::from(to) / f64::from(from)) as usize;
+            assert_eq!(stage.latency_out, delay);
+            assert_eq!(
+                stage.latency_samples(),
+                delay + stage.chunk * to as usize / from as usize
+            );
+            let mut input = vec![0.0; from as usize / 10];
+            // Place the impulse away from the startup boundary.
+            let impulse_at = stage.chunk * 2;
+            input[impulse_at] = 1.0;
+            let out = run_in_chunks(&mut stage, &input, from);
+            let peak = out
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+                .unwrap()
+                .0;
+            let expected = impulse_at * to as usize / from as usize + delay;
+            assert!(
+                peak.abs_diff(expected) <= 1,
+                "peak {peak}, expected {expected}"
+            );
+        }
     }
 }
