@@ -39,8 +39,9 @@ cargo test --workspace --lib --locked
 cargo fmt --check
 ```
 
-These model-free checks need no provider credentials. For the full pre-push
-matrix, use `just ci` as described in CONTRIBUTING. Use the affected crate's
+These model-free checks need no provider credentials. `just hooks` makes
+`git push` run formatting and clippy first (`.githooks/pre-push`). For the
+full pre-push matrix, use `just ci` as described in CONTRIBUTING. Use the affected crate's
 tests while iterating. Live provider and audio-device checks require their
 own configuration and should be reported separately.
 
