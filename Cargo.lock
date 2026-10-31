@@ -3658,15 +3658,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num_threads"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c7398b9c8b70908f6371f47ed36737907c87c52af34c268fed0bf0ceb92ead9"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "objc2"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4821,15 +4812,13 @@ dependencies = [
 
 [[package]]
 name = "rsipstack"
-version = "0.6.13"
+version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9414f9c1441de2051fb12d14fe33ac0f36964c0fdb6de34d6f922e00434f7b0f"
+checksum = "389ff2ad88f4eb5dec2e39f21b78e9fbad70fc6191b00a6c8ace21757a7d4f9c"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bytes",
- "clap",
- "dashmap",
  "futures",
  "futures-util",
  "hickory-resolver",
@@ -4848,7 +4837,6 @@ dependencies = [
  "tokio-tungstenite 0.29.0",
  "tokio-util",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -6029,9 +6017,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdb87b95ec50ddfa440816d227a17b2ccbdda963a316a727fda0fc4334f7d134"
 dependencies = [
  "deranged",
- "libc",
  "num-conv",
- "num_threads",
  "powerfmt",
  "serde_core",
  "time-core",
@@ -6502,7 +6488,6 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
- "time",
  "tracing",
  "tracing-core",
  "tracing-log",

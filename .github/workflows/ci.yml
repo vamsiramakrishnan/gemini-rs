@@ -61,6 +61,8 @@ jobs:
       # feature-gated resampler regressions or accidental voice-io coupling.
       - name: DSP streaming and audio regressions
         run: cargo test -p gemini-adk-fluent-rs --no-default-features --features dsp --lib voice::dsp --locked
+      - name: SIP signaling and registration regressions
+        run: cargo test -p gemini-adk-fluent-rs --no-default-features --features sip --lib telephony::sip::tests --locked
       - name: OpenTelemetry SDK and tracing bridge regression
         run: cargo test -p gemini-genai-rs --no-default-features --features otel-base --lib tracing_layer_preserves_remote_parent_context --locked
       # `cargo test --workspace` uses default features, so every test file
