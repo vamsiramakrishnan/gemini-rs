@@ -1015,7 +1015,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn registration_refreshes_and_shutdown_stops_waiting_for_calls() {
-        let (registrar, mut seen) = fake_registrar_with_expiry(4).await;
+        let (registrar, mut seen) = fake_registrar_with_expiry(8).await;
         let mut agent = SipAgent::bind("127.0.0.1:0".parse().unwrap())
             .await
             .unwrap();
@@ -1028,7 +1028,7 @@ mod tests {
             .await
             .unwrap();
         // Consume the initial challenge and authenticated request, then wait
-        // for the next REGISTER (the refresh floor is five seconds).
+        // for the next REGISTER at three quarters of the granted lifetime.
         seen.recv().await.unwrap();
         seen.recv().await.unwrap();
         let refresh = tokio::time::timeout(Duration::from_secs(10), seen.recv())
@@ -1036,11 +1036,22 @@ mod tests {
             .expect("registration refreshes")
             .expect("registrar running");
         assert!(refresh.starts_with("REGISTER "));
+        if !refresh.to_ascii_lowercase().contains("authorization:") {
+            let authenticated = tokio::time::timeout(Duration::from_secs(5), seen.recv())
+                .await
+                .expect("refresh answers the challenge")
+                .expect("registrar running");
+            assert!(authenticated.to_ascii_lowercase().contains("authorization:"));
+        }
         tokio::time::timeout(Duration::from_secs(5), registration.unregister())
             .await
             .expect("unregister finishes")
             .expect("unregister succeeds");
-        agent.shutdown();
+        let cancel = agent.cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            cancel.cancel();
+        });
         assert!(
             tokio::time::timeout(Duration::from_secs(2), agent.next_call())
                 .await
