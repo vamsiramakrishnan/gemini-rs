@@ -126,7 +126,7 @@ metrics-exporter-prometheus = { version = "0.16", optional = true }
 # `opentelemetry_gcloud_monitoring_exporter`, whose latest (0.23) is built on
 # 0.31; move the whole block, exporters included, once it has one.
 opentelemetry = { version = "0.31", optional = true }
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio", "metrics"], optional = true }
+opentelemetry_sdk = { version = "0.33", features = ["rt-tokio", "metrics"], optional = true }
 tracing-opentelemetry = { version = "0.32", optional = true }
 
 # OpenTelemetry — generic OTLP exporter (otel-otlp)
