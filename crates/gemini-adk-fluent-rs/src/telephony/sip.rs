@@ -143,12 +143,8 @@ impl SipAgent {
             .with_cancel_token(cancel.child_token())
             .with_transport_layer(transport_layer)
             .build();
-        endpoint
-            .inner
-            .transport_layer
-            .serve_listens()
-            .await
-            .map_err(SipError::from)?;
+        // Endpoint::serve owns listener startup in rsipstack 0.7. Starting
+        // listeners separately would race the endpoint's transport receiver.
         let inner = endpoint.inner.clone();
         tokio::spawn(async move {
             let _ = inner.serve().await;
@@ -170,7 +166,11 @@ impl SipAgent {
     /// ACK) and non-call methods are handled internally; only new INVITEs
     /// surface. Returns `None` once the agent is shut down.
     pub async fn next_call(&mut self) -> Option<IncomingCall> {
-        while let Some(mut tx) = self.incoming.recv().await {
+        loop {
+            let mut tx = tokio::select! {
+                _ = self.cancel.cancelled() => return None,
+                tx = self.incoming.recv() => tx?,
+            };
             use rsipstack::rsip::{Method, StatusCode};
             match tx.original.method {
                 Method::Invite => {
@@ -251,7 +251,6 @@ impl SipAgent {
                 }
             }
         }
-        None
     }
 
     /// The SIP port actually bound (useful with port 0).
@@ -294,6 +293,7 @@ impl SipAgent {
                 username: account.username.clone(),
                 password: account.password.clone(),
                 realm: account.realm.clone(),
+                auth_username: None,
             }),
         );
         if let Some(contact) = &account.contact {
@@ -962,6 +962,12 @@ mod tests {
     /// A registrar that challenges a REGISTER without credentials (401) and
     /// grants one with them for 60 s. Every request it sees is forwarded.
     async fn fake_registrar() -> (SocketAddr, mpsc::UnboundedReceiver<String>) {
+        fake_registrar_with_expiry(60).await
+    }
+
+    async fn fake_registrar_with_expiry(
+        expires: u32,
+    ) -> (SocketAddr, mpsc::UnboundedReceiver<String>) {
         let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let addr = socket.local_addr().unwrap();
         let (seen_tx, seen_rx) = mpsc::unbounded_channel();
@@ -988,7 +994,7 @@ mod tests {
                         .lines()
                         .find(|l| l.to_ascii_lowercase().starts_with("contact:"))
                         .unwrap_or("Contact: <sip:alice@127.0.0.1>");
-                    ("200 OK", format!("{contact};expires=60\r\n"))
+                    ("200 OK", format!("{contact};expires={expires}\r\n"))
                 } else {
                     (
                         "401 Unauthorized",
@@ -1005,6 +1011,42 @@ mod tests {
             }
         });
         (addr, seen_rx)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn registration_refreshes_and_shutdown_stops_waiting_for_calls() {
+        let (registrar, mut seen) = fake_registrar_with_expiry(4).await;
+        let mut agent = SipAgent::bind("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
+        let registration = agent
+            .register(SipAccount::new(
+                format!("sip:{registrar}"),
+                "alice",
+                test_password(),
+            ))
+            .await
+            .unwrap();
+        // Consume the initial challenge and authenticated request, then wait
+        // for the next REGISTER (the refresh floor is five seconds).
+        seen.recv().await.unwrap();
+        seen.recv().await.unwrap();
+        let refresh = tokio::time::timeout(Duration::from_secs(10), seen.recv())
+            .await
+            .expect("registration refreshes")
+            .expect("registrar running");
+        assert!(refresh.starts_with("REGISTER "));
+        tokio::time::timeout(Duration::from_secs(5), registration.unregister())
+            .await
+            .expect("unregister finishes")
+            .expect("unregister succeeds");
+        agent.shutdown();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), agent.next_call())
+                .await
+                .expect("shutdown wakes next_call")
+                .is_none()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
