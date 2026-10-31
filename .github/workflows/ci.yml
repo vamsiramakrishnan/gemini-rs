@@ -59,8 +59,26 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       # nextest runs every test binary's tests in one pool of processes, where
       # `cargo test` runs the binaries one after another. It does not run
-      # doctests, so `cargo test --doc` keeps those.
+      # doctests; the `doctests` job keeps those.
       - run: cargo nextest run --workspace --locked
+
+  # Doctests and the feature-specific tests, beside the suite rather than
+  # after it. rustdoc compiles every doctest afresh on each run (about two
+  # minutes here, nothing cached), and each feature-specific step builds the
+  # crate again without default features; in the `test` job these steps
+  # added four minutes after the suite had already finished.
+  doctests:
+    name: Doctests and feature tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.0"
+      - uses: Swatinem/rust-cache@v2
+      # `voice-io` (cpal) needs system audio headers to compile.
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      # nextest (the `test` job) does not run doctests.
       - run: cargo test --workspace --doc --locked
       # Run audio assertions with DSP alone: default workspace tests can hide
       # feature-gated resampler regressions or accidental voice-io coupling.
@@ -70,6 +88,7 @@ jobs:
         run: cargo test -p gemini-adk-fluent-rs --no-default-features --features sip --lib telephony::sip::tests --locked
       - name: OpenTelemetry SDK and tracing bridge regression
         run: cargo test -p gemini-genai-rs --no-default-features --features otel-base --lib tracing_layer_preserves_remote_parent_context --locked
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -295,7 +314,7 @@ jobs:
   ci-ok:
     name: CI
     if: ${{ !cancelled() }}
-    needs: [check, test, clippy, fmt, features, hack, deny, monty-worker, conversation-ci, generated-projects, studio, python]
+    needs: [check, test, doctests, clippy, fmt, features, hack, deny, monty-worker, conversation-ci, generated-projects, studio, python]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed
