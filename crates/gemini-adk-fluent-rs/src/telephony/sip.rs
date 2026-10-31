@@ -1041,7 +1041,11 @@ mod tests {
                 .await
                 .expect("refresh answers the challenge")
                 .expect("registrar running");
-            assert!(authenticated.to_ascii_lowercase().contains("authorization:"));
+            assert!(
+                authenticated
+                    .to_ascii_lowercase()
+                    .contains("authorization:")
+            );
         }
         tokio::time::timeout(Duration::from_secs(5), registration.unregister())
             .await
