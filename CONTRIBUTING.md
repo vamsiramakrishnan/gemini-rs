@@ -114,6 +114,10 @@ just check          # Fast inner loop: fmt + clippy + tests
 just ci             # Every job GitHub Actions runs — do this before pushing
    ```
 
+`just hooks` points git at the committed pre-push hook (`.githooks/pre-push`),
+so `git push` runs `cargo fmt --check` and clippy first and refuses a push that
+would fail those jobs in CI; do it once per clone.
+
 `just check` is the loop you run while working. `just ci` is the one that tells
 you whether the push will be green: it adds the feature matrix, the per-feature
 `cargo-hack` pass, `cargo-deny` and the conversation suite, which are jobs CI

@@ -53,10 +53,33 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
+      - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
       # `voice-io` (cpal) needs system audio headers to compile.
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - run: cargo test --workspace --locked
+      # nextest runs every test binary's tests in one pool of processes, where
+      # `cargo test` runs the binaries one after another. It does not run
+      # doctests; the `doctests` job keeps those.
+      - run: cargo nextest run --workspace --locked
+
+  # Doctests and the feature-specific tests, beside the suite rather than
+  # after it. rustdoc compiles every doctest afresh on each run (about two
+  # minutes here, nothing cached), and each feature-specific step builds the
+  # crate again without default features; in the `test` job these steps
+  # added four minutes after the suite had already finished.
+  doctests:
+    name: Doctests and feature tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.0"
+      - uses: Swatinem/rust-cache@v2
+      # `voice-io` (cpal) needs system audio headers to compile.
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      # nextest (the `test` job) does not run doctests.
+      - run: cargo test --workspace --doc --locked
       # Run audio assertions with DSP alone: default workspace tests can hide
       # feature-gated resampler regressions or accidental voice-io coupling.
       - name: DSP streaming and audio regressions
@@ -65,12 +88,6 @@ jobs:
         run: cargo test -p gemini-adk-fluent-rs --no-default-features --features sip --lib telephony::sip::tests --locked
       - name: OpenTelemetry SDK and tracing bridge regression
         run: cargo test -p gemini-genai-rs --no-default-features --features otel-base --lib tracing_layer_preserves_remote_parent_context --locked
-      # `cargo test --workspace` uses default features, so every test file
-      # behind `#![cfg(feature = "...")]` is invisible to it — a whole suite can
-      # stop compiling without CI noticing, which is exactly what happened to
-      # `contradiction_reconciliation`. Compile them; don't run them (the
-      # model-backed ones need an API key and would cost money per push).
-      - run: cargo check --workspace --all-features --all-targets --locked
 
   clippy:
     name: Clippy
@@ -110,13 +127,29 @@ jobs:
       # `voice-io` (cpal) needs system audio headers to compile.
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - run: cargo check --workspace --no-default-features --locked
-      - run: cargo check --workspace --all-features --locked
+      # `cargo test --workspace` uses default features, so every test file
+      # behind `#![cfg(feature = "...")]` is invisible to it — a whole suite can
+      # stop compiling without CI noticing, which is exactly what happened to
+      # `contradiction_reconciliation`. Compile them (`--all-targets`); don't
+      # run them (the model-backed ones need an API key and would cost money
+      # per push). This step lived in the `test` job until it became the
+      # slowest job's tail; here it shares the all-features build with the
+      # extreme above.
+      - run: cargo check --workspace --all-features --all-targets --locked
 
   # Per-feature isolation: every feature of the published crates must compile on
   # its own (catches missing feature deps that the extremes above can't see).
   hack:
-    name: Feature isolation (cargo-hack)
+    name: Feature isolation ${{ matrix.partition }}/4 (cargo-hack)
     runs-on: ubuntu-latest
+    # About 70 single-feature checks across the four crates, run in series,
+    # made this the job that finished last in two runs out of three. cargo-hack
+    # deals the checks out by `--partition M/N`, so four runners each take a
+    # quarter; the job is as long as its slowest quarter.
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
@@ -130,7 +163,7 @@ jobs:
       # `--no-dev-deps` edits the real Cargo.toml while cargo-hack runs, which
       # changes the resolution and so requires a lockfile update — exactly what
       # `--locked` forbids. The two cannot both be passed.
-      - run: cargo hack check --each-feature --no-dev-deps -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
+      - run: cargo hack check --each-feature --no-dev-deps --partition ${{ matrix.partition }}/4 -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
 
   # Supply chain: RustSec advisories, license allow-list, source whitelist.
   # Configuration lives in deny.toml.
@@ -273,3 +306,22 @@ jobs:
           pip install "maturin>=1.7,<2.0"
           maturin develop --locked
           python tests/smoke.py
+
+  # Green only when every job above is. The one check a branch rule names:
+  # with a matrix, a job's name changes when its size does, and a job that
+  # is skipped would count as passed for a required check, which is why this
+  # runs after a failure too (`!cancelled()`) and then fails itself.
+  ci-ok:
+    name: CI
+    if: ${{ !cancelled() }}
+    needs: [check, test, doctests, clippy, fmt, features, hack, deny, monty-worker, conversation-ci, generated-projects, studio, python]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            test "$result" = success || exit 1
+          done

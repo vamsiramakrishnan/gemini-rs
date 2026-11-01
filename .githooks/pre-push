@@ -1,0 +1,18 @@
+#!/bin/sh
+# pre-push: the checks a push must pass before CI sees it. Installed by
+# `just hooks` (git config core.hooksPath .githooks).
+#
+# A line in AGENTS.md asking for `just check` is a step an agent can skip; a
+# hook is not. Formatting and clippy on a warm build take seconds and catch
+# what otherwise costs a CI round trip. Tests are not here: they are minutes,
+# and CI runs them.
+set -eu
+cat > /dev/null  # git sends the refs on stdin; the checks do not need them
+if ! cargo fmt --all -- --check; then
+    echo "pre-push: rustfmt found changes; run 'cargo fmt --all' and retry." >&2
+    exit 1
+fi
+if ! cargo clippy --workspace --all-targets --locked -- -D warnings; then
+    echo "pre-push: clippy failed; fix the warnings and retry." >&2
+    exit 1
+fi

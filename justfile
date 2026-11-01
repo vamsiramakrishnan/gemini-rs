@@ -37,6 +37,16 @@ check: fmt-check lint test
 # Pre-commit check (alias for 'check')
 pre-commit: check
 
+# Make `git push` run .githooks/pre-push (fmt-check and clippy) first. Once per
+# clone; `just hooks-off` undoes it.
+hooks:
+    git config core.hooksPath .githooks
+    @echo "git push now runs .githooks/pre-push first (cargo fmt --check, cargo clippy -D warnings)."
+
+# Stop running .githooks/pre-push on git push
+hooks-off:
+    git config --unset core.hooksPath
+
 # Format all code
 fmt:
     cargo fmt --all
