@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Bug-bash test suites.** libFuzzer targets for the Live frame decoder on
+  both wire paths (`crates/gemini-genai-rs/fuzz`, run for a fixed minute in
+  CI from a committed corpus); property tests that a `SessionSpec` survives
+  serialization, validates the same way on both sides and generates Rust
+  that parses and declares the same flow; property tests that a governed
+  flow never admits a gated tool before its guard holds, under interleaved
+  state writes, tool calls and turns; a fast-lane dispatch budget test (one
+  millisecond per callback, asserted) and an end-to-end `criterion`
+  benchmark; a `loom` model of the telemetry lane's atomics (CI job `loom`);
+  session-lifecycle tests through the fluent API for GoAway, resumption and
+  reconnect, barge-in during a tool call and cancellation of in-flight tool
+  calls; G.711 reference-vector tests; DTMF delivery into session state over
+  Twilio, RTP (RFC 4733) and in-band detection; `--help` and non-zero exit
+  tests for every `adk` subcommand; and a Flow Studio round trip of every
+  gallery document through the runtime and back.
+- **`transport::ws::frame_payload`.** The text/binary/close/control frame
+  classification the transport applies, as a function, so the fuzz targets
+  and tests exercise the same code the session loop runs.
+
 - **Code mode: programs over your own tools.** `Live::code_mode(CodeMode)`,
   `SessionSpec.code` and `SkillSpec.code` give the model `run_code`: a short
   Python program whose functions are the session's tools, run in
@@ -97,6 +116,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SipError::Sip` now boxes the SIP stack's error.
 
 ### Fixed
+
+- **G.711 encoders are bit-exact with the ITU-T G.191 / Sun `g711.c`
+  reference.** Negative samples at segment boundaries encoded one code off
+  (`-1` became µ-law negative zero, which decodes to 0); the encoders now
+  work in the reference's 14-bit (µ-law) and 13-bit (A-law) domain. The
+  decoders were already exact. Checked for every `i16` input and every byte.
+- **Latency percentiles never count an unpublished sample.** Under two
+  concurrent `record` calls the telemetry lane's recent-sample ring could
+  expose a slot that was claimed but not yet written, so a percentile fell
+  below the minimum; found by the loom model, the ring now publishes each
+  slot on its own.
+- **`adk flow …`, `adk replay`, `adk session …` and `adk eval` name the
+  missing file.** They printed a bare `No such file or directory`; the path
+  is now in the error, as the `spec` and `bundle` commands already did.
+- **`runtime.temperature` survives a save through Flow Studio.** The `f32`
+  serialized as its exact binary value (`0.6` became `0.6000000238418579`);
+  it serializes as its shortest decimal form.
+- **Generated Rust for a conversation document keeps the conversation.**
+  `SessionSpec::to_rust` dropped the `conversation` section (the shape of
+  every Flow Studio gallery example) and emitted a program with no
+  governance; it now embeds the document and applies it, as it already did
+  for skills documents.
+- **`on_tool_cancelled` runs for a barge-in cancellation.** The hook ran only
+  for a server `toolCallCancellation`; an inline tool cancelled by a user
+  interruption emitted the `ToolCancelled` event but skipped the hook.
+- **Generated Rust survives a multi-line description.** A line break in
+  `description` put the rest of the text outside the generated `//!`
+  comment, and the program did not parse.
+- **Generated Rust for a `Guard::custom` is a compile error, not a panic.**
+  `SessionSpec::to_rust` emitted `todo!()` for a custom guard, so the
+  generated program compiled and then panicked at the first evaluation; it
+  now emits `compile_error!` naming the guard, so the reader writes it.
 
 - **A call the phase refuses no longer opens a digression.** The decision
   gate asked about every incoming call before the phase filter, so a call to
