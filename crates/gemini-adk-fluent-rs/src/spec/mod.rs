@@ -768,7 +768,11 @@ pub enum PersistenceSpec {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RuntimeSpec {
     /// Sampling temperature.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_f32_exact"
+    )]
     pub temperature: Option<f32>,
     /// Thinking budget in tokens (Google AI only; stripped on Vertex).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1122,6 +1126,25 @@ impl SpecResources {
     pub fn implement(mut self, tool: impl ToolFunction + 'static) -> Self {
         self.tools.insert(tool.name().to_string(), Arc::new(tool));
         self
+    }
+}
+
+/// Serialize an `f32` by its shortest decimal form rather than its exact
+/// binary value: an authored `0.6` must come back as `0.6`, not
+/// `0.6000000238418579`, or every save through Flow Studio rewrites it.
+fn serialize_f32_exact<S: serde::Serializer>(
+    value: &Option<f32>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::Serialize as _;
+    match value {
+        Some(v) => {
+            // `f32::to_string` is the shortest round-tripping decimal of the
+            // f32, which parses to the same f64 a JSON author wrote.
+            let widened: f64 = v.to_string().parse().unwrap_or(f64::from(*v));
+            widened.serialize(serializer)
+        }
+        None => serializer.serialize_none(),
     }
 }
 
