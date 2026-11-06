@@ -1770,7 +1770,6 @@ dependencies = [
 name = "gemini-adk-api-rs"
 version = "4.0.0"
 dependencies = [
- "axum",
  "dotenvy",
  "gemini-adk-server-rs",
  "tokio",
@@ -1785,10 +1784,8 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
- "bytes",
  "clap",
  "dotenvy",
- "futures",
  "gemini-adk-fluent-rs",
  "gemini-adk-rs",
  "gemini-adk-server-rs",
@@ -1799,7 +1796,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "toml 0.8.23",
- "tower-http",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1952,9 +1948,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "thiserror 2.0.21",
  "tokio",
- "tokio-stream",
  "tower",
  "tower-http",
  "tracing",
@@ -1971,7 +1965,6 @@ dependencies = [
  "bytemuck",
  "bytes",
  "criterion",
- "dashmap",
  "futures-util",
  "metrics",
  "metrics-exporter-prometheus",
