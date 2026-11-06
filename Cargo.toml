@@ -33,6 +33,8 @@ exclude = [
     "evals/code-mode",
     # A load harness with its own lockfile; it never runs in CI.
     "evals/python-vs-rust",
+    # Its own workspace and lockfile (DSP chain evaluation); never in CI.
+    "evals/dspbench",
     # The Python binding crate links libpython and is built by maturin, not
     # `cargo build --workspace`; keep it out of the workspace graph/CI gates.
     "crates/gemini-adk-py",
