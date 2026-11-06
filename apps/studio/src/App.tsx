@@ -16,13 +16,13 @@ import { Bundles } from './panels/Bundles';
 import { Tasks } from './panels/Tasks';
 
 const TABS: { id: DockTab; label: string }[] = [
-  { id: 'problems', label: 'Problems' },
+  { id: 'problems', label: 'Validation' },
   { id: 'tests', label: 'Tests' },
-  { id: 'preview', label: 'Step through' },
+  { id: 'preview', label: 'Simulate' },
   { id: 'tasks', label: 'Tasks' },
   { id: 'run', label: 'Run' },
   { id: 'code', label: 'Code' },
-  { id: 'bundles', label: 'Versions' },
+  { id: 'bundles', label: 'Bundles' },
 ];
 
 export function App() {

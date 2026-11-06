@@ -169,9 +169,10 @@ enum Command {
         /// Google Cloud project ID.
         #[arg(long)]
         project: Option<String>,
-        /// Google Cloud region.
-        #[arg(long, default_value = "us-central1")]
-        region: String,
+        /// Google Cloud location (the SDK's `GOOGLE_CLOUD_LOCATION`). `--region`
+        /// is accepted as an alias.
+        #[arg(long, alias = "region", default_value = "us-central1")]
+        location: String,
         /// Cloud Run service name, and the image name when building.
         #[arg(long, default_value = "adk-runtime")]
         service_name: String,
@@ -643,7 +644,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Deploy {
             target,
             project,
-            region,
+            location,
             service_name,
             bundles,
             serve,
@@ -662,7 +663,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 DeployTarget::AgentEngine => commands::deploy::Target::AgentEngine,
             },
             project,
-            region,
+            location,
             service_name,
             bundles: bundles.or_else(|| std::env::var("ADK_BUNDLES").ok()),
             serve,

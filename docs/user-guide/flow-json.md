@@ -471,8 +471,8 @@ completion, or a failure if the flow blocks it unexpectedly), `{"set": {…}}`
 (stands in for extraction), `{"expect": {done, active, allowed, blocked,
 state, complete}}`.
 
-`set` re-latches the active layer without counting a user turn. Step through
-uses the same replay and returns L1 `FlowSnapshot` fields: active-layer
+`set` re-latches the active layer without counting a user turn. The Studio's
+Simulate panel uses the same replay and returns L1 `FlowSnapshot` fields: active-layer
 progress, `overlay_path`, whole-stack `complete`, and `terminated`. A
 digression's closing turn can have no missing requirements while the stack
 remains incomplete. These tests supply state explicitly; they do not run

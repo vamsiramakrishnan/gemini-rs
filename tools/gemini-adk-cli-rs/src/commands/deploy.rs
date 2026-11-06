@@ -20,7 +20,7 @@ pub enum Target {
 pub struct DeployConfig {
     pub target: Target,
     pub project: Option<String>,
-    pub region: String,
+    pub location: String,
     pub service_name: String,
     /// Bundle store URI (`gs://bucket/prefix`).
     pub bundles: Option<String>,
@@ -103,7 +103,7 @@ fn image(config: &DeployConfig, project: &str) -> String {
     config.image.clone().unwrap_or_else(|| {
         format!(
             "{}-docker.pkg.dev/{project}/adk/{}:latest",
-            config.region, config.service_name
+            config.location, config.service_name
         )
     })
 }
@@ -163,7 +163,7 @@ fn cloud_run_plan(config: &DeployConfig) -> Result<Plan, String> {
         format!("ADK_DRAIN_SECS={CLOUD_RUN_DRAIN_SECS}"),
         "GOOGLE_GENAI_USE_VERTEXAI=true".into(),
         format!("GOOGLE_CLOUD_PROJECT={project}"),
-        format!("GOOGLE_CLOUD_LOCATION={}", config.region),
+        format!("GOOGLE_CLOUD_LOCATION={}", config.location),
     ]
     .join(";");
     let mut secrets = vec![format!(
@@ -183,7 +183,7 @@ fn cloud_run_plan(config: &DeployConfig) -> Result<Plan, String> {
         "--project",
         project,
         "--region",
-        &config.region,
+        &config.location,
         "--image",
         &image,
         "--port",
@@ -269,7 +269,7 @@ mod tests {
         DeployConfig {
             target: Target::CloudRun,
             project: Some("my-project".into()),
-            region: "us-central1".into(),
+            location: "us-central1".into(),
             service_name: "adk-runtime".into(),
             bundles: Some("gs://my-bucket/bundles".into()),
             serve: Some("booking:prod,clinic:prod".into()),

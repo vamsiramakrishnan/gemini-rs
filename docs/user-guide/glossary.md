@@ -90,7 +90,7 @@ Core vocabulary across the three layers. Types link to where they live; see the
   the main flow plus its digressions and repair policies. A bare `govern` is a
   stack with no digressions; `Live::converse` installs a compiled
   conversation's digressions on it. Lives in the runtime (`gemini-adk-rs`).
-- **Digression** — a named sub-flow that suspends the main flow when its trigger
+- **Overlay** (also called a digression) — a named sub-flow that suspends the main flow when its trigger
   holds, runs to completion, then resumes per its `Resume` policy
   (`Previous`, `Restart`, `Terminate`) at the turn boundary *after* the one it
   completed on — so its closing instruction is projected before the main flow

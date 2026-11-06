@@ -101,6 +101,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **One vocabulary across the SDK, the CLI and Flow Studio.** The Studio
+  now uses the document's own words: "New session spec" and "Open session
+  spec…" (was "New agent", "Open JSON…"), the "Bundles" tab and "Push
+  bundle" button (was "Versions", "Save version"), "Validation" and
+  "Simulate" tabs (was "Problems", "Step through"), "Extract", "Watch" and
+  "MCP" inspector sections, "Overlay" in the flow state (was "Digression"),
+  and a "confirm" chip. `adk deploy` takes `--location` (the SDK's
+  `GOOGLE_CLOUD_LOCATION`); `--region` still works as an alias.
+
 - **`plan.md` folded into `ROADMAP.md`.** The adk-fluent naming-parity plan
   is now Milestone 11 of the roadmap (its `Agent = AgentBuilder` alias is
   declined, since `Agent` is the runtime trait); the roadmap header names the

@@ -35,8 +35,8 @@ machinery through the server, so the Studio shows what a runtime would do.
   directly.
 - **Inspector** (right) edits whatever is selected: a section, a stage, or
   a transition's guard.
-- **Dock** (bottom) holds Problems, Tests, Step through, Run, Code and
-  Versions.
+- **Dock** (bottom) holds Validation, Tests, Simulate, Run, Code and
+  Bundles.
 
 Undo and redo cover every edit (Ctrl+Z, Ctrl+Shift+Z). Consecutive
 keystrokes in one field count as one step. The working document is kept in
@@ -61,9 +61,9 @@ conversation**). Steps become stages, and each dependency becomes a
 transition guarded by its source's completion and, for a conditional edge,
 by the edge's condition.
 
-## Problems, tests and step-through (no API key)
+## Validation, tests and simulation (no API key)
 
-The document is validated as you type. **Problems** lists what fails to
+The document is validated as you type. **Validation** lists what fails to
 compile and every guard that waits on a state key nothing writes.
 
 **Tests** runs the spec's flow tests (scripted `user`, `tool` and `set`
@@ -73,7 +73,7 @@ conversation include its digressions and repair policies. These tests use
 declared mock tool effects and supplied state; they do not run model
 extraction, phase callbacks, external services, or audio.
 
-**Step through** replays one flow test event by event. As you scrub, the
+**Simulate** replays one flow test event by event. As you scrub, the
 canvas marks active and done stages, and the panel shows admitted and
 blocked tools and each active stage's guard truth tree: exactly which atom
 it is waiting on.
@@ -84,7 +84,7 @@ closing turn before the main conversation resumes. Live and replay status
 are kept separately, so scrubbing a test does not overwrite a running
 session's observations.
 
-<p align="center"><img src="./assets/studio/preview.png" alt="Step through: a test at event 3, the canvas marking done and active stages, with blocked tools and the guard truth tree in the panel" width="900"></p>
+<p align="center"><img src="./assets/studio/preview.png" alt="Simulate: a test at event 3, the canvas marking done and active stages, with blocked tools and the guard truth tree in the panel" width="900"></p>
 
 ## Run: a live session
 

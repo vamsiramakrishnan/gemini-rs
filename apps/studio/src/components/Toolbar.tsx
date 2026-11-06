@@ -92,9 +92,9 @@ export function Toolbar() {
         }}
       >
         <option value="">File…</option>
-        <option value="__new">New agent</option>
-        <option value="__new_skills">New agent with skills</option>
-        <option value="__open">Open JSON…</option>
+        <option value="__new">New session spec</option>
+        <option value="__new_skills">New session spec with skills</option>
+        <option value="__open">Open session spec…</option>
         {gallery.length > 0 && (
           <optgroup label="Multi-capability examples">
             {gallery.filter((g) => !g.file.startsWith('reference/')).map((g) => (
@@ -115,8 +115,8 @@ export function Toolbar() {
       <button type="button" onClick={download}>
         Download
       </button>
-      <button type="button" className="primary" onClick={() => openDock('bundles')} title="Save a version (Ctrl+S)">
-        Save version
+      <button type="button" className="primary" onClick={() => openDock('bundles')} title="Push a bundle (Ctrl+S)">
+        Push bundle
       </button>
       <input
         ref={fileInput}
