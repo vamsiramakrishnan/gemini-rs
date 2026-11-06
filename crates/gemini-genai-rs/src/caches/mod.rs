@@ -102,6 +102,9 @@ pub enum CachesError {
     #[error("Failed to parse response: {0}")]
     /// Response body failed to parse.
     Parse(#[from] serde_json::Error),
+    #[error("Failed to serialize request: {0}")]
+    /// A request field failed to serialize to JSON.
+    Serialize(#[source] serde_json::Error),
     #[error("Auth error: {0}")]
     /// Authentication/authorization failure.
     Auth(#[from] crate::session::AuthError),
@@ -139,7 +142,8 @@ impl Client {
             body["displayName"] = serde_json::Value::String(name);
         }
         if let Some(instruction) = &config.system_instruction {
-            body["systemInstruction"] = serde_json::to_value(instruction).unwrap();
+            body["systemInstruction"] =
+                serde_json::to_value(instruction).map_err(CachesError::Serialize)?;
         }
         if let Some(ttl) = config.ttl {
             body["ttl"] = serde_json::Value::String(ttl);

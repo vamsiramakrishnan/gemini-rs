@@ -316,14 +316,14 @@ impl<S: OkfStore> OkfRepository<S> {
         format!("{}manifest.json", Self::user_prefix(user_id))
     }
 
-    async fn ensure_loaded(
+    async fn ensure_loaded<'a>(
         &self,
-        namespaces: &mut HashMap<UserId, Namespace>,
+        namespaces: &'a mut HashMap<UserId, Namespace>,
         user_id: &UserId,
-    ) -> Result<(), MemoryError> {
+    ) -> Result<&'a mut Namespace, MemoryError> {
         let entry = namespaces.entry(user_id.clone()).or_default();
         if entry.loaded {
-            return Ok(());
+            return Ok(entry);
         }
 
         let prefix = Self::user_prefix(user_id);
@@ -360,7 +360,7 @@ impl<S: OkfStore> OkfRepository<S> {
             applied: manifest.applied,
             written_files,
         };
-        Ok(())
+        Ok(entry)
     }
 
     /// Render the whole namespace to path → file contents.
@@ -431,8 +431,7 @@ impl<S: OkfStore> MemoryRepository for OkfRepository<S> {
         selector: &ReconciliationSelector,
     ) -> Result<Vec<CanonicalMemory>, MemoryError> {
         let mut namespaces = self.namespaces.lock().await;
-        self.ensure_loaded(&mut namespaces, user_id).await?;
-        let namespace = namespaces.get(user_id).expect("namespace just loaded");
+        let namespace = self.ensure_loaded(&mut namespaces, user_id).await?;
         let limit = if selector.limit == 0 {
             usize::MAX
         } else {
@@ -464,11 +463,9 @@ impl<S: OkfStore> MemoryRepository for OkfRepository<S> {
 
     async fn commit(&self, transaction: MemoryTransaction) -> Result<CommitReceipt, MemoryError> {
         let mut namespaces = self.namespaces.lock().await;
-        self.ensure_loaded(&mut namespaces, &transaction.user_id)
+        let namespace = self
+            .ensure_loaded(&mut namespaces, &transaction.user_id)
             .await?;
-        let namespace = namespaces
-            .get_mut(&transaction.user_id)
-            .expect("namespace just loaded");
 
         // A retried commit returns the current revision rather than applying
         // the same writes again.

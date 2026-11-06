@@ -209,10 +209,13 @@ async fn run(
         let _ = socket.close().await;
         return;
     };
-    let tokens: &StreamTokens = runtime
-        .stream_tokens
-        .as_ref()
-        .expect("media route requires stream tokens");
+    // The media route is only mounted when stream tokens are configured; a
+    // socket that reaches it without them is refused rather than trusted.
+    let Some(tokens) = runtime.stream_tokens.as_ref() else {
+        warn!(call = %call_sid, "Twilio media socket refused: the runtime has no stream tokens");
+        let _ = socket.close().await;
+        return;
+    };
     if let Err(e) = tokens.redeem(&token, &bundle.name, &call_sid, unix_now()) {
         warn!(call = %call_sid, "Twilio media socket refused: {e:?}");
         let _ = socket.close().await;

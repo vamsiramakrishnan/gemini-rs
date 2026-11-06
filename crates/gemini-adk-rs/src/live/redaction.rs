@@ -26,6 +26,7 @@
 //!   loss prevention on stored audio.
 
 use regex::Regex;
+use std::sync::LazyLock;
 
 /// A card-number match is replaced by this, keeping the last four digits —
 /// enough for the conversation to stay coherent ("the card ending 1234")
@@ -114,20 +115,21 @@ impl TranscriptRedactor {
 
 /// Candidate card spans: digit groups joined by optional single spaces or
 /// dashes. Verified by length and Luhn before replacement.
-fn card_regex() -> &'static Regex {
-    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\d(?:[ -]?\d){11,18}").expect("valid regex"))
-}
+static CARD_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\d(?:[ -]?\d){11,18}").expect("CARD_RE literal is a valid regex")
+});
 
-fn digit_run_regex(min: usize) -> Regex {
-    Regex::new(&format!(r"\d{{{min},}}")).expect("valid regex")
-}
+/// Maximal digit runs. The caller keeps the runs of at least `min` digits, so
+/// the threshold never has to be compiled into a pattern (a large `min` would
+/// make `\d{min,}` fail to compile).
+static DIGIT_RUN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\d+").expect("DIGIT_RUN_RE literal is a valid regex"));
 
 fn redact_cards(text: &str) -> String {
-    if !card_regex().is_match(text) {
+    if !CARD_RE.is_match(text) {
         return text.to_string();
     }
-    card_regex()
+    CARD_RE
         .replace_all(text, |caps: &regex::Captures<'_>| {
             let raw = &caps[0];
             let digits: String = raw.chars().filter(char::is_ascii_digit).collect();
@@ -141,11 +143,16 @@ fn redact_cards(text: &str) -> String {
 }
 
 fn redact_digit_runs(text: &str, min: usize) -> String {
-    let regex = digit_run_regex(min);
-    if !regex.is_match(text) {
-        return text.to_string();
-    }
-    regex.replace_all(text, NUMBER_REPLACEMENT).into_owned()
+    DIGIT_RUN_RE
+        .replace_all(text, |caps: &regex::Captures<'_>| {
+            let run = &caps[0];
+            if run.chars().count() >= min {
+                NUMBER_REPLACEMENT.to_string()
+            } else {
+                run.to_string()
+            }
+        })
+        .into_owned()
 }
 
 /// The Luhn checksum every payment-card number satisfies (ISO/IEC 7812).
@@ -169,6 +176,29 @@ fn luhn_valid(digits: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn static_regex_literals_compile() {
+        // Forces each `LazyLock`: a bad literal fails here, not at runtime.
+        LazyLock::force(&CARD_RE);
+        LazyLock::force(&DIGIT_RUN_RE);
+    }
+
+    #[test]
+    fn an_unreachably_large_digit_threshold_redacts_nothing() {
+        // `\d{usize::MAX,}` cannot compile; the run-length comparison can.
+        let redactor = TranscriptRedactor::new().long_digits(usize::MAX);
+        assert_eq!(redactor.redact("code 123456789".into()), "code 123456789");
+    }
+
+    #[test]
+    fn digit_runs_shorter_than_the_threshold_are_kept() {
+        let redactor = TranscriptRedactor::new().long_digits(4);
+        assert_eq!(
+            redactor.redact("12 and 1234 and 12345".into()),
+            format!("12 and {NUMBER_REPLACEMENT} and {NUMBER_REPLACEMENT}")
+        );
+    }
 
     fn full() -> TranscriptRedactor {
         TranscriptRedactor::new().card_numbers().long_digits(6)

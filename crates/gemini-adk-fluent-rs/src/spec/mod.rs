@@ -1732,8 +1732,9 @@ impl SessionSpec {
             for c in &self.computed {
                 for dep in c.from.keys_read() {
                     let dep = normalize(&dep);
-                    if dep != c.key && computed_keys.contains(dep.as_str()) {
-                        let dep_key = *computed_keys.get(dep.as_str()).unwrap();
+                    if dep != c.key
+                        && let Some(&dep_key) = computed_keys.get(dep.as_str())
+                    {
                         dependents.entry(dep_key).or_default().push(c.key.as_str());
                         *in_degree.entry(c.key.as_str()).or_default() += 1;
                     }
@@ -1751,7 +1752,12 @@ impl SessionSpec {
             while let Some(key) = queue.pop() {
                 visited += 1;
                 for dependent in dependents.get(key).cloned().unwrap_or_default() {
-                    let d = in_degree.get_mut(dependent).unwrap();
+                    // Every dependent is a computed key, and every computed key
+                    // has an entry; an absent one would only leave `visited`
+                    // short and be reported as a cycle below.
+                    let Some(d) = in_degree.get_mut(dependent) else {
+                        continue;
+                    };
                     *d -= 1;
                     if *d == 0 {
                         queue.push(dependent);

@@ -515,10 +515,11 @@ impl TaskLane {
             })
             .collect();
         for (id, invalid) in settled {
-            let (_, output) = self
-                .completion_requests
-                .remove(&id)
-                .expect("request collected");
+            // `settled` was collected from this map, so the entry is there; if
+            // it were not, no request is left to complete.
+            let Some((_, output)) = self.completion_requests.remove(&id) else {
+                continue;
+            };
             if invalid {
                 continue;
             }
@@ -582,10 +583,18 @@ impl TaskLane {
                 }
             }
         }
-        let value = serde_json::to_value(&snapshot).expect("task snapshots serialize");
-        if self.last_status.as_ref() != Some(&value) {
-            self.last_status = Some(value);
-            let _ = event_tx.send(LiveEvent::TasksChanged(snapshot));
+        match serde_json::to_value(&snapshot) {
+            Ok(value) => {
+                if self.last_status.as_ref() != Some(&value) {
+                    self.last_status = Some(value);
+                    let _ = event_tx.send(LiveEvent::TasksChanged(snapshot));
+                }
+            }
+            Err(error) => {
+                let _ = event_tx.send(LiveEvent::Error(format!(
+                    "task snapshot could not be serialized: {error}"
+                )));
+            }
         }
     }
 

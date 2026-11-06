@@ -2,12 +2,15 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 static MODEL_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/(.+)$").unwrap()
+    Regex::new(r"^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/(.+)$")
+        .expect("MODEL_PATH_RE literal is a valid regex")
 });
 
 /// Regex to extract the major version digit from a gemini model name.
 /// Matches "gemini-" followed by one or more digits (the major version).
-static GEMINI_VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^gemini-(\d+)").unwrap());
+static GEMINI_VERSION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^gemini-(\d+)").expect("GEMINI_VERSION_RE literal is a valid regex")
+});
 
 /// Extract simple model name from a fully-qualified resource path.
 ///
@@ -63,6 +66,13 @@ pub fn is_gemini2_or_above(model_string: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn static_regex_literals_compile() {
+        // Forces each `LazyLock`: a bad literal fails here, not at runtime.
+        LazyLock::force(&MODEL_PATH_RE);
+        LazyLock::force(&GEMINI_VERSION_RE);
+    }
 
     // ── extract_model_name ──────────────────────────────────────────
 

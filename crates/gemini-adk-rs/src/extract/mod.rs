@@ -39,16 +39,24 @@ use crate::orchestration::AgentMode;
 use crate::state::State;
 use crate::text::TextAgent;
 
-static MONEY_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\$?\s?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?").unwrap());
-static INT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-?\d+").unwrap());
-static DATE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d{4}-\d{2}-\d{2}\b").unwrap());
+static MONEY_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\$?\s?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?")
+        .expect("MONEY_RE literal is a valid regex")
+});
+static INT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"-?\d+").expect("INT_RE literal is a valid regex"));
+static DATE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b\d{4}-\d{2}-\d{2}\b").expect("DATE_RE literal is a valid regex")
+});
 // 12-hour clock with an am/pm marker: "3pm", "3:30 pm".
-static TIME12_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\b(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b").unwrap());
+static TIME12_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(\d{1,2})(?::(\d{2}))?\s*([ap]m)\b")
+        .expect("TIME12_RE literal is a valid regex")
+});
 // 24-hour clock: "15:00", "09:30".
-static TIME24_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b([01]?\d|2[0-3]):([0-5]\d)\b").unwrap());
+static TIME24_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b([01]?\d|2[0-3]):([0-5]\d)\b").expect("TIME24_RE literal is a valid regex")
+});
 
 /// Normalize a clock time found in `text` to a 24-hour `"HH:MM"` string.
 fn parse_time(text: &str) -> Option<String> {
@@ -657,6 +665,14 @@ impl TurnExtractor for RecordExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn static_regex_literals_compile() {
+        // Forces each `LazyLock`: a bad literal fails here, not at runtime.
+        for re in [&MONEY_RE, &INT_RE, &DATE_RE, &TIME12_RE, &TIME24_RE] {
+            LazyLock::force(re);
+        }
+    }
     use serde_json::json;
 
     fn turn(user: &str) -> TranscriptTurn {

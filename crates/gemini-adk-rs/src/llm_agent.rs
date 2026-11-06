@@ -353,12 +353,10 @@ impl LlmAgent {
             }
 
             // Send final response when tool completes
-            let final_response = if all_yields.is_empty() {
-                json!({"status": "completed"})
-            } else if all_yields.len() == 1 {
-                all_yields.into_iter().next().unwrap()
-            } else {
-                json!({"results": all_yields})
+            let final_response = match all_yields.as_mut_slice() {
+                [] => json!({"status": "completed"}),
+                [only] => only.take(),
+                _ => json!({"results": all_yields}),
             };
 
             let resp = FunctionResponse {

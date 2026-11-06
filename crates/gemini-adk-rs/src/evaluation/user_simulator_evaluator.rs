@@ -242,11 +242,8 @@ impl Evaluator for UserSimulatorEvaluator {
         let mut per_invocation = Vec::new();
         let mut total_score = 0.0;
 
-        let use_llm = self.llm.is_some();
-
         for (i, actual_inv) in actual.iter().enumerate() {
-            let (score, explanation) = if use_llm {
-                let llm = self.llm.as_ref().unwrap();
+            let (score, explanation) = if let Some(llm) = self.llm.as_ref() {
                 let prompt = self.build_prompt(actual_inv);
                 let request = crate::llm::LlmRequest::from_text(&prompt);
                 let response = llm

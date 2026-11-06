@@ -404,7 +404,7 @@ impl InMemorySessionLedger {
             if !corrected && !single_valued {
                 continue;
             }
-            let winner = fingerprints
+            let Some(winner) = fingerprints
                 .iter()
                 .max_by(|a, b| {
                     let ca = &state.candidates[*a];
@@ -414,7 +414,10 @@ impl InMemorySessionLedger {
                         .then_with(|| ca.last_seen_turn.cmp(&cb.last_seen_turn))
                 })
                 .cloned()
-                .expect("non-empty window");
+            else {
+                // An empty window has no winner (windows here hold two or more).
+                continue;
+            };
 
             for fingerprint in fingerprints {
                 if fingerprint == winner {

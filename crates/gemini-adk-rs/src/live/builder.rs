@@ -387,7 +387,7 @@ impl LiveSessionBuilder {
 
         // Connect via L0 using the resolved config (taken out of the plan so
         // the rest of the plan can be moved into the runtime stage).
-        let config = plan.config.take().expect("plan always carries a config");
+        let config = plan.take_config()?;
         let session = ConnectBuilder::new(config)
             .connect()
             .await
@@ -409,7 +409,7 @@ impl LiveSessionBuilder {
         transport: T,
     ) -> Result<LiveHandle, AgentError> {
         let mut plan = self.into_plan()?;
-        let config = plan.config.take().expect("plan always carries a config");
+        let config = plan.take_config()?;
         let session = ConnectBuilder::new(config)
             .transport_config(TransportConfig {
                 max_reconnect_attempts: 0,
@@ -762,6 +762,22 @@ pub(crate) struct SessionPlan {
     clock: Option<crate::clock::SharedClock>,
     lockstep: Option<Arc<super::processor::Lockstep>>,
     event_capacity: usize,
+}
+
+impl SessionPlan {
+    /// Take the resolved [`SessionConfig`] out for the connect stage.
+    ///
+    /// [`into_plan`](LiveSessionBuilder::into_plan) always fills it, and
+    /// connect takes it exactly once, so `None` means a plan was connected
+    /// twice: reported, not assumed away.
+    fn take_config(&mut self) -> Result<SessionConfig, AgentError> {
+        self.config.take().ok_or_else(|| {
+            AgentError::Config(
+                "session plan has no config: it was already taken by an earlier connect"
+                    .to_string(),
+            )
+        })
+    }
 }
 
 /// Fully wired runtime for a connected Live session, ready for lane spawning.

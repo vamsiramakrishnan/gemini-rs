@@ -185,29 +185,33 @@ impl Transport for ReplayTransport {
         // (mirrors MockTransport).
         tokio::task::yield_now().await;
 
-        if self.inbound.is_empty() {
-            let _ = self.drained_tx.send(true);
-            // Stay connected-but-idle; the session loop's `select!` drops this
-            // future when a command (e.g. Disconnect) arrives.
-            std::future::pending::<()>().await;
-            unreachable!("pending() never resolves");
-        }
+        // The queue cannot change while this future is suspended on the gate
+        // (`&mut self`), so the pop below always finds a frame; the loop makes
+        // an empty queue re-enter the idle branch instead of asserting.
+        let frame = loop {
+            if self.inbound.is_empty() {
+                let _ = self.drained_tx.send(true);
+                // Stay connected-but-idle; the session loop's `select!` drops this
+                // future when a command (e.g. Disconnect) arrives.
+                std::future::pending::<()>().await;
+                unreachable!("pending() never resolves");
+            }
 
-        if self.delivered >= self.ungated_prefix {
-            let mut gate = self.gate_rx.clone();
-            while !*gate.borrow() {
-                // If the control handle is dropped, proceed ungated rather
-                // than deadlocking the replay.
-                if gate.changed().await.is_err() {
-                    break;
+            if self.delivered >= self.ungated_prefix {
+                let mut gate = self.gate_rx.clone();
+                while !*gate.borrow() {
+                    // If the control handle is dropped, proceed ungated rather
+                    // than deadlocking the replay.
+                    if gate.changed().await.is_err() {
+                        break;
+                    }
                 }
             }
-        }
 
-        let frame = self
-            .inbound
-            .pop_front()
-            .expect("checked non-empty inbound queue");
+            if let Some(frame) = self.inbound.pop_front() {
+                break frame;
+            }
+        };
         if let Some(ts_ms) = self.timestamps.pop_front()
             && let Some(gate) = &self.on_frame
         {

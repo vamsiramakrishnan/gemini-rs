@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 
 use base64::Engine as _;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
@@ -188,68 +188,31 @@ impl std::error::Error for TwilioError {}
 
 // ── Outbound protocol (us → Twilio) ──────────────────────────────────────────
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OutMedia<'a> {
-    event: &'static str,
-    stream_sid: &'a str,
-    media: OutMediaPayload,
-}
-
-#[derive(Serialize)]
-struct OutMediaPayload {
-    payload: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OutClear<'a> {
-    event: &'static str,
-    stream_sid: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OutMark<'a> {
-    event: &'static str,
-    stream_sid: &'a str,
-    mark: OutMarkPayload<'a>,
-}
-
-#[derive(Serialize)]
-struct OutMarkPayload<'a> {
-    name: &'a str,
-}
-
 /// Build an outbound `media` frame from mono PCM16 samples @ 8 kHz.
 pub fn media_frame(stream_sid: &str, samples: &[i16]) -> String {
     let payload = base64::engine::general_purpose::STANDARD.encode(g711::encode_ulaw(samples));
-    serde_json::to_string(&OutMedia {
-        event: "media",
-        stream_sid,
-        media: OutMediaPayload { payload },
+    serde_json::json!({
+        "event": "media",
+        "streamSid": stream_sid,
+        "media": { "payload": payload },
     })
-    .expect("media frame serializes")
+    .to_string()
 }
 
 /// Build a `clear` frame — Twilio drops all buffered outbound audio.
 /// This is barge-in on the telephone: send it on [`Playback::Flush`].
 pub fn clear_frame(stream_sid: &str) -> String {
-    serde_json::to_string(&OutClear {
-        event: "clear",
-        stream_sid,
-    })
-    .expect("clear frame serializes")
+    serde_json::json!({ "event": "clear", "streamSid": stream_sid }).to_string()
 }
 
 /// Build a `mark` frame — Twilio echoes it back once playback reaches it.
 pub fn mark_frame(stream_sid: &str, name: &str) -> String {
-    serde_json::to_string(&OutMark {
-        event: "mark",
-        stream_sid,
-        mark: OutMarkPayload { name },
+    serde_json::json!({
+        "event": "mark",
+        "streamSid": stream_sid,
+        "mark": { "name": name },
     })
-    .expect("mark frame serializes")
+    .to_string()
 }
 
 // ── Call bridge ──────────────────────────────────────────────────────────────

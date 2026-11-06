@@ -417,7 +417,7 @@ pub struct SlotEvidence {
 pub struct State {
     inner: Arc<DashMap<String, Value>>,
     delta: Arc<DashMap<String, DeltaOp>>,
-    mutations: Arc<std::sync::Mutex<VecDeque<StateMutation>>>,
+    mutations: Arc<parking_lot::Mutex<VecDeque<StateMutation>>>,
     next_mutation_sequence: Arc<AtomicU64>,
     mutation_capacity: usize,
     journal_sink: JournalSinkSlot,
@@ -438,7 +438,7 @@ impl State {
         Self {
             inner: Arc::new(DashMap::new()),
             delta: Arc::new(DashMap::new()),
-            mutations: Arc::new(std::sync::Mutex::new(VecDeque::new())),
+            mutations: Arc::new(parking_lot::Mutex::new(VecDeque::new())),
             next_mutation_sequence: Arc::new(AtomicU64::new(1)),
             mutation_capacity: DEFAULT_MUTATION_JOURNAL_CAPACITY,
             journal_sink: JournalSinkSlot::default(),
@@ -1181,12 +1181,7 @@ impl State {
 
     /// Return a snapshot of recent state mutations.
     pub fn recent_mutations(&self) -> Vec<StateMutation> {
-        self.mutations
-            .lock()
-            .expect("state mutation journal poisoned")
-            .iter()
-            .cloned()
-            .collect()
+        self.mutations.lock().iter().cloned().collect()
     }
 
     /// Return the current monotonic cursor for the mutation journal.
@@ -1196,10 +1191,7 @@ impl State {
 
     /// Return mutations appended after a previously captured cursor.
     pub fn mutations_since(&self, cursor: u64) -> Vec<StateMutation> {
-        let mutations = self
-            .mutations
-            .lock()
-            .expect("state mutation journal poisoned");
+        let mutations = self.mutations.lock();
         mutations
             .iter()
             .filter(|mutation| mutation.sequence > cursor)
@@ -1214,10 +1206,7 @@ impl State {
     /// uses this instead of [`mutations_since`](Self::mutations_since) and
     /// falls back to a full rescan on `None`.
     pub fn try_mutations_since(&self, cursor: u64) -> Option<Vec<StateMutation>> {
-        let mutations = self
-            .mutations
-            .lock()
-            .expect("state mutation journal poisoned");
+        let mutations = self.mutations.lock();
         let latest = self.next_mutation_sequence.load(Ordering::Relaxed) - 1;
         if latest > cursor {
             let oldest = mutations.front().map_or(u64::MAX, |m| m.sequence);
@@ -1236,11 +1225,7 @@ impl State {
 
     /// Drain and return all recorded state mutations.
     pub fn drain_mutations(&self) -> Vec<StateMutation> {
-        self.mutations
-            .lock()
-            .expect("state mutation journal poisoned")
-            .drain(..)
-            .collect()
+        self.mutations.lock().drain(..).collect()
     }
 
     /// Aggregate the [`SlotEvidence`] for a key: its current value, provenance
@@ -1295,10 +1280,7 @@ impl State {
         origin: StateMutationOrigin,
         delta: bool,
     ) {
-        let mut mutations = self
-            .mutations
-            .lock()
-            .expect("state mutation journal poisoned");
+        let mut mutations = self.mutations.lock();
         if mutations.len() >= self.mutation_capacity {
             mutations.pop_front();
         }

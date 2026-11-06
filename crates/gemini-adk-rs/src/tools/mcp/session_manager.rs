@@ -118,7 +118,7 @@ impl McpSessionManager {
         let timeout = self.stdio_timeout();
         let mut guard = self.stdio.lock().await;
         self.ensure_connected(&mut guard, timeout).await?;
-        let conn = guard.as_mut().expect("connection established above");
+        let conn = connected(&mut guard)?;
 
         let id = self.next_id();
         let req = json!({
@@ -135,7 +135,7 @@ impl McpSessionManager {
         let timeout = self.stdio_timeout();
         let mut guard = self.stdio.lock().await;
         self.ensure_connected(&mut guard, timeout).await?;
-        let conn = guard.as_mut().expect("connection established above");
+        let conn = connected(&mut guard)?;
 
         let id = self.next_id();
         let arguments = if args.is_null() { json!({}) } else { args };
@@ -463,6 +463,13 @@ pub struct McpToolInfo {
     pub description: String,
     /// JSON Schema for the tool's input parameters.
     pub input_schema: serde_json::Value,
+}
+
+/// The live stdio connection that `ensure_connected` just established.
+fn connected(guard: &mut Option<StdioConnection>) -> Result<&mut StdioConnection, McpError> {
+    guard.as_mut().ok_or_else(|| {
+        McpError::NotConnected("stdio connection missing after handshake".to_string())
+    })
 }
 
 /// MCP-related errors.

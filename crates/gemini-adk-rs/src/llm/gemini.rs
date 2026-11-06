@@ -98,9 +98,9 @@ fn llm_error(error: gemini_genai_rs::generate::GenerateError) -> LlmError {
 
 static SUPPORTED_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
-        Regex::new(r"^gemini-.*$").unwrap(),
-        Regex::new(r"^projects/.*/endpoints/.*$").unwrap(),
-        Regex::new(r"^projects/.*/models/gemini.*$").unwrap(),
+        Regex::new(r"^gemini-.*$").expect("gemini model pattern is a valid regex"),
+        Regex::new(r"^projects/.*/endpoints/.*$").expect("endpoint pattern is a valid regex"),
+        Regex::new(r"^projects/.*/models/gemini.*$").expect("tuned-model pattern is a valid regex"),
     ]
 });
 
@@ -475,6 +475,12 @@ impl BaseLlm for GeminiLlm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supported_model_patterns_compile() {
+        // Forces the `LazyLock`: a bad literal fails here, not at runtime.
+        assert_eq!(SUPPORTED_PATTERNS.len(), 3);
+    }
 
     /// Every setting an agent can make must reach the wire body; a field that
     /// is accepted and dropped is the bug this guards against.
