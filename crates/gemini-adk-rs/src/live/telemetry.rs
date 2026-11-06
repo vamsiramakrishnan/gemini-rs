@@ -12,11 +12,22 @@
 //! [`SessionTelemetry::latency`] or [`SessionTelemetry::snapshot`].
 
 use std::fmt;
+use std::time::{Duration, Instant};
+
+// Under `--cfg gemini_adk_loom` the counters are loom's model atomics, so the `record`
+// / `stats` protocol below can be checked over every interleaving; the
+// production build uses `std` ones. Only this module switches: the model
+// covers the telemetry lane's counters, nothing else.
+#[cfg(gemini_adk_loom)]
+use loom::sync::atomic::{
+    AtomicBool, AtomicU64,
+    Ordering::{Acquire, Relaxed, Release},
+};
+#[cfg(not(gemini_adk_loom))]
 use std::sync::atomic::{
     AtomicBool, AtomicU64,
     Ordering::{Acquire, Relaxed, Release},
 };
-use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -125,10 +136,13 @@ impl LatencyRecorder {
     ///
     /// `count` is the publication point and is written **last**, with
     /// [`Release`]: a reader that observes `count == n` (with [`Acquire`], as
-    /// [`stats`](Self::stats) does) is guaranteed to see all `n` samples in the
-    /// ring and in the scalars. Bumping it first would let a reader see
-    /// `count == 1` while the first ring slot was still unwritten, and compute
-    /// a percentile over an empty window.
+    /// [`stats`](Self::stats) does) sees the scalars and histogram of at
+    /// least `n` samples. The ring is published slot by slot: a slot holds
+    /// `latency + 1` once written and `0` while it is still claimed but
+    /// unwritten, so a reader skips it. With two writers the slot order and
+    /// the `count` order can differ (one claims slot 0, the other claims slot
+    /// 1 and publishes first), which is why the count alone cannot say which
+    /// slots are readable; the loom model in this file checks that.
     #[inline]
     fn record(&self, latency_ns: u64) {
         self.last_ns.store(latency_ns, Relaxed);
@@ -145,16 +159,19 @@ impl LatencyRecorder {
 
         // Ring of recent samples: one atomic slot per turn, index wraps.
         let slot = self.recent_next.fetch_add(1, Relaxed) as usize % LATENCY_RECENT_WINDOW;
-        self.recent[slot].store(latency_ns, Relaxed);
+        // `+ 1` so that an unwritten slot (0) is distinguishable from a
+        // zero-latency sample; `stats` subtracts it. `Release`: a reader that
+        // sees this slot (with `Acquire`) also sees the scalars and the
+        // histogram bucket written above it, so a percentile over the ring
+        // never exceeds the `max` or undercuts the `min` read beside it.
+        self.recent[slot].store(latency_ns.saturating_add(1), Release);
 
         self.count.fetch_add(1, Release);
     }
 
     fn stats(&self) -> LatencyStats {
         // Acquire pairs with the Release in `record`: every sample counted here
-        // is already visible in the ring and the scalars.
-        // Acquire pairs with the Release in `record`: every sample counted here
-        // is already visible in the ring and the scalars.
+        // is already visible in the scalars and the histogram.
         let count = self.count.load(Acquire);
         let histogram = self
             .buckets
@@ -172,16 +189,15 @@ impl LatencyRecorder {
             };
         }
 
-        // `count` and `recent_next` advance together, one per sample, so the
-        // count sizes the window too — and reading one atomic instead of two
-        // leaves no room for the pair to disagree.
-        // `count` and `recent_next` advance together, one per sample, so the
-        // count sizes the window too — and reading one atomic instead of two
-        // leaves no room for the pair to disagree.
-        let filled = (count as usize).min(LATENCY_RECENT_WINDOW);
-        let mut recent: Vec<u64> = self.recent[..filled]
+        // The window is every slot a writer has claimed; a slot still at 0
+        // was claimed but not yet written (see `record`) and is skipped, so
+        // a percentile never counts a sample that was not published.
+        let claimed = (self.recent_next.load(Relaxed) as usize).min(LATENCY_RECENT_WINDOW);
+        let mut recent: Vec<u64> = self.recent[..claimed]
             .iter()
-            .map(|s| s.load(Relaxed))
+            .map(|s| s.load(Acquire))
+            .filter(|&s| s != 0)
+            .map(|s| s - 1)
             .collect();
         recent.sort_unstable();
         // Nearest-rank percentile over the sorted recent window.
@@ -859,5 +875,99 @@ mod tests {
         assert_eq!(v["p50_ms"], 420);
         let back: LatencyStats = serde_json::from_value(v).unwrap();
         assert_eq!(back, s);
+    }
+}
+
+/// Loom models of the telemetry lane's lock-free protocol.
+///
+/// Run with `RUSTFLAGS="--cfg gemini_adk_loom" cargo test -p gemini-adk-rs --lib --release loom_`.
+///
+/// The recorder touches some forty atomics per sample (scalars, the
+/// histogram, the ring), so the unbounded three-thread model does not
+/// finish in CI time; the models run with a preemption bound of two, which
+/// explores every schedule with at most two forced context switches and
+/// found the ring-slot race this file's fix removed.
+///
+/// The invariant: a reader that observes `count == n` (an `Acquire` load)
+/// sees every one of the `n` recorded samples in the ring, the histogram
+/// and the scalar extrema, because each `record` publishes them before its
+/// `Release` increment of `count`. Readers never block writers and writers
+/// never block each other: there is no lock to model, only the ordering.
+#[cfg(all(test, gemini_adk_loom))]
+mod loom_tests {
+    use super::*;
+    use loom::sync::Arc;
+    use loom::thread;
+
+    fn bounded() -> loom::model::Builder {
+        let mut builder = loom::model::Builder::new();
+        builder.preemption_bound = Some(2);
+        builder
+    }
+
+    #[test]
+    fn loom_two_writers_one_reader_count_never_exceeds_visible_samples() {
+        bounded().check(|| {
+            let stats = Arc::new(LatencyRecorder::new());
+            let writers: Vec<_> = [7_000_000u64, 40_000_000u64]
+                .into_iter()
+                .map(|latency| {
+                    let stats = stats.clone();
+                    thread::spawn(move || stats.record(latency))
+                })
+                .collect();
+            let reader = {
+                let stats = stats.clone();
+                thread::spawn(move || {
+                    let snapshot = stats.stats();
+                    // Everything the count promises is already visible.
+                    let in_histogram: u64 =
+                        snapshot.histogram.iter().map(|bucket| bucket.count).sum();
+                    assert!(
+                        in_histogram >= snapshot.count,
+                        "count {} ran ahead of the histogram {in_histogram}",
+                        snapshot.count
+                    );
+                    if snapshot.count > 0 {
+                        assert!(snapshot.min_ms <= snapshot.max_ms);
+                        assert!(snapshot.p99_ms <= snapshot.max_ms);
+                        assert!(snapshot.min_ms <= snapshot.p50_ms);
+                        // A counted sample is a real one, never the ring's
+                        // zero-initialised slot.
+                        assert!(snapshot.p50_ms >= snapshot.min_ms);
+                    }
+                })
+            };
+            for writer in writers {
+                writer.join().unwrap();
+            }
+            reader.join().unwrap();
+            let final_stats = stats.stats();
+            assert_eq!(final_stats.count, 2);
+            assert_eq!(final_stats.min_ms, 7);
+            assert_eq!(final_stats.max_ms, 40);
+        });
+    }
+
+    #[test]
+    fn loom_concurrent_audio_counters_lose_nothing() {
+        bounded().check(|| {
+            let telemetry = Arc::new(SessionTelemetry::new());
+            let threads: Vec<_> = (0..2)
+                .map(|_| {
+                    let telemetry = telemetry.clone();
+                    thread::spawn(move || {
+                        telemetry.record_audio_out(960);
+                        telemetry.record_audio_out(960);
+                    })
+                })
+                .collect();
+            for thread in threads {
+                thread.join().unwrap();
+            }
+            let snapshot = telemetry.snapshot();
+            assert_eq!(snapshot["audio_chunks_out"], 4);
+            assert_eq!(snapshot["audio_kbytes_out"], (4 * 960) / 1024);
+        });
     }
 }
