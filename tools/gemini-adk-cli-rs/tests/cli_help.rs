@@ -39,12 +39,12 @@ fn listed_subcommands(help: &str) -> Vec<String> {
             break;
         }
         // Entries are indented two spaces; wrapped descriptions are indented further.
-        if line.starts_with("  ") && !line.starts_with("   ") {
-            if let Some(name) = line.split_whitespace().next() {
-                if name != "help" {
-                    names.push(name.to_string());
-                }
-            }
+        if line.starts_with("  ")
+            && !line.starts_with("   ")
+            && let Some(name) = line.split_whitespace().next()
+            && name != "help"
+        {
+            names.push(name.to_string());
         }
     }
     names
