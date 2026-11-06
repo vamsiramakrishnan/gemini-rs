@@ -69,7 +69,11 @@ outcome 2 (keep, documented unstable), nothing is published to PyPI, and no
 | D2/D3 decisions: vocabulary, error unification | `4d3d394` | docs; D3 awaits Vamsi | |
 | D5: one vocabulary (Studio labels, CLI `--location`, docs) | `ec0f28a` | Studio typecheck/test/build, CLI tests | |
 | CodeQL alerts #58/#67 explained (pre-existing); secret-name fields renamed | `a0425b5` | CLI tests | |
-| D1 allow reasons + D2 unwrap/expect removal | pending | clippy + all-features tests running | commit as two changes once green |
+| D1: every allow() has a reason or its cause is fixed | `34ad42c` | clippy all-features pass; all-features suite 3 809 pass | |
+| D2: library unwrap/expect → typed errors; proposals D4–D10 | `e8f520e` | same run | D4–D10 await Vamsi |
+| D6: missing_docs on facade and macros | `4cfadba` | check clean | |
+| D8: seven unused dependencies removed; heavy ones justified | `db2c13b` | machete clean | |
+| D3: dedupe helpers (agent running); semver-checks running | pending | | then hack powerset rerun, Phase 4 gate |
 
 ## Fast-lane diffs needing Fable/Opus review
 
