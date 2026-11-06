@@ -59,6 +59,13 @@ tokio = { version = "1", features = ["full"] }
 tokio-test = "0.4"
 proptest = "1"
 
+# The telemetry lane's atomics are checked over every interleaving under
+# `RUSTFLAGS="--cfg gemini_adk_loom"` (a cfg of this name, so that no dependency
+# that also reacts to a bare `cfg(loom)` is affected); loom is only compiled
+# for that run.
+[target.'cfg(gemini_adk_loom)'.dev-dependencies]
+loom = "0.7"
+
 [features]
 # One TLS backend is on by default so a plain `cargo add` can dial `wss://`,
 # and `gemini-llm` so `GeminiLlm` generates instead of erroring at runtime.

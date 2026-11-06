@@ -66,6 +66,9 @@ gemini-adk-server-rs = { path = "apps/gemini-adk-server-rs",   version = "4.0.0"
 # Every crate is unsafe-free and says so with `#![forbid(unsafe_code)]` (the
 # audio ring is `rtrb`); this keeps any new `unsafe` visible in review.
 unsafe_code = "warn"
+# `--cfg gemini_adk_loom` swaps the telemetry lane's atomics for loom's model atomics
+# (gemini-adk-rs `live/telemetry.rs`); it is a cfg this workspace sets itself.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(gemini_adk_loom)'] }
 # `unreachable_pub` lives in each library crate's lib.rs rather than here:
 # it is the right lint for a library and pure noise for a binary.
 #
