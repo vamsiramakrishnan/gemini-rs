@@ -23,7 +23,7 @@ pub async fn replay(
     wire_log_path: &str,
     journal_path: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let entries = read_wire_log(wire_log_path)?;
+    let entries = read_wire_log(wire_log_path).map_err(|e| format!("{wire_log_path}: {e}"))?;
     if entries.is_empty() {
         return Err(format!("wire log `{wire_log_path}` contains no entries").into());
     }
@@ -212,7 +212,7 @@ fn is_volatile_key(key: &str) -> bool {
 
 /// Diff the recorded journal's per-key final values against the replayed state.
 fn diff_journal(path: &str, state: &State) -> Result<(), Box<dyn std::error::Error>> {
-    let data = std::fs::read_to_string(path)?;
+    let data = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let mut journal: Vec<StateMutation> = Vec::new();
     for (idx, line) in data.lines().enumerate() {
         let line = line.trim();
@@ -279,7 +279,8 @@ fn diff_journal(path: &str, state: &State) -> Result<(), Box<dyn std::error::Err
 /// regression scenario (JSON on stdout) for `adk flow simulate` or
 /// `adk flow ci`. See `Scenario::from_journal`.
 pub fn scenario(journal_path: &str, name: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    let journal = gemini_adk_rs::state::read_journal(journal_path)?;
+    let journal = gemini_adk_rs::state::read_journal(journal_path)
+        .map_err(|e| format!("{journal_path}: {e}"))?;
     let name = name.map(str::to_string).unwrap_or_else(|| {
         std::path::Path::new(journal_path)
             .file_stem()

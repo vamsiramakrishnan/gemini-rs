@@ -4,12 +4,12 @@ use gemini_adk_rs::live::RuntimeContract;
 use serde_json::Value;
 
 pub fn run(path: &str, contract_path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    let data = std::fs::read_to_string(path)?;
+    let data = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
     let root: Value = serde_json::from_str(&data)?;
     let events = extract_events(&root)?;
     let contract = match contract_path {
         Some(path) => Some(serde_json::from_str::<RuntimeContract>(
-            &std::fs::read_to_string(path)?,
+            &std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?,
         )?),
         None => None,
     };

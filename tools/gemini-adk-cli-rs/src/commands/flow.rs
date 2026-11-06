@@ -10,9 +10,16 @@ use gemini_adk_fluent_rs::conversation::{CompiledConversation, Conversation, Con
 use gemini_adk_fluent_rs::prelude::*;
 use gemini_adk_fluent_rs::simulation::Scenario;
 
+/// Read a file, naming it in the error: a bare `No such file or directory`
+/// from a command that takes several paths does not say which one.
+fn read_named(path: impl AsRef<std::path::Path>) -> Result<String, Box<dyn std::error::Error>> {
+    let path = path.as_ref();
+    fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()).into())
+}
+
 /// Load and compile a conversation spec from a JSON file.
 fn load(spec_path: &str) -> Result<CompiledConversation, Box<dyn std::error::Error>> {
-    let raw = fs::read_to_string(spec_path)?;
+    let raw = read_named(spec_path)?;
     let spec: ConversationSpec = serde_json::from_str(&raw)?;
     Conversation::from_spec_stubbing_resolvers(spec).map_err(|e| e.to_string().into())
 }
@@ -88,7 +95,7 @@ pub fn schema() -> Result<(), Box<dyn std::error::Error>> {
 /// and exits non-zero so it can gate CI. Errors are machine-readable so a web
 /// UI can render them.
 pub fn validate(spec_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let raw = fs::read_to_string(spec_path)?;
+    let raw = read_named(spec_path)?;
     let spec: ConversationSpec = serde_json::from_str(&raw)?;
     match Conversation::from_spec_stubbing_resolvers(spec) {
         Ok(_) => {
@@ -114,7 +121,7 @@ pub async fn simulate(
     scenario_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let convo = load(spec_path)?;
-    let scenario: Scenario = serde_json::from_str(&fs::read_to_string(scenario_path)?)?;
+    let scenario: Scenario = serde_json::from_str(&read_named(scenario_path)?)?;
     match scenario.run(&convo, Enforcement::Enforce).await {
         Ok(()) => {
             println!("PASS: scenario '{}'", scenario.name);
@@ -262,7 +269,7 @@ pub async fn ci(dir: &str, json: bool) -> Result<(), Box<dyn std::error::Error>>
     let (mut specs_failed, mut scen_total, mut scen_passed) = (0usize, 0usize, 0usize);
 
     for spec_path in &specs {
-        let raw = fs::read_to_string(spec_path)?;
+        let raw = read_named(spec_path)?;
         let spec: Result<ConversationSpec, _> = serde_json::from_str(&raw);
         let compiled = spec
             .map_err(|e| serde_json::Value::String(format!("invalid JSON: {e}")))
@@ -381,7 +388,7 @@ fn collect_specs(
     dir: &std::path::Path,
     out: &mut Vec<std::path::PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    for entry in fs::read_dir(dir)? {
+    for entry in fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
         let path = entry?.path();
         if path.is_dir() {
             collect_specs(&path, out)?;
@@ -405,7 +412,7 @@ fn paired_scenarios(
     let stem = file.strip_suffix(".spec.json").unwrap_or(file);
     let dir = spec_path.parent().unwrap_or(std::path::Path::new("."));
     let mut out = Vec::new();
-    for entry in fs::read_dir(dir)? {
+    for entry in fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
         let path = entry?.path();
         let name = match path.file_name().and_then(|n| n.to_str()) {
             Some(n) if n.ends_with(".scenario.json") => n.to_string(),
