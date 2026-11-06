@@ -210,6 +210,58 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
 
+  # The Live frame decoder under libFuzzer for a short, fixed time per
+  # target, from the committed corpus: a crash or a failed invariant in the
+  # decoder (text or binary wire path) fails the job. Longer campaigns run
+  # locally (`cargo +nightly fuzz run <target>` in crates/gemini-genai-rs/fuzz)
+  # and their minimised corpus is committed.
+  fuzz:
+    name: Fuzz (Live frame decoder)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/gemini-genai-rs/fuzz
+      - run: cargo install cargo-fuzz --locked
+      - name: decode_server_message (raw bytes, text and binary paths)
+        working-directory: crates/gemini-genai-rs/fuzz
+        run: cargo fuzz run decode_server_message -- -max_total_time=60 -timeout=10
+      - name: server_frame_structured (well-formed frames)
+        working-directory: crates/gemini-genai-rs/fuzz
+        run: cargo fuzz run server_frame_structured -- -max_total_time=60 -timeout=10
+
+  # The telemetry lane's atomics under loom: every interleaving of the
+  # record/stats protocol. `--cfg gemini_adk_loom` swaps in loom's model atomics for
+  # that module only (see gemini-adk-rs `live/telemetry.rs`).
+  loom:
+    name: Loom (telemetry-lane atomics)
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: "-D warnings --cfg gemini_adk_loom"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.0"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p gemini-adk-rs --lib --release loom_ --locked
+
+  # The benchmarks compile (they are not run: a shared runner's numbers mean
+  # nothing). The fast-lane budget itself is asserted by
+  # `fast_lane_budget_tests` in the ordinary test job.
+  bench-build:
+    name: Benchmarks compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.0"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo bench --workspace --no-run --locked
+
   # Supply chain: RustSec advisories, license allow-list, source whitelist.
   # Configuration lives in deny.toml.
   deny:
@@ -359,7 +411,7 @@ jobs:
   ci-ok:
     name: CI
     if: ${{ !cancelled() }}
-    needs: [check, test, test-all-features, doctests, clippy, fmt, features, hack, doc, deny, monty-worker, conversation-ci, generated-projects, studio, python]
+    needs: [check, test, test-all-features, doctests, clippy, fmt, features, hack, doc, deny, fuzz, loom, bench-build, monty-worker, conversation-ci, generated-projects, studio, python]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed

@@ -206,6 +206,20 @@ feature-isolation:
     @command -v cargo-hack >/dev/null 2>&1 || { echo "cargo-hack is not installed. Run: cargo install cargo-hack"; exit 1; }
     cargo hack check --workspace --feature-powerset --depth 2 --locked
 
+# The telemetry lane's atomics over every interleaving (CI's `loom` job)
+loom:
+    RUSTFLAGS="-D warnings --cfg gemini_adk_loom" cargo test -p gemini-adk-rs --lib --release loom_ --locked
+
+# The Live frame decoder under libFuzzer for a minute per target. Needs a
+# nightly toolchain and `cargo install cargo-fuzz`.
+fuzz seconds="60":
+    cd crates/gemini-genai-rs/fuzz && cargo +nightly fuzz run decode_server_message -- -max_total_time={{seconds}} -timeout=10
+    cd crates/gemini-genai-rs/fuzz && cargo +nightly fuzz run server_frame_structured -- -max_total_time={{seconds}} -timeout=10
+
+# The fast-lane benchmark, end to end through the public API
+bench-fast-lane:
+    cargo bench -p gemini-adk-fluent-rs --bench fast_lane
+
 # Licences and advisories. Needs `cargo install cargo-deny`.
 deny:
     @command -v cargo-deny >/dev/null 2>&1 || { echo "cargo-deny is not installed. Run: cargo install cargo-deny"; exit 1; }
@@ -226,7 +240,7 @@ generated-projects:
 # slower than `just check` because CI is slower than `just check`.
 #
 # Every job GitHub Actions runs, in one command
-ci: fmt-check lint doc-check test test-all test-all-features features feature-isolation deny conversations
+ci: fmt-check lint doc-check test test-all test-all-features features feature-isolation loom deny conversations
     @echo ""
     @echo "✓ Every job GitHub Actions runs has passed locally."
 
