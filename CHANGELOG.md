@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+> **Breaking against 4.0.0.** `cargo semver-checks` against the published
+> 4.0.0 reports that this unreleased work already needs a major version:
+> new public fields on `SessionSpec` (`models`, `decisions`, `code`),
+> `ExtractSpec` (`model`, `thinking_budget`), `ToolSpec` (`returns`),
+> `SkillSpec` (`code`), `SpecResources` (`models`, `decision_model`,
+> `code_sandbox`), `CompiledSkill` (`code`) and `GeminiLlmParams`
+> (`base_url`); and new variants on the exhaustive enums `SimStep`
+> (`Decide`), `SteeringSpec` / `SteeringMode` (`ContextUpdate`), `Pred`
+> (`Decided`) and `SessionCommand` (`UpdateContext`). The cleanup adds three
+> error variants (`HttpError::InvalidMethod`, `CachesError::Serialize`,
+> `EmbedError::Serialize`). The next release is therefore 5.0.0 unless the
+> types gain `#[non_exhaustive]` first; see `docs/cleanup/decisions.md`.
+
 ### Added
 
 - **Bug-bash test suites.** libFuzzer targets for the Live frame decoder on
