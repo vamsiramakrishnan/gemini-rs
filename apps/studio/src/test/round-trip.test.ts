@@ -31,7 +31,7 @@ const isEmpty = (v: Json) =>
 
 describe('runtime example documents and the Studio prune', () => {
   it('leaves returns-desk exactly as the runtime accepts it', () => {
-    expect(prune(returnsDesk as Json)).toEqual(returnsDesk);
+    expect(prune(returnsDesk as unknown as Json)).toEqual(returnsDesk);
   });
 
   it.each([
@@ -40,11 +40,11 @@ describe('runtime example documents and the Studio prune', () => {
     ['support-agent', supportAgent],
     ['returns-desk', returnsDesk],
   ])('%s: prune only drops empty values and is idempotent', (_name, doc) => {
-    const pruned = prune(doc as Json) as Json;
+    const pruned = prune(doc as unknown as Json) as Json;
     // Everything it removes is "" / [] / {}: the runtime fills these defaults
     // back in on load (see the allow-list in studio_round_trip.rs), so the
     // Studio loses no authored data.
-    const lost = removed(doc as Json, pruned).filter(([, v]) => !isEmpty(v));
+    const lost = removed(doc as unknown as Json, pruned).filter(([, v]) => !isEmpty(v));
     expect(lost).toEqual([]);
     expect(prune(pruned)).toEqual(pruned);
   });
