@@ -69,7 +69,13 @@ let llm: Arc<dyn BaseLlm> = Arc::new(GeminiLlm::new(GeminiLlmParams {
 
 ```bash
 cargo run -p example-quickstart --bin hello-text    # the README quickstart: first token
-cargo run -p example-quickstart --bin hello-voice   # the README quickstart: first sound
+cargo run -p example-quickstart --bin chat          # the README quickstart: a conversation, streamed
+cargo run -p example-quickstart --bin typed         # the README quickstart: a typed answer from a JSON Schema
+cargo run -p example-quickstart --bin tool          # the README quickstart: one #[tool]
+cargo run -p example-quickstart --features voice --bin hello-voice   # the README quickstart: first sound
+cargo test -p example-quickstart                    # the README quickstart test against MockLlm
+cargo run -p example-cookbook --bin 37-governed-flow  # one of 30 cookbook binaries: `cargo run -p example-cookbook --bin` lists them
+cargo run -p example-voice-spec-demo # a whole phone call from one SessionSpec document (examples/voice-spec-demo/spec.json)
 cargo run -p example-text-chat       # http://127.0.0.1:3001
 cargo run -p example-voice-chat      # http://127.0.0.1:3002
 cargo run -p example-tool-calling    # http://127.0.0.1:3003
@@ -81,6 +87,11 @@ cargo run -p example-redteam-call    # no server — two Live sessions call each
 cargo run -p example-session-bench   # no server, no model — N concurrent sessions, memory and turn latency
 cargo run -p example-context-update-spike  # no server — probes how the model handles a mid-session contextUpdate
 ```
+
+Every Rust example above is a workspace member: `cargo check --workspace
+--all-targets` in CI compiles each of them (the all-features job builds
+`hello-voice`), and `example-quickstart` and `example-session-bench` carry
+tests. `ai-gateway-jev` is TypeScript and is not built by CI.
 
 ### Multi-app Web UI
 

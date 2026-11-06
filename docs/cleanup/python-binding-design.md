@@ -4,7 +4,19 @@ Status: design, written before any binding code beyond the existing JSON
 data-plane surface. Phase 5 implements it. Every invariant below has a test
 named beside it; the tests are written with the code that must hold them.
 
-## 0. What exists and what changes
+## 0. Shape, as agreed with Vamsi (2026-11-06)
+
+Keep it to pyo3 and maturin: one extension module, `import gemini_adk`,
+nothing else needed to build or install. The pure-Python directory shrinks
+to `__init__.py` re-exporting the compiled module plus the stubs. The
+Tokio runtime is created lazily inside the module. The API is synchronous
+by default and releases the GIL while Rust runs; asyncio support is kept
+only where it matters, streamed replies and Live events, through
+pyo3-async-runtimes (one small crate). Pydantic stays an optional extra.
+The sections below describe the full design; where they say an entry
+point is async, read "sync, with an async variant for streams and events".
+
+## 1. What exists and what changes
 
 `crates/gemini-adk-py` today is a `cdylib` named `_gemini_adk`, pyo3 0.29
 with `abi3-py310`, excluded from the Cargo workspace, built by maturin into
