@@ -27,6 +27,9 @@ pub mod rtp;
 pub mod sdp;
 pub mod twilio;
 
+#[cfg(test)]
+mod dtmf_delivery_tests;
+
 #[cfg(feature = "sip")]
 pub mod sip;
 #[cfg(feature = "sip")]
