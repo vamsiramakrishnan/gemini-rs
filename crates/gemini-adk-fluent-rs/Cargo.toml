@@ -64,6 +64,16 @@ thiserror = { version = "2", optional = true }
 [dev-dependencies]
 # The live eval harness calls Jev through AI Gateway.
 gemini-adk-rs = { workspace = true, features = ["ai-gateway"] }
+# Property tests over `SessionSpec` documents (tests/spec_round_trip_props.rs).
+proptest = "1"
+# The spec property tests parse the generated `main.rs` and read its flow
+# back, so a generator change that drops a step or guard fails there.
+syn = { version = "2", features = ["full"] }
+# ... and the generated `Cargo.toml`.
+toml = "0.8"
+# The end-to-end fast-lane benchmark (benches/fast_lane.rs).
+criterion = { version = "0.5", default-features = false }
+base64 = "0.22"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 tokio = { version = "1", features = ["full"] }
 tokio-test = "0.4"
@@ -126,3 +136,7 @@ otel-gcp = ["gemini-adk-rs/otel-gcp", "gemini-genai-rs/otel-gcp"]
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "fast_lane"
+harness = false
