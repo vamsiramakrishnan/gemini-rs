@@ -2212,3 +2212,173 @@ mod tests {
         let _ = ctrl_handle.await;
     }
 }
+
+/// The fast lane's latency budget: dispatching one frame to its callback and
+/// the event broadcast must cost well under a millisecond, with no
+/// allocation or lock beyond the broadcast send. These tests measure the
+/// lane itself (`run_fast_lane` over its channel) in a debug build, so the
+/// budget they assert is the contract's one millisecond, and a regression
+/// that adds blocking work to the lane fails here before any benchmark runs.
+#[cfg(test)]
+mod fast_lane_budget_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    use bytes::Bytes;
+    use tokio::sync::{broadcast, mpsc};
+
+    use super::{DeliveryConfig, DroppedFrames, FastEvent, SharedState, run_fast_lane};
+    use crate::live::callbacks::EventCallbacks;
+    use crate::live::events::LiveEvent;
+
+    fn shared() -> Arc<SharedState> {
+        Arc::new(SharedState {
+            interrupted: std::sync::atomic::AtomicBool::new(false),
+            barge_in: parking_lot::Mutex::new(tokio_util::sync::CancellationToken::new()),
+            resume_handle: parking_lot::Mutex::new(None),
+            last_instruction: parking_lot::Mutex::new(None),
+            last_context: parking_lot::Mutex::new(Vec::new()),
+            pending_context: None,
+            delivery: DeliveryConfig::default(),
+            dropped: DroppedFrames::default(),
+            redactor: None,
+            playback: crate::live::playback::PlaybackClock::new(crate::clock::system_clock()),
+            speech: parking_lot::Mutex::new(crate::live::playback::TurnSpeech::default()),
+        })
+    }
+
+    /// Per-frame dispatch latency in nanoseconds, p50 and p99, for `frames`
+    /// audio frames of `bytes` bytes with `subscribers` broadcast receivers.
+    ///
+    /// One frame is in flight at a time: the producer sends a frame and waits
+    /// for its callback before sending the next, so the number is the lane's
+    /// own cost (channel wake-up, interrupt check, callback, broadcast) and
+    /// not the queueing delay of a burst. A real session's router paces
+    /// frames the same way, one wire message at a time.
+    async fn measure(frames: usize, bytes: usize, subscribers: usize) -> (u64, u64) {
+        let (fast_tx, fast_rx) = mpsc::channel::<FastEvent>(512);
+        let (event_tx, _keep) = broadcast::channel::<LiveEvent>(512);
+        let mut receivers: Vec<_> = (0..subscribers).map(|_| event_tx.subscribe()).collect();
+        // Drain the subscribers so the broadcast never lags.
+        let drains: Vec<_> = receivers
+            .drain(..)
+            .map(|mut rx| tokio::spawn(async move { while rx.recv().await.is_ok() {} }))
+            .collect();
+
+        // The callback records when each frame reached it; the frame's send
+        // time is in its first eight bytes. Recording is one timestamp and
+        // one push into a pre-sized vector, so the callback itself stays
+        // within the contract it measures.
+        let samples = Arc::new(parking_lot::Mutex::new(Vec::with_capacity(frames)));
+        let samples_cb = samples.clone();
+        let delivered = Arc::new(tokio::sync::Notify::new());
+        let delivered_cb = delivered.clone();
+        let epoch = Instant::now();
+        let callbacks = EventCallbacks {
+            on_audio: Some(Box::new(move |data: &Bytes| {
+                let sent = u64::from_le_bytes(data[..8].try_into().expect("8-byte header"));
+                let now = epoch.elapsed().as_nanos() as u64;
+                samples_cb.lock().push(now.saturating_sub(sent));
+                delivered_cb.notify_one();
+            })),
+            ..EventCallbacks::default()
+        };
+        let lane = tokio::spawn(run_fast_lane(
+            fast_rx,
+            Arc::new(callbacks),
+            shared(),
+            event_tx,
+        ));
+
+        let payload = vec![0u8; bytes.max(8)];
+        for _ in 0..frames {
+            let mut frame = payload.clone();
+            frame[..8].copy_from_slice(&(epoch.elapsed().as_nanos() as u64).to_le_bytes());
+            fast_tx
+                .send(FastEvent::Audio(Bytes::from(frame)))
+                .await
+                .expect("lane alive");
+            delivered.notified().await;
+        }
+        drop(fast_tx);
+        lane.await.expect("lane exits when the channel closes");
+        for drain in drains {
+            drain.abort();
+        }
+
+        let mut samples = samples.lock().clone();
+        samples.sort_unstable();
+        let pct = |p: usize| samples[(p * samples.len()).div_ceil(100).max(1) - 1];
+        (pct(50), pct(99))
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn audio_dispatch_stays_under_one_millisecond() {
+        // 2 000 frames of 40 ms of 24 kHz PCM16 (1 920 bytes), one subscriber:
+        // the shape of a real session's audio stream.
+        let (p50, p99) = measure(2_000, 1_920, 1).await;
+        let budget = Duration::from_millis(1).as_nanos() as u64;
+        assert!(
+            p99 < budget,
+            "fast-lane audio dispatch p99 {p99} ns exceeds the 1 ms budget (p50 {p50} ns)"
+        );
+        // The median is the number to watch: tens of microseconds in a debug
+        // build. A median past a quarter of the budget means the lane grew
+        // work it should not have (an allocation, a lock, a log line).
+        assert!(
+            p50 < budget / 4,
+            "fast-lane audio dispatch p50 {p50} ns is past a quarter of the budget"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn subscribers_do_not_change_the_dispatch_cost_class() {
+        let (_, p99_one) = measure(1_000, 1_920, 1).await;
+        let (_, p99_eight) = measure(1_000, 1_920, 8).await;
+        let budget = Duration::from_millis(1).as_nanos() as u64;
+        assert!(p99_eight < budget, "eight subscribers: p99 {p99_eight} ns");
+        // Broadcast fan-out is a refcount per subscriber, not a copy: eight
+        // subscribers may cost more, but not an order of magnitude more.
+        assert!(
+            p99_eight < p99_one.saturating_mul(10).max(budget / 10),
+            "eight subscribers p99 {p99_eight} ns vs one {p99_one} ns"
+        );
+    }
+
+    #[tokio::test]
+    async fn interrupted_audio_is_dropped_without_a_callback() {
+        let (fast_tx, fast_rx) = mpsc::channel::<FastEvent>(8);
+        let (event_tx, mut event_rx) = broadcast::channel::<LiveEvent>(8);
+        let calls = Arc::new(AtomicU64::new(0));
+        let calls_cb = calls.clone();
+        let callbacks = EventCallbacks {
+            on_audio: Some(Box::new(move |_: &Bytes| {
+                calls_cb.fetch_add(1, Ordering::Relaxed);
+            })),
+            ..EventCallbacks::default()
+        };
+        let shared = shared();
+        shared.interrupted.store(true, Ordering::Release);
+        let lane = tokio::spawn(run_fast_lane(
+            fast_rx,
+            Arc::new(callbacks),
+            shared,
+            event_tx,
+        ));
+        fast_tx
+            .send(FastEvent::Audio(Bytes::from_static(&[0; 16])))
+            .await
+            .unwrap();
+        fast_tx.send(FastEvent::VadEnd).await.unwrap();
+        drop(fast_tx);
+        lane.await.unwrap();
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            0,
+            "suppressed audio never reaches the callback"
+        );
+        // The VAD event still flows: suppression is for the model's speech only.
+        assert!(matches!(event_rx.try_recv(), Ok(LiveEvent::VadEnd)));
+    }
+}
