@@ -344,7 +344,11 @@ The repository includes examples for:
 
 These transports feed audio and DTMF into the same session state and flow runtime.
 
-SIP registration and SRTP are not implemented in the current example path. See the [telephony chapter](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/telephony.html) for the current support matrix.
+The SIP path registers with a PBX or trunk (`SipAgent::register`) and answers
+secure offers with SRTP (RFC 3711, SDES keys); `examples/sip-agent` registers
+when `SIP_REGISTRAR` is set. SRTCP, MKIs and DTLS-SRTP are not supported. See
+the [telephony chapter](https://vamsiramakrishnan.github.io/gemini-rs/user-guide/telephony.html)
+for the support matrix.
 
 ## Examples
 
