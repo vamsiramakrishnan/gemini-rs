@@ -31,9 +31,9 @@ pub struct DeployConfig {
     /// The gemini-rs checkout holding `deploy/Dockerfile`.
     pub source: String,
     /// Secret Manager secret holding `ADK_RUNTIME_TOKENS`.
-    pub tokens_secret: String,
+    pub tokens_secret_name: String,
     /// Secret Manager secret holding `TWILIO_AUTH_TOKEN`, for phone calls.
-    pub twilio_secret: Option<String>,
+    pub twilio_secret_name: Option<String>,
     pub service_account: Option<String>,
     pub max_sessions: u32,
     pub min_instances: u32,
@@ -168,9 +168,9 @@ fn cloud_run_plan(config: &DeployConfig) -> Result<Plan, String> {
     .join(";");
     let mut secrets = vec![format!(
         "ADK_RUNTIME_TOKENS={}:latest",
-        config.tokens_secret
+        config.tokens_secret_name
     )];
-    if let Some(twilio) = &config.twilio_secret {
+    if let Some(twilio) = &config.twilio_secret_name {
         secrets.push(format!("TWILIO_AUTH_TOKEN={twilio}:latest"));
     }
 
@@ -215,7 +215,7 @@ fn cloud_run_plan(config: &DeployConfig) -> Result<Plan, String> {
             "Sessions: wss://<service URL>/ws/<bundle> with a token from the {} secret.\n\
              Promote or roll back without redeploying: adk bundle label <bundle> prod <version> \
              --store {bundles}",
-            config.tokens_secret
+            config.tokens_secret_name
         ),
     })
 }
@@ -276,8 +276,8 @@ mod tests {
             image: None,
             // The repository root, which has deploy/Dockerfile.
             source: concat!(env!("CARGO_MANIFEST_DIR"), "/../..").into(),
-            tokens_secret: "adk-runtime-tokens".into(),
-            twilio_secret: None,
+            tokens_secret_name: "adk-runtime-tokens".into(),
+            twilio_secret_name: None,
             service_account: None,
             max_sessions: 50,
             min_instances: 1,
@@ -332,7 +332,7 @@ mod tests {
     fn a_given_image_skips_the_build_and_twilio_adds_its_secret() {
         let mut config = config();
         config.image = Some("example.com/adk-runtime:v1".into());
-        config.twilio_secret = Some("twilio-auth-token".into());
+        config.twilio_secret_name = Some("twilio-auth-token".into());
         let plan = cloud_run_plan(&config).unwrap();
         assert_eq!(plan.steps.len(), 1);
         let line = shell_line(&plan.steps[0]);

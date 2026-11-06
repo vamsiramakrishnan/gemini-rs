@@ -188,12 +188,12 @@ enum Command {
         /// The gemini-rs checkout that holds deploy/Dockerfile.
         #[arg(long, default_value = ".")]
         source: String,
-        /// Secret Manager secret holding ADK_RUNTIME_TOKENS.
-        #[arg(long, default_value = "adk-runtime-tokens")]
-        tokens_secret: String,
-        /// Secret Manager secret holding TWILIO_AUTH_TOKEN (enables phone calls).
-        #[arg(long)]
-        twilio_secret: Option<String>,
+        /// Name of the Secret Manager secret holding ADK_RUNTIME_TOKENS.
+        #[arg(long = "tokens-secret", default_value = "adk-runtime-tokens")]
+        tokens_secret_name: String,
+        /// Name of the Secret Manager secret holding TWILIO_AUTH_TOKEN (enables phone calls).
+        #[arg(long = "twilio-secret")]
+        twilio_secret_name: Option<String>,
         /// Service account to run as; default adk-runtime@PROJECT.iam.gserviceaccount.com.
         #[arg(long)]
         service_account: Option<String>,
@@ -650,8 +650,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             serve,
             image,
             source,
-            tokens_secret,
-            twilio_secret,
+            tokens_secret_name,
+            twilio_secret_name,
             service_account,
             max_sessions,
             min_instances,
@@ -669,8 +669,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             serve,
             image,
             source,
-            tokens_secret,
-            twilio_secret,
+            tokens_secret_name,
+            twilio_secret_name,
             service_account,
             max_sessions,
             min_instances,
