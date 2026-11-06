@@ -218,6 +218,10 @@ jobs:
   fuzz:
     name: Fuzz (Live frame decoder)
     runs-on: ubuntu-latest
+    env:
+      # rust-toolchain.toml pins the stable toolchain for every other job;
+      # libFuzzer needs nightly's -Z flags, so this job overrides the pin.
+      RUSTUP_TOOLCHAIN: nightly
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
