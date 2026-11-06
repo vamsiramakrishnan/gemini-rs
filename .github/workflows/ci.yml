@@ -62,6 +62,31 @@ jobs:
       # doctests; the `doctests` job keeps those.
       - run: cargo nextest run --workspace --locked
 
+  # The suite again with every feature on. `cargo test --workspace` runs the
+  # default set, so a test behind `#[cfg(feature = "…")]` was compiled by the
+  # `features` job and never run. Live-provider tests stay behind their own
+  # environment checks and `#[ignore]`, so this job needs no credentials; the
+  # Monty pool tests return early without `MONTY_BIN` (the `monty-worker` job
+  # runs them for real).
+  test-all-features:
+    name: Test (all features)
+    runs-on: ubuntu-latest
+    env:
+      # Debug info doubles the size of the all-features test binaries and
+      # nothing here reads it.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.0"
+      - uses: taiki-e/install-action@nextest
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - run: cargo nextest run --workspace --all-features --locked
+      - run: cargo test --workspace --all-features --doc --locked
+
   # Doctests and the feature-specific tests, beside the suite rather than
   # after it. rustdoc compiles every doctest afresh on each run (about two
   # minutes here, nothing cached), and each feature-specific step builds the
@@ -100,7 +125,10 @@ jobs:
           components: clippy
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # `--all-features`: without it every feature-gated module (sip, voice-io,
+      # otel, the sqlx store, the CLI's voice path, …) is never linted, and a
+      # lint that only fires behind a feature reaches main unseen.
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
   fmt:
     name: Format
@@ -137,19 +165,20 @@ jobs:
       # extreme above.
       - run: cargo check --workspace --all-features --all-targets --locked
 
-  # Per-feature isolation: every feature of the published crates must compile on
-  # its own (catches missing feature deps that the extremes above can't see).
+  # Feature isolation: every feature of every workspace member must compile on
+  # its own and beside any one other feature (`--feature-powerset --depth 2`),
+  # which catches a feature that needs another one it does not declare, and a
+  # pair that cannot be enabled together. That is about 950 checks across the
+  # workspace, so cargo-hack deals them out by `--partition M/N` over eight
+  # runners; the job is as long as its slowest eighth, and rust-cache keeps
+  # the dependency builds between runs.
   hack:
-    name: Feature isolation ${{ matrix.partition }}/4 (cargo-hack)
+    name: Feature powerset ${{ matrix.partition }}/8 (cargo-hack)
     runs-on: ubuntu-latest
-    # About 70 single-feature checks across the four crates, run in series,
-    # made this the job that finished last in two runs out of three. cargo-hack
-    # deals the checks out by `--partition M/N`, so four runners each take a
-    # quarter; the job is as long as its slowest quarter.
     strategy:
       fail-fast: false
       matrix:
-        partition: [1, 2, 3, 4]
+        partition: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
@@ -159,11 +188,27 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # `voice-io` (cpal) needs system audio headers to compile.
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      # No `--locked` here, unlike every other cargo call in this file:
-      # `--no-dev-deps` edits the real Cargo.toml while cargo-hack runs, which
-      # changes the resolution and so requires a lockfile update — exactly what
-      # `--locked` forbids. The two cannot both be passed.
-      - run: cargo hack check --each-feature --no-dev-deps --partition ${{ matrix.partition }}/4 -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
+      # No `--no-dev-deps`: it rewrites Cargo.toml while cargo-hack runs, which
+      # changes the resolution and cannot be combined with `--locked`. Dev
+      # dependencies are part of the lockfile this job should be testing.
+      - run: cargo hack check --workspace --feature-powerset --depth 2 --locked --partition ${{ matrix.partition }}/8
+
+  # rustdoc with warnings denied, every feature on. `docs.yml` builds the same
+  # thing to deploy the site, but that workflow is not a dependency of `ci-ok`,
+  # so a broken intra-doc link could pass the required check.
+  doc:
+    name: Rustdoc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.0"
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps --all-features --locked
+        env:
+          RUSTDOCFLAGS: "-D warnings"
 
   # Supply chain: RustSec advisories, license allow-list, source whitelist.
   # Configuration lives in deny.toml.
@@ -314,7 +359,7 @@ jobs:
   ci-ok:
     name: CI
     if: ${{ !cancelled() }}
-    needs: [check, test, doctests, clippy, fmt, features, hack, deny, monty-worker, conversation-ci, generated-projects, studio, python]
+    needs: [check, test, test-all-features, doctests, clippy, fmt, features, hack, doc, deny, monty-worker, conversation-ci, generated-projects, studio, python]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed

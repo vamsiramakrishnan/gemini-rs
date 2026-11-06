@@ -59,15 +59,19 @@ fmt-check:
 warn-check:
     RUSTFLAGS="-D warnings" cargo check --workspace --all-targets --locked
 
-# Run clippy lints (includes -D warnings for all targets)
+# Run clippy lints (includes -D warnings for all targets, every feature on, as CI does)
 lint:
-    RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets --locked -- -D warnings
+    RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
 # ─── Testing ─────────────────────────────────────────────────
 
 # Run all workspace tests (with warnings as errors, matches CI)
 test:
     RUSTFLAGS="-D warnings" cargo test --workspace --locked
+
+# The suite with every feature on (CI's `test-all-features` job)
+test-all:
+    RUSTFLAGS="-D warnings" cargo test --workspace --all-features --locked
 
 # Run fast lib-only tests (no doc tests, no -D warnings)
 test-fast:
@@ -196,13 +200,11 @@ features:
     cargo check --workspace --no-default-features --locked
     cargo check --workspace --all-features --locked
 
-# No `--locked`: `--no-dev-deps` rewrites Cargo.toml while cargo-hack runs, so
-# the resolution changes and the lockfile has to move. The two are exclusive.
-#
-# Every feature on its own. Needs `cargo install cargo-hack`.
+# Every feature on its own and beside any one other (about 950 checks; CI
+# splits them over eight runners). Needs `cargo install cargo-hack`.
 feature-isolation:
     @command -v cargo-hack >/dev/null 2>&1 || { echo "cargo-hack is not installed. Run: cargo install cargo-hack"; exit 1; }
-    cargo hack check --each-feature --no-dev-deps -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
+    cargo hack check --workspace --feature-powerset --depth 2 --locked
 
 # Licences and advisories. Needs `cargo install cargo-deny`.
 deny:
@@ -224,7 +226,7 @@ generated-projects:
 # slower than `just check` because CI is slower than `just check`.
 #
 # Every job GitHub Actions runs, in one command
-ci: fmt-check lint doc-check test test-all-features features feature-isolation deny conversations
+ci: fmt-check lint doc-check test test-all test-all-features features feature-isolation deny conversations
     @echo ""
     @echo "✓ Every job GitHub Actions runs has passed locally."
 
