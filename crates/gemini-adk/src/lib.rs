@@ -1,5 +1,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 //! Build Gemini agents in Rust, from one crate.
 //!
 //! ```toml

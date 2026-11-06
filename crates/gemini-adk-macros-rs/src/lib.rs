@@ -1,5 +1,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 //! Procedural macros for `gemini-adk-rs`.
 //!
 //! This crate provides the [`macro@tool`] attribute macro, which turns a plain
