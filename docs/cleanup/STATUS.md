@@ -6,9 +6,11 @@ cleanup prompt; the classified inventory is `inventory.md`.
 
 ## Current phase
 
-**Phase 3 — bug bash**, with the Phase 2 doc items landing alongside.
-Phase 1 gates pass locally (table below); the CI change is committed
-(`74ead81`) and runs on PR #131.
+**Phase 4 — tech debt.** Phase 3 is committed (seven bugs, each with a
+regression test, in `bugs.md`). Remaining Phase 4 items: D1/D2 commit,
+D6 (`missing_docs` on the facade and macro crates), D8 (seven unused
+dependencies found by cargo-machete, heavy-dependency justifications),
+D3 dedupe (not started), D4 error unification (awaiting the D3 decision).
 
 ## Gate results on the starting commit (local, debuginfo off, provider keys unset)
 
@@ -58,7 +60,16 @@ outcome 2 (keep, documented unstable), nothing is published to PyPI, and no
 | Bugs 5, 6, F3: codegen keeps conversation docs, multi-line descriptions, custom guard → compile_error | `8043728` | `spec::codegen` pass (14) | |
 | Spec property tests + fast-lane benchmark (+ dev-deps, Cargo.lock) | `cb7dec3` | `spec_round_trip_props` pass (4 × 256 cases); bench compiles | |
 | Bug 4: on_tool_cancelled on barge-in; lifecycle tests; decision D1 (GoAway) | `249b51a` | `session_lifecycle` pass (7) | |
-| Fast-lane budget tests, loom model, fuzz targets + corpus, CI jobs (fuzz, loom, bench-build), docs | pending | clippy/loom/fuzz runs in progress | commit once green |
+| Fast-lane budget tests | `6b52522` | pass | |
+| Loom model + bug 7 (ring-slot race) | `6a2b792` | loom pass (bounded) | |
+| Fuzz targets + seed corpus; transport `frame_payload` | `87f22cb`, `9ccef6d` | 10-minute campaigns clean; CI job `fuzz` | |
+| CI jobs fuzz/loom/bench-build; Phase 3 docs | `fdc000c`, `c8dd31c`, `2809086` | CI | Phase 4 |
+| D0: AGENTS.md the one instruction file | `d1b62da` | docs | |
+| D7: examples index complete; Python design shape | `c158d62` | docs | |
+| D2/D3 decisions: vocabulary, error unification | `4d3d394` | docs; D3 awaits Vamsi | |
+| D5: one vocabulary (Studio labels, CLI `--location`, docs) | `ec0f28a` | Studio typecheck/test/build, CLI tests | |
+| CodeQL alerts #58/#67 explained (pre-existing); secret-name fields renamed | `a0425b5` | CLI tests | |
+| D1 allow reasons + D2 unwrap/expect removal | pending | clippy + all-features tests running | commit as two changes once green |
 
 ## Fast-lane diffs needing Fable/Opus review
 

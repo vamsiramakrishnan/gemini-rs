@@ -101,6 +101,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Library code returns typed errors instead of panicking.** 67
+  `unwrap`/`expect` sites in the published crates now return the crate's
+  error or are restructured so nothing can fail: `HttpError::InvalidMethod`,
+  `CachesError::Serialize` and `EmbedError::Serialize` are new variants; a
+  `FlowBuilder` setter called before `.step()` and a `Conversation` stage
+  setter called before `.stage()` are reported by `build()` / `compile()`
+  instead of panicking; the MCP session manager, the task runtime and the
+  session plan return their errors; regex literals are `LazyLock` statics
+  checked by unit tests; the mutation journal and the audio ring use
+  `parking_lot` locks, which cannot poison. `TranscriptRedactor::long_digits`
+  compares run lengths instead of compiling the threshold into a pattern, so
+  a huge threshold redacts nothing rather than panicking. The 17 sites that
+  would need a public signature change are proposals D4–D10 in
+  `docs/cleanup/decisions.md`.
+- **Every `#[allow(...)]` carries a reason.** 33 were removed by fixing the
+  cause (dead fields and functions deleted, named type aliases instead of
+  `clippy::type_complexity`), 45 keep the attribute with `reason = "..."`.
+
 - **One vocabulary across the SDK, the CLI and Flow Studio.** The Studio
   now uses the document's own words: "New session spec" and "Open session
   spec…" (was "New agent", "Open JSON…"), the "Bundles" tab and "Push
