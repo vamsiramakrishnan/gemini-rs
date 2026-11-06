@@ -343,7 +343,10 @@ impl TelemetryConfig {
     /// Used when `tracing-subscriber` is on but neither `otel-otlp` nor `otel-gcp`
     /// provides a tracer, or when called from `init()` without OTLP.
     #[cfg(feature = "tracing-subscriber")]
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "only called when the `otel-otlp` feature is off; the tracer variant is used otherwise"
+    )]
     fn init_tracing_subscriber(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.init_tracing_subscriber_with_tracer(None)
     }

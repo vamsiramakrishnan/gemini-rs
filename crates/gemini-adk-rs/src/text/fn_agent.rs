@@ -4,11 +4,13 @@ use super::TextAgent;
 use crate::error::AgentError;
 use crate::state::State;
 
+/// Closure that turns the session state into a reply or an error.
+type StateFn = Box<dyn Fn(&State) -> Result<String, AgentError> + Send + Sync>;
+
 /// Zero-cost state transform agent — executes a closure, no LLM call.
 pub struct FnTextAgent {
     name: String,
-    #[allow(clippy::type_complexity)]
-    func: Box<dyn Fn(&State) -> Result<String, AgentError> + Send + Sync>,
+    func: StateFn,
 }
 
 impl FnTextAgent {

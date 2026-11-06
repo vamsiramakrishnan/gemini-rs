@@ -4,7 +4,7 @@ use gemini_adk_macros_rs::Extract;
 
 #[derive(Extract)]
 #[extract(name = "order", window = 3)]
-#[allow(dead_code)]
+#[allow(dead_code, reason = "the trybuild fixture only has to compile")]
 struct Order {
     #[recognize(integer_near = ["want", "get"])]
     quantity: Option<i64>,

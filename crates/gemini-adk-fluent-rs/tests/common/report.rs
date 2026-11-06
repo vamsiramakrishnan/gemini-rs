@@ -11,7 +11,10 @@
 //! no scripts — so it opens from a file:// URL on a machine with no network and
 //! survives being attached to a ticket.
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared test helpers: each test binary uses a subset"
+)]
 
 use std::fmt::Write as _;
 

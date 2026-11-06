@@ -2,24 +2,21 @@
 
 use async_trait::async_trait;
 
+use crate::BoxFuture;
 use crate::error::ToolError;
 
 use super::ToolFunction;
+
+/// Async handler over raw JSON arguments.
+type ToolHandler =
+    Box<dyn Fn(serde_json::Value) -> BoxFuture<Result<serde_json::Value, ToolError>> + Send + Sync>;
 
 /// Simple function tool that wraps an async closure.
 pub struct SimpleTool {
     name: String,
     description: String,
     parameters: Option<serde_json::Value>,
-    #[allow(clippy::type_complexity)]
-    handler: Box<
-        dyn Fn(
-                serde_json::Value,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<serde_json::Value, ToolError>> + Send>,
-            > + Send
-            + Sync,
-    >,
+    handler: ToolHandler,
 }
 
 impl SimpleTool {

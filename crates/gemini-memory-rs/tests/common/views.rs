@@ -8,7 +8,11 @@
 //! `semantic_fusion_probe` cannot drift away from what `embedding_text`
 //! actually produces — a change to one is a change to both.
 
-#![allow(dead_code, unused_imports)]
+#![allow(
+    dead_code,
+    unused_imports,
+    reason = "shared test helpers: each test binary uses a subset"
+)]
 
 pub use gemini_memory_rs::retrieval::{
     embedding_text as structural_view, frontmatter_prose as structural, predicate_line as predicate,

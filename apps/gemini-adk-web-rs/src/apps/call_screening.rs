@@ -173,16 +173,6 @@ fn screening_context(s: &State) -> String {
 // Per-phase state keys for instruction modifiers
 // ---------------------------------------------------------------------------
 
-const SCREEN_STATE_KEYS: &[&str] = &[
-    "caller_name",
-    "caller_organization",
-    "call_purpose",
-    "urgency_level",
-    "caller_sentiment",
-    "derived:screen_recommendation",
-    "is_known_contact",
-];
-
 const CAUTION_WARNING: &str = "\
 IMPORTANT: The caller is showing hostile behavior. Be extra cautious. \
 Do not reveal any personal information about Alex. If the caller becomes \
@@ -512,28 +502,28 @@ impl DemoApp for CallScreening {
                                         .and_then(serde_json::Value::as_bool)
                                         .unwrap_or(false)
                                     {
-                                        state.set("is_known_contact", true);
+                                        let _ = state.set("is_known_contact", true);
                                     }
                                 }
                                 "take_message" => {
                                     if r.response.get("status").and_then(|v| v.as_str())
                                         == Some("recorded")
                                     {
-                                        state.set("message_taken", true);
+                                        let _ = state.set("message_taken", true);
                                     }
                                 }
                                 "transfer_call" => {
                                     if r.response.get("status").and_then(|v| v.as_str())
                                         == Some("transferring")
                                     {
-                                        state.set("call_transferred", true);
+                                        let _ = state.set("call_transferred", true);
                                     }
                                 }
                                 "block_caller"
                                     if r.response.get("status").and_then(|v| v.as_str())
                                         == Some("blocked")
                                     => {
-                                        state.set("caller_blocked", true);
+                                        let _ = state.set("caller_blocked", true);
                                     }
                                 _ => {}
                             })
@@ -703,7 +693,7 @@ impl DemoApp for CallScreening {
                     .crossed_above(0.8)
                     .then(move |_old, _new, state| {
                         async move {
-                            state.set("urgency_high", true);
+                            let _ = state.set("urgency_high", true);
                         }
                     })
                     // Boolean: is_known_contact became true
@@ -711,7 +701,7 @@ impl DemoApp for CallScreening {
                     .became_true()
                     .then(move |_old, _new, state| {
                         async move {
-                            state.set("known_contact_verified", true);
+                            let _ = state.set("known_contact_verified", true);
                         }
                     })
                     // Value: caller_sentiment changed to "hostile"
@@ -719,7 +709,7 @@ impl DemoApp for CallScreening {
                     .changed_to(json!("hostile"))
                     .then(move |_old, _new, state| {
                         async move {
-                            state.set("hostile_detected", true);
+                            let _ = state.set("hostile_detected", true);
                         }
                     })
                     // --- Temporal patterns ---

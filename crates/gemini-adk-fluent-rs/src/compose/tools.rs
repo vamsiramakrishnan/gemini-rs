@@ -507,15 +507,17 @@ impl ToolCompositeEntry {
     }
 }
 
+/// Async rewrite of a tool result value.
+type ResultTransformer = Arc<
+    dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// A [`ToolFunction`] that applies an async transformer to another tool's result.
 struct TransformTool {
     inner: Arc<dyn ToolFunction>,
-    #[allow(clippy::type_complexity)]
-    transformer: Arc<
-        dyn Fn(serde_json::Value) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>
-            + Send
-            + Sync,
-    >,
+    transformer: ResultTransformer,
 }
 
 #[async_trait::async_trait]

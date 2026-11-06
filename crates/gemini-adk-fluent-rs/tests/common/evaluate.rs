@@ -31,7 +31,10 @@
 //! **reports** everything else (what was said, how long it took, which phrasing
 //! the recogniser produced).
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared test helpers: each test binary uses a subset"
+)]
 
 use std::fmt;
 

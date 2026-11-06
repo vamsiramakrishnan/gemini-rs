@@ -11,12 +11,14 @@ use gemini_adk_rs::llm::LlmRequest;
 use gemini_adk_rs::middleware::Middleware;
 use gemini_genai_rs::prelude::Content;
 
+/// Rewrites a conversation history into a new one.
+type HistoryFilter = Arc<dyn Fn(&[Content]) -> Vec<Content> + Send + Sync>;
+
 /// A context policy that filters/transforms conversation history.
 #[derive(Clone)]
 pub struct ContextPolicy {
     name: &'static str,
-    #[allow(clippy::type_complexity)]
-    filter: Arc<dyn Fn(&[Content]) -> Vec<Content> + Send + Sync>,
+    filter: HistoryFilter,
 }
 
 impl ContextPolicy {

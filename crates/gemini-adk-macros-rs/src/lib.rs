@@ -664,7 +664,11 @@ fn expand_extract(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         let Some(recognize) = field.attrs.iter().find(|a| a.path().is_ident("recognize")) else {
             continue;
         };
-        let fname = field.ident.as_ref().expect("named field").to_string();
+        let fname = field
+            .ident
+            .as_ref()
+            .ok_or_else(|| syn::Error::new_spanned(field, "expected a named field"))?
+            .to_string();
         let recognizer = recognizer_expr(recognize)?;
 
         // Optional per-field state-key override.
@@ -700,7 +704,7 @@ fn expand_extract(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     .build()
             }
 
-            #[allow(dead_code)]
+            #[allow(dead_code, reason = "generated helper that only reads the fields so rustc counts them as used")]
             #[doc(hidden)]
             fn __extract_mark_fields_used(&self) {
                 #( let _ = &self.#all_field_idents; )*
@@ -781,7 +785,11 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     let mut slot_exprs = Vec::new();
     for field in fields {
-        let fname = field.ident.as_ref().expect("named field").to_string();
+        let fname = field
+            .ident
+            .as_ref()
+            .ok_or_else(|| syn::Error::new_spanned(field, "expected a named field"))?
+            .to_string();
         let mut state_key = fname.clone();
         let mut prompt: Option<String> = None;
         let mut reprompt: Option<String> = None;
@@ -897,7 +905,7 @@ fn expand_frame(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         }
 
         impl #ident {
-            #[allow(dead_code)]
+            #[allow(dead_code, reason = "generated helper that only reads the fields so rustc counts them as used")]
             #[doc(hidden)]
             fn __frame_mark_fields_used(&self) {
                 #( let _ = &self.#all_field_idents; )*

@@ -362,7 +362,10 @@ mod tests {
     #[tokio::test]
     async fn ask_as_repairs_once_then_gives_up() {
         #[derive(serde::Deserialize, schemars::JsonSchema, Debug)]
-        #[allow(dead_code)]
+        #[allow(
+            dead_code,
+            reason = "the field is only deserialized and schema-derived in this test"
+        )]
         struct Answer {
             value: u32,
         }

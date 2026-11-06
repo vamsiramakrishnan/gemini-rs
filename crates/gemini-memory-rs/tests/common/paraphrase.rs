@@ -23,7 +23,10 @@
 //! Every query carries both, so the report can be cut either way: by how hard
 //! it is, and by what kind of moment produced it.
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared test helpers: each test binary uses a subset"
+)]
 
 use std::collections::HashSet;
 

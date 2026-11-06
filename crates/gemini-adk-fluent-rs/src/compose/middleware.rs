@@ -35,6 +35,26 @@ use gemini_adk_rs::context::AgentEvent;
 use gemini_adk_rs::error::{AgentError, ToolError};
 use gemini_adk_rs::middleware::{LatencyMiddleware, LogMiddleware, Middleware};
 
+/// Hook over a tool call; `Err` carries the veto message.
+type ToolCallHook = Arc<dyn Fn(&FunctionCall) -> Result<(), String> + Send + Sync>;
+/// Hook over a tool call and its result.
+type ToolResultHook =
+    Arc<dyn Fn(&FunctionCall, &serde_json::Value) -> Result<(), String> + Send + Sync>;
+/// Hook over an agent error.
+type ErrorHook = Arc<dyn Fn(&AgentError) -> Result<(), String> + Send + Sync>;
+/// Hook over the invocation context at agent start or end.
+type AgentHook =
+    Arc<dyn Fn(&gemini_adk_rs::context::InvocationContext) -> Result<(), String> + Send + Sync>;
+/// Hook over an outgoing model request.
+type ModelRequestHook =
+    Arc<dyn Fn(&gemini_adk_rs::llm::LlmRequest) -> Result<(), String> + Send + Sync>;
+/// Hook over a model request and the response it produced.
+type ModelResponseHook = Arc<
+    dyn Fn(&gemini_adk_rs::llm::LlmRequest, &gemini_adk_rs::llm::LlmResponse) -> Result<(), String>
+        + Send
+        + Sync,
+>;
+
 /// A middleware composite — one or more middleware layers (`M::a() >> M::b()`).
 ///
 /// A single `Arc<dyn Middleware>` converts into a one-layer composite, so
@@ -353,7 +373,6 @@ impl Middleware for TimeoutMiddleware {
 // ── Tap Middleware ──────────────────────────────────────────────────────────
 
 struct TapMiddleware {
-    #[allow(clippy::type_complexity)]
     handler: Arc<dyn Fn(&AgentEvent) + Send + Sync>,
 }
 
@@ -372,8 +391,7 @@ impl Middleware for TapMiddleware {
 // ── BeforeTool Middleware ───────────────────────────────────────────────────
 
 struct BeforeToolMiddleware {
-    #[allow(clippy::type_complexity)]
-    handler: Arc<dyn Fn(&FunctionCall) -> Result<(), String> + Send + Sync>,
+    handler: ToolCallHook,
 }
 
 #[async_trait]
@@ -390,8 +408,7 @@ impl Middleware for BeforeToolMiddleware {
 // ── AfterTool Middleware ────────────────────────────────────────────────────
 
 struct AfterToolMiddleware {
-    #[allow(clippy::type_complexity)]
-    handler: Arc<dyn Fn(&FunctionCall, &serde_json::Value) -> Result<(), String> + Send + Sync>,
+    handler: ToolResultHook,
 }
 
 #[async_trait]
@@ -412,8 +429,7 @@ impl Middleware for AfterToolMiddleware {
 // ── OnError Middleware ──────────────────────────────────────────────────────
 
 struct OnErrorMiddleware {
-    #[allow(clippy::type_complexity)]
-    handler: Arc<dyn Fn(&AgentError) -> Result<(), String> + Send + Sync>,
+    handler: ErrorHook,
 }
 
 #[async_trait]
@@ -460,7 +476,6 @@ impl Middleware for CostMiddleware {
 
 // ── RateLimit Middleware ───────────────────────────────────────────────────
 
-#[allow(dead_code)]
 struct RateLimitMiddleware {
     /// Minimum spacing between successive tool calls.
     min_interval: Duration,
@@ -667,8 +682,7 @@ impl Middleware for AuditMiddleware {
 // ── Validate Middleware ──────────────────────────────────────────────────
 
 struct ValidateMiddleware {
-    #[allow(clippy::type_complexity)]
-    validator: Arc<dyn Fn(&FunctionCall) -> Result<(), String> + Send + Sync>,
+    validator: ToolCallHook,
 }
 
 #[async_trait]
@@ -868,9 +882,7 @@ impl Middleware for MetricsMiddleware {
 // ── BeforeAgent Middleware ───────────────────────────────────────────
 
 struct BeforeAgentMiddleware {
-    #[allow(clippy::type_complexity)]
-    handler:
-        Arc<dyn Fn(&gemini_adk_rs::context::InvocationContext) -> Result<(), String> + Send + Sync>,
+    handler: AgentHook,
 }
 
 #[async_trait]
@@ -890,9 +902,7 @@ impl Middleware for BeforeAgentMiddleware {
 // ── AfterAgent Middleware ───────────────────────────────────────────
 
 struct AfterAgentMiddleware {
-    #[allow(clippy::type_complexity)]
-    handler:
-        Arc<dyn Fn(&gemini_adk_rs::context::InvocationContext) -> Result<(), String> + Send + Sync>,
+    handler: AgentHook,
 }
 
 #[async_trait]
@@ -912,8 +922,7 @@ impl Middleware for AfterAgentMiddleware {
 // ── BeforeModel Middleware ──────────────────────────────────────────
 
 struct BeforeModelMiddleware {
-    #[allow(clippy::type_complexity)]
-    handler: Arc<dyn Fn(&gemini_adk_rs::llm::LlmRequest) -> Result<(), String> + Send + Sync>,
+    handler: ModelRequestHook,
 }
 
 #[async_trait]
@@ -934,15 +943,7 @@ impl Middleware for BeforeModelMiddleware {
 // ── AfterModel Middleware ──────────────────────────────────────────
 
 struct AfterModelMiddleware {
-    #[allow(clippy::type_complexity)]
-    handler: Arc<
-        dyn Fn(
-                &gemini_adk_rs::llm::LlmRequest,
-                &gemini_adk_rs::llm::LlmResponse,
-            ) -> Result<(), String>
-            + Send
-            + Sync,
-    >,
+    handler: ModelResponseHook,
 }
 
 #[async_trait]

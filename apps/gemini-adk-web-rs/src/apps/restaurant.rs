@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -817,13 +816,13 @@ impl DemoApp for Restaurant {
                     .watch("party_size")
                         .crossed_above(8.0)
                         .then(|_old, _new, state| async move {
-                            state.set("watcher:large_party_triggered", true);
+                            let _ = state.set("watcher:large_party_triggered", true);
                         })
                     // Booking readiness crossed above 0.9 — all info collected
                     .watch("derived:booking_readiness")
                         .crossed_above(0.9)
                         .then(|_old, _new, state| async move {
-                            state.set("watcher:booking_ready", true);
+                            let _ = state.set("watcher:booking_ready", true);
                         })
                     // --- Temporal patterns ---
                     // Sustained: guest undecided for 25 seconds — suggest popular time

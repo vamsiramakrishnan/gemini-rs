@@ -8,7 +8,10 @@ use std::sync::Arc;
 
 #[derive(Deserialize)]
 struct EvalSetFile {
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "part of the eval-set file format; parsed so a malformed file is rejected, never read"
+    )]
     name: String,
     cases: Vec<EvalCase>,
 }
@@ -20,7 +23,10 @@ struct EvalCase {
     #[serde(default)]
     expected: Vec<String>,
     #[serde(default)]
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "part of the eval-set file format; parsed so a malformed file is rejected, never read"
+    )]
     tags: Vec<String>,
 }
 

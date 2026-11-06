@@ -1,15 +1,11 @@
 mod all_config;
-#[allow(unused)]
 mod call_screening;
-#[allow(unused)]
 mod clinic;
-#[allow(unused)]
 mod debt_collection;
 pub mod extractors;
 mod flow_studio;
 mod guardrails;
 mod playbook;
-#[allow(unused)]
 mod restaurant;
 mod support;
 mod text_chat;

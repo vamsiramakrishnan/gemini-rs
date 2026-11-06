@@ -1,7 +1,10 @@
 //! A spoken caller: Gemini TTS for each line, streamed in real time through
 //! a microphone that stays open, as in the fluent crate's live tests.
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "voice helpers ported from the fluent live tests; this eval uses a subset"
+)]
 
 use std::path::PathBuf;
 

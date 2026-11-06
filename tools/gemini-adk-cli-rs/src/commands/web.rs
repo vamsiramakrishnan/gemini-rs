@@ -39,7 +39,10 @@ struct WebState {
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "carries every `adk web` flag for adk-python parity; some are accepted but not wired yet"
+)]
 pub struct WebConfig {
     pub agent_dir: String,
     pub host: String,

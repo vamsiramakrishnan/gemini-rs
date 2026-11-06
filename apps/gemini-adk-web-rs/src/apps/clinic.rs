@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -9,40 +8,12 @@ use tokio::sync::mpsc;
 use tracing::info;
 
 use gemini_adk_fluent_rs::prelude::*;
-use gemini_adk_rs::state::StateKey;
 
 use crate::app::{AppError, ClientMessage, DemoApp, WsSender};
 use crate::bridge::SessionBridge;
 use crate::demo_meta;
 
 use super::resolve_voice;
-
-// ---------------------------------------------------------------------------
-// Typed state keys
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-const PATIENT_NAME: StateKey<String> = StateKey::new("patient_name");
-#[allow(dead_code)]
-const PATIENT_ID: StateKey<String> = StateKey::new("patient_id");
-#[allow(dead_code)]
-const SYMPTOMS: StateKey<String> = StateKey::new("symptoms");
-#[allow(dead_code)]
-const DEPARTMENT: StateKey<String> = StateKey::new("department");
-#[allow(dead_code)]
-const DOCTOR_NAME: StateKey<String> = StateKey::new("doctor_name");
-#[allow(dead_code)]
-const APPOINTMENT_DATE: StateKey<String> = StateKey::new("appointment_date");
-#[allow(dead_code)]
-const APPOINTMENT_TIME: StateKey<String> = StateKey::new("appointment_time");
-#[allow(dead_code)]
-const IS_NEW_PATIENT: StateKey<bool> = StateKey::new("is_new_patient");
-#[allow(dead_code)]
-const INSURANCE_PROVIDER: StateKey<String> = StateKey::new("insurance_provider");
-#[allow(dead_code)]
-const CLINICAL_URGENCY: StateKey<f64> = StateKey::new("clinical_urgency");
-#[allow(dead_code)]
-const APPOINTMENT_BOOKED: StateKey<bool> = StateKey::new("appointment_booked");
 
 // ---------------------------------------------------------------------------
 // Phase instructions — lean directives for what to do in each phase.
@@ -705,11 +676,11 @@ impl DemoApp for Clinic {
                                             if r.response.get("status").and_then(|v| v.as_str())
                                                 == Some("confirmed")
                                             {
-                                                state.set("appointment_booked", true);
+                                                let _ = state.set("appointment_booked", true);
                                                 if let Some(apt_id) =
                                                     r.response.get("appointment_id").and_then(|v| v.as_str())
                                                 {
-                                                    state.set(
+                                                    let _ = state.set(
                                                         "appointment_id",
                                                         apt_id.to_string(),
                                                     );
@@ -722,8 +693,8 @@ impl DemoApp for Clinic {
                                                 && let Some(pid) =
                                                     r.response.get("patient_id").and_then(|v| v.as_str())
                                                 {
-                                                    state.set("patient_id", pid.to_string());
-                                                    state.set("is_new_patient", false);
+                                                    let _ = state.set("patient_id", pid.to_string());
+                                                    let _ = state.set("is_new_patient", false);
                                                 }
                                         }
                                         "lookup_patient" => {
@@ -736,16 +707,16 @@ impl DemoApp for Clinic {
                                                 if let Some(pid) =
                                                     r.response.get("patient_id").and_then(|v| v.as_str())
                                                 {
-                                                    state.set("patient_id", pid.to_string());
+                                                    let _ = state.set("patient_id", pid.to_string());
                                                 }
-                                                state.set("is_new_patient", false);
+                                                let _ = state.set("is_new_patient", false);
                                             } else {
-                                                state.set("is_new_patient", true);
+                                                let _ = state.set("is_new_patient", true);
                                             }
                                         }
                                         "reschedule_appointment" | "cancel_appointment"
                                             if r.response.get("status").is_some() => {
-                                                state.set("appointment_booked", true);
+                                                let _ = state.set("appointment_booked", true);
                                             }
                                         _ => {}
                                     }
@@ -892,7 +863,7 @@ impl DemoApp for Clinic {
                         .blocking()
                         .then(move |_old, _new, state| {
                             async move {
-                                state.set("emergency_detected", true);
+                                let _ = state.set("emergency_detected", true);
                             }
                         })
                     // --- Temporal patterns ---

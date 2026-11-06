@@ -16,7 +16,7 @@
 //! Framing is 20 ms through the production `InputAudioProcessor` path.
 
 #[path = "../src/metrics.rs"]
-#[allow(dead_code)]
+#[allow(dead_code, reason = "this example includes the whole module by path and uses a subset of it")]
 mod metrics;
 
 use gemini_adk_fluent_rs::voice::dsp::{
