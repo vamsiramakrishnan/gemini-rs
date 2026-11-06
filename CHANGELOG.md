@@ -115,6 +115,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   toolchain pins 1.99.0. Code mode runs programs in Monty, which needs it.
   `SipError::Sip` now boxes the SIP stack's error.
 
+### Removed
+
+- **`.cursorrules`, `.clinerules`, `.windsurfrules` and `.cursor/rules`.**
+  Stale copies of older guidance that named crates which do not exist
+  (`rs-genai`, `rs-adk`, `adk-rs-fluent`) and an older Live API. `AGENTS.md`
+  is the one instruction file; `CLAUDE.md` and `GEMINI.md` point to it.
+
 ### Fixed
 
 - **G.711 encoders are bit-exact with the ITU-T G.191 / Sun `g711.c`

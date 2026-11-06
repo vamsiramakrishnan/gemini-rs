@@ -1,6 +1,8 @@
 # Working on gemini-rs
 
 These instructions apply to any coding agent working in this repository.
+This file is the one source; `CLAUDE.md` and `GEMINI.md` only point here, and
+no other tool-specific rules file exists.
 Read [CONTRIBUTING.md](CONTRIBUTING.md) for the development and release gates.
 Use [the API working reference](docs/agent-reference.md) for imports and
 examples; it is reference material, not a script to execute in full.
@@ -19,8 +21,20 @@ the fluent builder. See [migration](docs/user-guide/migration.md).
 ## Preserve behavior
 
 Use atomic `State::modify` for read-modify-write operations. Choose strict
-state access when a type mismatch must fail. Keep fast-lane callbacks short
-and synchronous; move I/O to the control lane or a bounded worker.
+state access when a type mismatch must fail. State keys carry a scope prefix
+(`session:`, `derived:`, `turn:`, `app:`, `bg:`, `user:`, `temp:`); see
+`crates/gemini-adk-rs/src/state.rs`. Keep fast-lane callbacks short and
+synchronous; move I/O to the control lane or a bounded worker. A change that
+adds an allocation, a lock, a log line or a blocking call on the fast lane is
+a regression even when every test passes; the budget test in
+`live/processor.rs` is the first check.
+
+Do not add `#[allow(...)]` without a `reason = "..."` or a comment saying
+why, a dependency without a one-line justification in `Cargo.toml`, or a
+public API change without an entry in `docs/cleanup/decisions.md`. Library
+code returns typed errors (`thiserror`), not `unwrap`/`expect`; half-done
+work lives behind an `experimental-*` feature that is off by default and
+documented as unstable, or is removed with a CHANGELOG entry.
 
 Tool admission, confirmation, cancellation, and retries need separate tests.
 Do not use an allow-all confirmation provider to make a production path pass.
