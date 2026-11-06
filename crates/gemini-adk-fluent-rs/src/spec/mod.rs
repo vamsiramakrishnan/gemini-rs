@@ -1972,7 +1972,7 @@ impl SessionSpec {
                 }
                 let hint = written
                     .iter()
-                    .filter(|w| levenshtein(&key, w) <= 2)
+                    .filter(|w| gemini_adk_rs::utils::text::levenshtein(&key, w) <= 2)
                     .cloned()
                     .collect::<Vec<_>>();
                 let suffix = if hint.is_empty() {
@@ -2700,32 +2700,15 @@ fn build_tool(tool: &ToolSpec, state: &State, call: ToolCall) -> SimpleTool {
 
 /// Interpolate `{args.field}` and `{state.key}` templates in a string.
 fn interpolate(template: &str, args: &Value, state: &State) -> String {
-    let mut out = String::with_capacity(template.len());
-    let mut rest = template;
-    while let Some(open) = rest.find('{') {
-        out.push_str(&rest[..open]);
-        let after = &rest[open + 1..];
-        let Some(close) = after.find('}') else {
-            out.push_str(&rest[open..]);
-            return out;
-        };
-        let expr = after[..close].trim();
-        let value = if let Some(field) = expr.strip_prefix("args.") {
+    gemini_adk_rs::utils::text::interpolate_with(template, |expr| {
+        if let Some(field) = expr.strip_prefix("args.") {
             args.get(field).cloned()
         } else if let Some(key) = expr.strip_prefix("state.") {
             state.get::<Value>(key)
         } else {
             None
-        };
-        match value {
-            Some(Value::String(s)) => out.push_str(&s),
-            Some(v) => out.push_str(&v.to_string()),
-            None => {}
         }
-        rest = &after[close + 1..];
-    }
-    out.push_str(rest);
-    out
+    })
 }
 
 /// Walk a JSON value, interpolating every string.
@@ -2957,8 +2940,9 @@ fn guard_uses_marking(guard: &Guard) -> bool {
     }
 }
 
-/// Resolve a voice name to the `Voice` enum.
-fn resolve_voice(name: Option<&str>) -> Voice {
+/// Resolve a voice name to the `Voice` enum: a preset by name, `Puck` when
+/// absent, any other name as a custom voice.
+pub fn resolve_voice(name: Option<&str>) -> Voice {
     match name {
         Some("Aoede") => Voice::Aoede,
         Some("Charon") => Voice::Charon,
@@ -2967,23 +2951,6 @@ fn resolve_voice(name: Option<&str>) -> Voice {
         Some("Puck") | None => Voice::Puck,
         Some(other) => Voice::Custom(other.to_string()),
     }
-}
-
-/// Edit distance for the did-you-mean hint on unmatched state keys.
-fn levenshtein(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    let mut current = vec![0; b.len() + 1];
-    for (i, ca) in a.iter().enumerate() {
-        current[0] = i + 1;
-        for (j, cb) in b.iter().enumerate() {
-            let cost = usize::from(ca != cb);
-            current[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(current[j] + 1);
-        }
-        std::mem::swap(&mut prev, &mut current);
-    }
-    prev[b.len()]
 }
 
 #[cfg(test)]
@@ -3397,6 +3364,32 @@ mod tests {
             interpolate("book/{state.city}/{args.guests}/{missing}", &args, &state),
             "book/Paris/4/"
         );
+    }
+
+    #[test]
+    fn resolve_known_voices() {
+        assert!(matches!(resolve_voice(Some("Aoede")), Voice::Aoede));
+        assert!(matches!(resolve_voice(Some("Charon")), Voice::Charon));
+        assert!(matches!(resolve_voice(Some("Fenrir")), Voice::Fenrir));
+        assert!(matches!(resolve_voice(Some("Kore")), Voice::Kore));
+        assert!(matches!(resolve_voice(Some("Puck")), Voice::Puck));
+        assert!(matches!(resolve_voice(None), Voice::Puck));
+    }
+
+    #[test]
+    fn resolve_custom_voice() {
+        assert_eq!(
+            resolve_voice(Some("CustomVoice")),
+            Voice::Custom("CustomVoice".into())
+        );
+    }
+
+    /// The did-you-mean hint's edit distance counts characters, not bytes.
+    #[test]
+    fn did_you_mean_distance_counts_characters() {
+        use gemini_adk_rs::utils::text::levenshtein;
+        assert_eq!(levenshtein("caller_name", "caller_nane"), 1);
+        assert_eq!(levenshtein("café", "cafe"), 1);
     }
 
     #[tokio::test]

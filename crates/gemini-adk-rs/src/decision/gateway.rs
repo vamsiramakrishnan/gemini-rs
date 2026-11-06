@@ -9,6 +9,7 @@ use super::{
     Answer, DecisionModel, DecisionRequest, DecisionResponse, DecisionUsage, FallbackWhen,
 };
 use crate::llm::LlmError;
+use crate::utils::text::truncate_with_marker;
 
 /// A decision model served by Vercel AI Gateway, such as TypeSafe AI's Jev.
 ///
@@ -171,12 +172,15 @@ impl GatewayDecisionModel {
     pub fn parse(status: u16, body: &str, latency: Duration) -> Result<DecisionResponse, LlmError> {
         let value: Value = serde_json::from_str(body).map_err(|e| LlmError::Api {
             status,
-            message: format!("unreadable response ({e}): {}", truncate(body, 300)),
+            message: format!(
+                "unreadable response ({e}): {}",
+                truncate_with_marker(body, 300, "…")
+            ),
         })?;
         if !(200..300).contains(&status) {
             let message = value["error"]["message"]
                 .as_str()
-                .map_or_else(|| truncate(body, 300), str::to_string);
+                .map_or_else(|| truncate_with_marker(body, 300, "…"), str::to_string);
             return Err(match status {
                 401 => LlmError::Auth(format!(
                     "AI Gateway rejected the credential: {message}. Check AI_GATEWAY_API_KEY"
@@ -188,7 +192,10 @@ impl GatewayDecisionModel {
             .as_object()
             .ok_or_else(|| LlmError::Api {
                 status,
-                message: format!("response has no answers: {}", truncate(body, 300)),
+                message: format!(
+                    "response has no answers: {}",
+                    truncate_with_marker(body, 300, "…")
+                ),
             })?
             .iter()
             .map(|(k, v)| (k.clone(), Answer::from_value(v.clone())))
@@ -240,13 +247,6 @@ fn object(key: &str, value: Value) -> Value {
     let mut m = Map::new();
     m.insert(key.to_string(), value);
     Value::Object(m)
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    match s.char_indices().nth(max) {
-        Some((i, _)) => format!("{}…", &s[..i]),
-        None => s.to_string(),
-    }
 }
 
 #[async_trait]

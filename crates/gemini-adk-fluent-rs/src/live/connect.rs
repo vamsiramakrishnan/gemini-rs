@@ -484,18 +484,19 @@ pub(crate) fn apply_policies(
 /// fallback for Vertex AI when `GOOGLE_ACCESS_TOKEN` is not set.
 async fn resolve_endpoint_from_env() -> Result<ApiEndpoint, gemini_adk_rs::error::AgentError> {
     use gemini_adk_rs::error::AgentError;
-    use gemini_genai_rs::protocol::types::EndpointEnvError;
+    use gemini_genai_rs::protocol::types::{
+        EndpointEnvError, cloud_location_from_env, cloud_project_from_env,
+    };
 
     match ApiEndpoint::from_env() {
         Ok(endpoint) => Ok(endpoint),
         // Vertex was selected but no token was in the environment: use the
         // service's own credentials (metadata server), else the gcloud CLI.
         Err(EndpointEnvError::Missing("GOOGLE_ACCESS_TOKEN")) => {
-            let project = std::env::var("GOOGLE_CLOUD_PROJECT").map_err(|_| {
+            let project = cloud_project_from_env().ok_or_else(|| {
                 AgentError::Config("GOOGLE_CLOUD_PROJECT is required for Vertex AI".into())
             })?;
-            let location = std::env::var("GOOGLE_CLOUD_LOCATION")
-                .unwrap_or_else(|_| "us-central1".to_string());
+            let location = cloud_location_from_env();
             let token = vertex_access_token().await?;
             Ok(ApiEndpoint::vertex(project, location, token))
         }

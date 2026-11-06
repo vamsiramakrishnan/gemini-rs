@@ -8,9 +8,11 @@ use axum::{
     routing::get,
 };
 use gemini_adk_fluent_rs::prelude::*;
+use gemini_adk_rs::utils::text::truncate_with_marker;
+use gemini_adk_server_rs::web_handlers;
 use gemini_adk_server_rs::ws::{
     AgentSource, AppCategory, AppError, AppInfo, AppRegistry, ClientMessage, ServerMessage,
-    WsSender, handle_ws,
+    WsSender,
 };
 use rust_embed::Embed;
 use std::path::PathBuf;
@@ -135,14 +137,12 @@ impl AgentSource for ManifestApp {
         });
 
         // ── Resolve API key ──────────────────────────────────────────────
-        let api_key = std::env::var("GOOGLE_GENAI_API_KEY")
-            .or_else(|_| std::env::var("GEMINI_API_KEY"))
-            .or_else(|_| std::env::var("GOOGLE_API_KEY"))
-            .map_err(|_| {
-                AppError::Connection(
-                    "No API key found. Set GOOGLE_GENAI_API_KEY environment variable.".into(),
-                )
-            })?;
+        let api_key = gemini_genai_rs::protocol::types::api_key_from_env().ok_or_else(|| {
+            AppError::Connection(
+                "No API key found. Set GEMINI_API_KEY (or GOOGLE_GENAI_API_KEY / GOOGLE_API_KEY)."
+                    .into(),
+            )
+        })?;
 
         // ── Resolve voice ────────────────────────────────────────────────
         let voice = match manifest.voice.as_deref() {
@@ -358,15 +358,11 @@ async fn app_page() -> Html<String> {
 }
 
 async fn list_apps(AxumState(state): AxumState<Arc<WebState>>) -> Json<Vec<AppInfo>> {
-    Json(state.registry.list())
+    web_handlers::list_apps(&state.registry)
 }
 
 async fn favicon() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "image/svg+xml")],
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🤖</text></svg>"#,
-    )
+    web_handlers::favicon("🤖")
 }
 
 async fn serve_static(Path(path): Path<String>) -> impl IntoResponse {
@@ -398,21 +394,16 @@ async fn ws_upgrade(
     Path(name): Path<String>,
     AxumState(state): AxumState<Arc<WebState>>,
 ) -> impl IntoResponse {
-    let app = state.registry.get(&name);
-    ws.on_upgrade(move |socket| async move {
-        match app {
-            Some(app) => handle_ws(socket, app, None).await,
-            None => tracing::warn!("Agent '{}' not found", name),
-        }
-    })
+    web_handlers::upgrade_app_socket(ws, &state.registry, name, None)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/// `s` shortened to `max` characters, with `...` in place of the cut.
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    if s.chars().count() <= max {
         s.to_string()
     } else {
-        format!("{}...", &s[..max.saturating_sub(3)])
+        truncate_with_marker(s, max.saturating_sub(3), "...")
     }
 }

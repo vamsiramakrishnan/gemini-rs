@@ -205,25 +205,11 @@ impl Runner {
 mod tests {
     use super::*;
     use crate::error::AgentError;
+    use crate::test_helpers::NoopAgent;
     use async_trait::async_trait;
     use gemini_genai_rs::session::{SessionHandle, SessionPhase, SessionState};
     use std::sync::atomic::{AtomicU32, Ordering};
     use tokio::sync::{broadcast, mpsc, watch};
-
-    // Mock agent that completes immediately
-    struct NoopAgent {
-        name: String,
-    }
-
-    #[async_trait]
-    impl Agent for NoopAgent {
-        fn name(&self) -> &str {
-            &self.name
-        }
-        async fn run_live(&self, _ctx: &mut InvocationContext) -> Result<(), AgentError> {
-            Ok(())
-        }
-    }
 
     // Mock agent that requests transfer
     struct TransferAgent {

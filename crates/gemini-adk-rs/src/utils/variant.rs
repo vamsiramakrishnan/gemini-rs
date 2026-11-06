@@ -27,16 +27,12 @@ pub fn get_google_llm_variant() -> GoogleLlmVariant {
 /// locally for months and fail on a busier machine, having read a value another
 /// test wrote microseconds earlier.
 fn classify(value: Option<&str>) -> GoogleLlmVariant {
-    match value {
-        Some(value) => {
-            let lower = value.to_lowercase();
-            if lower == "true" || lower == "1" {
-                GoogleLlmVariant::VertexAi
-            } else {
-                GoogleLlmVariant::GeminiApi
-            }
-        }
-        None => GoogleLlmVariant::GeminiApi,
+    // The rule is gemini-genai-rs's, so every surface reads the variable the
+    // same way (`true` in any case or `1`, whitespace ignored).
+    if value.is_some_and(gemini_genai_rs::protocol::types::vertex_flag_enabled) {
+        GoogleLlmVariant::VertexAi
+    } else {
+        GoogleLlmVariant::GeminiApi
     }
 }
 
@@ -59,7 +55,7 @@ mod tests {
     /// the *variable* was one, shared by every thread in the binary.
     #[test]
     fn truthy_values_select_vertex() {
-        for value in ["true", "TRUE", "True", "1"] {
+        for value in ["true", "TRUE", "True", "1", " true "] {
             assert_eq!(
                 classify(Some(value)),
                 GoogleLlmVariant::VertexAi,

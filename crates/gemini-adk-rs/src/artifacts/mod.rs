@@ -124,12 +124,7 @@ pub trait ArtifactService: Send + Sync {
     async fn delete(&self, session_id: &str, name: &str) -> Result<(), ArtifactError>;
 }
 
-pub(crate) fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
+pub(crate) use crate::utils::time::now_secs;
 
 #[cfg(test)]
 mod tests {

@@ -12,11 +12,17 @@ mod text_chat;
 mod tool_calling;
 mod voice_chat;
 
-use std::sync::Arc;
-
-use gemini_adk_rs::llm::{BaseLlm, GeminiLlm, GeminiLlmParams};
 use gemini_genai_rs::prelude::*;
 use tokio::sync::mpsc;
+
+// One copy of each, shared with the other surfaces: the extraction LLM from
+// `GEMINI_EXTRACTION_*` (server crate) and the voice-name lookup (fluent).
+pub use gemini_adk_fluent_rs::spec::resolve_voice;
+pub use gemini_adk_server_rs::execution::build_extraction_llm;
+use gemini_genai_rs::protocol::types::{
+    api_key_from_env, cloud_location_from_env, cloud_project_from_env, non_empty_env,
+    vertex_requested,
+};
 
 use crate::app::{AppError, AppInfo, AppRegistry, ClientMessage, DemoApp, ServerMessage, WsSender};
 
@@ -97,8 +103,10 @@ fn resolve_vertex_token() -> Result<String, String> {
 
 /// Build a base `SessionConfig` from environment variables.
 ///
-/// Reads `GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, and API key env vars
-/// to determine the correct endpoint.
+/// Reads `GOOGLE_GENAI_USE_VERTEXAI` (`true` or `1`), `GOOGLE_CLOUD_PROJECT`,
+/// and the API key variables (`GEMINI_API_KEY`, `GOOGLE_GENAI_API_KEY`,
+/// `GOOGLE_API_KEY`) to determine the correct endpoint, by the same rules as
+/// `ApiEndpoint::from_env`.
 ///
 /// For the Live session location, prefers `GEMINI_LIVE_MODEL_LOCATION` over
 /// `GOOGLE_CLOUD_LOCATION` (default: `us-central1`). This allows setting
@@ -107,29 +115,22 @@ fn resolve_vertex_token() -> Result<String, String> {
 ///
 /// For the model, prefers `model` argument > `GEMINI_LIVE_MODEL` > `GEMINI_MODEL`.
 pub fn build_session_config(model: Option<&str>) -> Result<SessionConfig, String> {
-    let use_vertex = std::env::var("GOOGLE_GENAI_USE_VERTEXAI")
-        .map(|v| v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
-
-    let mut config = if use_vertex {
-        let project = std::env::var("GOOGLE_CLOUD_PROJECT")
-            .map_err(|_| "GOOGLE_CLOUD_PROJECT env var not set".to_string())?;
-        let location = std::env::var("GEMINI_LIVE_MODEL_LOCATION")
-            .or_else(|_| std::env::var("GOOGLE_CLOUD_LOCATION"))
-            .unwrap_or_else(|_| "us-central1".to_string());
+    let mut config = if vertex_requested() {
+        let project = cloud_project_from_env()
+            .ok_or_else(|| "GOOGLE_CLOUD_PROJECT env var not set".to_string())?;
+        let location =
+            non_empty_env("GEMINI_LIVE_MODEL_LOCATION").unwrap_or_else(cloud_location_from_env);
 
         let access_token = resolve_vertex_token()?;
 
         SessionConfig::from_vertex(project, location, access_token)
     } else {
         // Google AI with API key.
-        let api_key = std::env::var("GOOGLE_GENAI_API_KEY")
-            .or_else(|_| std::env::var("GEMINI_API_KEY"))
-            .map_err(|_| {
-                "No API key found. Set GOOGLE_GENAI_API_KEY or GEMINI_API_KEY, \
-                 or set GOOGLE_GENAI_USE_VERTEXAI=TRUE for Vertex AI."
-                    .to_string()
-            })?;
+        let api_key = api_key_from_env().ok_or_else(|| {
+            "No API key found. Set GEMINI_API_KEY (or GOOGLE_GENAI_API_KEY / GOOGLE_API_KEY), \
+             or set GOOGLE_GENAI_USE_VERTEXAI=true for Vertex AI."
+                .to_string()
+        })?;
 
         SessionConfig::new(api_key)
     };
@@ -156,23 +157,6 @@ pub fn live_model() -> ModelId {
         .unwrap_or(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
 }
 
-/// Build a `GeminiLlm` for OOB extraction from environment variables.
-///
-/// Reads `GEMINI_EXTRACTION_MODEL` (default: `gemini-2.0-flash`) and
-/// `GEMINI_EXTRACTION_LOCATION` (default: `GOOGLE_CLOUD_LOCATION`, then `us-central1`).
-pub fn build_extraction_llm() -> Arc<dyn BaseLlm> {
-    let model = std::env::var("GEMINI_EXTRACTION_MODEL").ok();
-    let location = std::env::var("GEMINI_EXTRACTION_LOCATION")
-        .or_else(|_| std::env::var("GOOGLE_CLOUD_LOCATION"))
-        .ok();
-
-    Arc::new(GeminiLlm::new(GeminiLlmParams {
-        model,
-        location,
-        ..Default::default()
-    }))
-}
-
 /// Send appMeta message to the browser so devtools can configure tabs.
 #[allow(dead_code)]
 pub fn send_app_meta(tx: &WsSender, app: &dyn DemoApp) {
@@ -186,18 +170,6 @@ pub fn send_app_meta(tx: &WsSender, app: &dyn DemoApp) {
             try_saying: app.try_saying(),
         },
     });
-}
-
-/// Resolve a voice name string to the Voice enum.
-pub fn resolve_voice(name: Option<&str>) -> Voice {
-    match name {
-        Some("Aoede") => Voice::Aoede,
-        Some("Charon") => Voice::Charon,
-        Some("Fenrir") => Voice::Fenrir,
-        Some("Kore") => Voice::Kore,
-        Some("Puck") | None => Voice::Puck,
-        Some(other) => Voice::Custom(other.to_string()),
-    }
 }
 
 /// Rolling buffer of recent conversation turns for analysis.

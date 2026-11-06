@@ -30,8 +30,9 @@ tracing-subscriber = { version = "0.3", features = ["registry", "env-filter", "f
 [features]
 default = []
 otel = ["gemini-genai-rs/otel", "gemini-adk-rs/otel"]
-otel-otlp = ["gemini-genai-rs/otel-otlp", "gemini-adk-rs/otel-otlp"]
-otel-gcp = ["gemini-genai-rs/otel-gcp", "gemini-adk-rs/otel-gcp"]
+# The exporters are installed by gemini-adk-server-rs's `init_telemetry`.
+otel-otlp = ["gemini-genai-rs/otel-otlp", "gemini-adk-rs/otel-otlp", "gemini-adk-server-rs/otel-otlp"]
+otel-gcp = ["gemini-genai-rs/otel-gcp", "gemini-adk-rs/otel-gcp", "gemini-adk-server-rs/otel-gcp"]
 
 [lints]
 workspace = true

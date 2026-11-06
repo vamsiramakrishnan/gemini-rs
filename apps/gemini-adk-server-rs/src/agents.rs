@@ -12,7 +12,7 @@ pub struct AgentEntry {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    #[serde(default = "default_agent_type")]
+    #[serde(default = "gemini_adk_rs::agent_config::default_agent_type")]
     pub agent_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instruction: Option<String>,
@@ -20,10 +20,6 @@ pub struct AgentEntry {
     pub tools: Vec<String>,
     #[serde(default)]
     pub sub_agents: Vec<String>,
-}
-
-fn default_agent_type() -> String {
-    "llm".to_string()
 }
 
 /// Agent registry — the single source of truth for available agents.
@@ -197,6 +193,14 @@ fn default_model() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An entry that names no type is an `llm` agent, by the one default
+    /// `gemini-adk-rs` defines for its own `AgentConfig` too.
+    #[test]
+    fn an_entry_without_an_agent_type_is_an_llm_agent() {
+        let entry: AgentEntry = serde_json::from_str(r#"{"name": "a"}"#).unwrap();
+        assert_eq!(entry.agent_type, "llm");
+    }
 
     #[test]
     fn register_and_lookup() {

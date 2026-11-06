@@ -40,6 +40,29 @@ pub fn default_llm(entry: &AgentEntry) -> Arc<dyn BaseLlm> {
     }))
 }
 
+/// The parameters of the LLM that backs `extract` pipelines: the model from
+/// `GEMINI_EXTRACTION_MODEL` and, for Vertex AI, the location from
+/// `GEMINI_EXTRACTION_LOCATION` (else `GOOGLE_CLOUD_LOCATION`, then
+/// `us-central1`). Credentials come from the same environment as the Live
+/// session, resolved by [`GeminiLlm`].
+pub fn extraction_llm_params() -> GeminiLlmParams {
+    use gemini_genai_rs::protocol::types::non_empty_env;
+    GeminiLlmParams {
+        model: non_empty_env("GEMINI_EXTRACTION_MODEL"),
+        location: non_empty_env("GEMINI_EXTRACTION_LOCATION"),
+        ..Default::default()
+    }
+}
+
+/// A [`GeminiLlm`] for `extract` pipelines; see [`extraction_llm_params`].
+///
+/// Does not wait for a Vertex token: [`GeminiLlm`] reads `GOOGLE_ACCESS_TOKEN`
+/// or runs `gcloud` when it needs one. A server that must refresh the token
+/// itself (`adk-runtime`) builds on [`extraction_llm_params`] instead.
+pub fn build_extraction_llm() -> Arc<dyn BaseLlm> {
+    Arc::new(GeminiLlm::new(extraction_llm_params()))
+}
+
 /// Outcome of running an agent over a single turn.
 pub struct RunOutcome {
     /// The agent's final text response.

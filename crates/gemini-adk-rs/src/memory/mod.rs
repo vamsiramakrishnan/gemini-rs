@@ -16,6 +16,8 @@ pub use vertex_ai_rag::{VertexAiRagMemoryConfig, VertexAiRagMemoryService};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::utils::time::now_secs;
+
 /// A memory entry — a named piece of information stored by an agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEntry {
@@ -78,13 +80,6 @@ pub trait MemoryService: Send + Sync {
 
     /// Clear all memory for a session.
     async fn clear(&self, session_id: &str) -> Result<(), MemoryError>;
-}
-
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 
 #[cfg(test)]

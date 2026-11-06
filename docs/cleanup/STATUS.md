@@ -73,7 +73,9 @@ outcome 2 (keep, documented unstable), nothing is published to PyPI, and no
 | D2: library unwrap/expect → typed errors; proposals D4–D10 | `e8f520e` | same run | D4–D10 await Vamsi |
 | D6: missing_docs on facade and macros | `4cfadba` | check clean | |
 | D8: seven unused dependencies removed; heavy ones justified | `db2c13b` | machete clean | |
-| D3: dedupe helpers (agent running); semver-checks running | pending | | then hack powerset rerun, Phase 4 gate |
+| D3: helpers deduplicated (14 groups), one env/credential rule, RFC 3339 timestamps; proposals D11–D15 | pending commit | per-crate checks/tests/clippy pass; all-features chain running | |
+| semver-checks vs 4.0.0: main already needs a major (D16) | `6c6d8f3` (CHANGELOG), D16 | documented | Vamsi's call |
+| Phase 4 gate: hack powerset rerun | pending | | then Phase 5 |
 
 ## Fast-lane diffs needing Fable/Opus review
 

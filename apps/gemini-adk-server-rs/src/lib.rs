@@ -21,8 +21,10 @@ pub mod router;
 pub mod runtime;
 pub mod serve;
 pub mod sessions;
+pub mod telemetry;
 pub mod trace;
 pub mod types;
+pub mod web_handlers;
 pub mod ws;
 
 pub use agents::{AgentEntry, ServerAgentRegistry};

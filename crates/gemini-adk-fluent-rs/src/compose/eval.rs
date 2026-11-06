@@ -444,28 +444,9 @@ mod tests {
 
     #[test]
     fn compose_with_bitor() {
-        use gemini_adk_rs::llm::{BaseLlm, LlmError, LlmRequest, LlmResponse};
-        use gemini_genai_rs::prelude::{Content, Part, Role};
-        struct NoopJudge;
-        #[async_trait::async_trait]
-        impl BaseLlm for NoopJudge {
-            fn model_id(&self) -> &str {
-                "noop"
-            }
-            async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-                Ok(LlmResponse {
-                    content: Content {
-                        role: Some(Role::Model),
-                        parts: vec![Part::Text {
-                            text: r#"{"violation": false}"#.into(),
-                        }],
-                    },
-                    finish_reason: None,
-                    usage: None,
-                })
-            }
-        }
-        let llm: Arc<dyn BaseLlm> = Arc::new(NoopJudge);
+        use gemini_adk_rs::llm::{BaseLlm, MockLlm};
+        // The judge is never called: these tests exercise composition only.
+        let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm::text(r#"{"violation": false}"#));
         let composite = E::response_match() + E::safety(llm.clone()) + E::semantic_match(llm);
         assert_eq!(composite.len(), 3);
     }

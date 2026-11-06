@@ -76,10 +76,7 @@ impl BackendInputVad {
     /// Process arbitrary little-endian PCM16 bytes and return speech edge events.
     pub fn process_pcm_bytes(&mut self, bytes: &[u8]) -> Vec<VadEvent> {
         self.pending_samples
-            .extend(bytes.as_chunks::<2>().0.iter().map(|pair| {
-                let raw = [pair[0], pair[1]];
-                i16::from_le_bytes(raw)
-            }));
+            .extend(gemini_genai_rs::buffer::convert::pcm16_le_samples(bytes));
 
         let frame_size = self.config.frame_size();
         if frame_size == 0 {
@@ -159,10 +156,7 @@ mod tests {
     }
 
     fn bytes(samples: &[i16]) -> Vec<u8> {
-        samples
-            .iter()
-            .flat_map(|sample| sample.to_le_bytes())
-            .collect()
+        gemini_genai_rs::buffer::convert::i16_to_pcm16_le(samples)
     }
 
     #[test]

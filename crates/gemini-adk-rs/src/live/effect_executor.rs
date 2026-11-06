@@ -147,6 +147,8 @@ mod tests {
         ActivityEnd,
     }
 
+    // Not `crate::test_helpers::MockWriter`: this one records the writes the
+    // tests assert on.
     #[derive(Default)]
     struct MockWriter {
         writes: Mutex<Vec<Write>>,

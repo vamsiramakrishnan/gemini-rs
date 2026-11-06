@@ -156,6 +156,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   toolchain pins 1.99.0. Code mode runs programs in Monty, which needs it.
   `SipError::Sip` now boxes the SIP stack's error.
 
+- **One credential and endpoint resolution for every surface.** The
+  Gemini API key is now the first non-empty of `GEMINI_API_KEY`,
+  `GOOGLE_GENAI_API_KEY`, `GOOGLE_API_KEY`, and `GOOGLE_GENAI_USE_VERTEXAI`
+  is `true` (any case) or `1`, whitespace ignored, in `ApiEndpoint::from_env`,
+  `GeminiLlm`, `get_google_llm_variant`, the fluent `connect_from_env`, the
+  demo web app, `adk-runtime`'s extraction model and `adk web` / `adk doctor`
+  (new `gemini_genai_rs::protocol::types::{vertex_requested, api_key_from_env,
+  cloud_project_from_env, cloud_location_from_env, non_empty_env}`). What
+  changes for a user: the demo web app and `adk-runtime` accept
+  `GOOGLE_GENAI_USE_VERTEXAI=1`; the demo web app accepts `GOOGLE_API_KEY`;
+  `GeminiLlm` and the demo web app prefer `GEMINI_API_KEY` over
+  `GOOGLE_GENAI_API_KEY` when both are set to different values; an empty
+  `GOOGLE_API_KEY` or `GOOGLE_CLOUD_LOCATION` is treated as unset; `adk
+  doctor` no longer counts `GOOGLE_PROJECT_ID`, which nothing else read;
+  `adk-runtime` reads `GEMINI_EXTRACTION_LOCATION` like the demo app.
+- **Session and trace timestamps are RFC 3339.** `Session::created_at`
+  / `updated_at`, `adk-runtime`'s and the server's session, trace and eval
+  timestamps were `"{unix_seconds}Z"`; they are now `2024-02-29T12:34:56Z`
+  (`gemini_adk_rs::utils::time`).
+
 ### Removed
 
 - **`.cursorrules`, `.clinerules`, `.windsurfrules` and `.cursor/rules`.**

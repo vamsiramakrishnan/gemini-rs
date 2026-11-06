@@ -158,40 +158,8 @@ fn string_similarity(a: &str, b: &str) -> f64 {
         return 1.0;
     }
 
-    let distance = levenshtein_distance(a, b) as f64;
+    let distance = crate::utils::text::levenshtein(a, b) as f64;
     1.0 - (distance / max_len)
-}
-
-/// Compute Levenshtein edit distance.
-fn levenshtein_distance(a: &str, b: &str) -> usize {
-    let a_chars: Vec<char> = a.chars().collect();
-    let b_chars: Vec<char> = b.chars().collect();
-    let m = a_chars.len();
-    let n = b_chars.len();
-
-    let mut dp = vec![vec![0usize; n + 1]; m + 1];
-
-    for (i, row) in dp.iter_mut().enumerate().take(m + 1) {
-        row[0] = i;
-    }
-    for (j, val) in dp[0].iter_mut().enumerate().take(n + 1) {
-        *val = j;
-    }
-
-    for i in 1..=m {
-        for j in 1..=n {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] {
-                0
-            } else {
-                1
-            };
-            dp[i][j] = (dp[i - 1][j] + 1)
-                .min(dp[i][j - 1] + 1)
-                .min(dp[i - 1][j - 1] + cost);
-        }
-    }
-
-    dp[m][n]
 }
 
 #[cfg(test)]
@@ -266,12 +234,12 @@ mod tests {
 
     #[test]
     fn levenshtein_identical() {
-        assert_eq!(levenshtein_distance("abc", "abc"), 0);
+        assert_eq!(crate::utils::text::levenshtein("abc", "abc"), 0);
     }
 
     #[test]
     fn levenshtein_one_edit() {
-        assert_eq!(levenshtein_distance("abc", "ab"), 1);
+        assert_eq!(crate::utils::text::levenshtein("abc", "ab"), 1);
     }
 
     #[test]

@@ -65,30 +65,13 @@ impl Default for LlmRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::{LlmError, LlmRequest, LlmResponse};
-    use async_trait::async_trait;
-
-    struct MockLlm {
-        model: String,
-    }
-
-    #[async_trait]
-    impl BaseLlm for MockLlm {
-        fn model_id(&self) -> &str {
-            &self.model
-        }
-        async fn generate(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
-            Err(LlmError::Other("mock".into()))
-        }
-    }
+    use crate::llm::MockLlm;
 
     #[test]
     fn register_and_resolve() {
         let mut registry = LlmRegistry::new();
         registry.register("gemini", |name: &str| {
-            Arc::new(MockLlm {
-                model: name.to_string(),
-            })
+            Arc::new(MockLlm::script([]).with_model_id(name.to_string()))
         });
 
         let llm = registry.resolve("gemini-2.5-flash").unwrap();
@@ -105,14 +88,10 @@ mod tests {
     fn first_match_wins() {
         let mut registry = LlmRegistry::new();
         registry.register("gemini-2.5", |name: &str| {
-            Arc::new(MockLlm {
-                model: format!("v2.5:{name}"),
-            })
+            Arc::new(MockLlm::script([]).with_model_id(format!("v2.5:{name}")))
         });
         registry.register("gemini", |name: &str| {
-            Arc::new(MockLlm {
-                model: format!("generic:{name}"),
-            })
+            Arc::new(MockLlm::script([]).with_model_id(format!("generic:{name}")))
         });
 
         let llm = registry.resolve("gemini-2.5-flash").unwrap();
@@ -129,9 +108,7 @@ mod tests {
         assert_eq!(registry.len(), 0);
 
         registry.register("test", |name: &str| {
-            Arc::new(MockLlm {
-                model: name.to_string(),
-            })
+            Arc::new(MockLlm::script([]).with_model_id(name.to_string()))
         });
         assert!(!registry.is_empty());
         assert_eq!(registry.len(), 1);

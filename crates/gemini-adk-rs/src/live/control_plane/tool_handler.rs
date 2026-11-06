@@ -776,6 +776,7 @@ mod tests {
     use crate::live::background_tool::ToolExecutionMode;
     use crate::live::processor::ControlEvent;
     use crate::middleware::{Middleware, MiddlewareChain};
+    use crate::test_helpers::MockWriter;
     use crate::tool::{SimpleTool, ToolDispatcher};
 
     /// Middleware that counts hook invocations and can veto `before_tool`.
@@ -814,38 +815,6 @@ mod tests {
             _err: &crate::error::ToolError,
         ) -> Result<(), crate::error::AgentError> {
             self.errors.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-    }
-
-    struct NoopWriter;
-    #[async_trait]
-    impl SessionWriter for NoopWriter {
-        async fn send_audio(&self, _: bytes::Bytes) -> Result<(), SessionError> {
-            Ok(())
-        }
-        async fn send_text(&self, _: String) -> Result<(), SessionError> {
-            Ok(())
-        }
-        async fn send_tool_response(&self, _: Vec<FunctionResponse>) -> Result<(), SessionError> {
-            Ok(())
-        }
-        async fn send_client_content(&self, _: Vec<Content>, _: bool) -> Result<(), SessionError> {
-            Ok(())
-        }
-        async fn send_video(&self, _: bytes::Bytes) -> Result<(), SessionError> {
-            Ok(())
-        }
-        async fn update_instruction(&self, _: String) -> Result<(), SessionError> {
-            Ok(())
-        }
-        async fn signal_activity_start(&self) -> Result<(), SessionError> {
-            Ok(())
-        }
-        async fn signal_activity_end(&self) -> Result<(), SessionError> {
-            Ok(())
-        }
-        async fn disconnect(&self) -> Result<(), SessionError> {
             Ok(())
         }
     }
@@ -995,7 +964,7 @@ mod tests {
 
     async fn run_one(middleware: Arc<MiddlewareChain>, tool_runs: Arc<AtomicUsize>) {
         let dispatcher = Some(dispatcher_with_counter(tool_runs));
-        let writer: Arc<dyn SessionWriter> = Arc::new(NoopWriter);
+        let writer: Arc<dyn SessionWriter> = Arc::new(MockWriter);
         let callbacks = EventCallbacks::default();
         let state = State::new();
         let mut transcript = TranscriptBuffer::new();
@@ -1284,7 +1253,7 @@ mod tests {
         // through the same gate as inline tools.
         let tool_runs = Arc::new(AtomicUsize::new(0));
         let dispatcher = Some(dispatcher_with_counter(tool_runs.clone()));
-        let writer: Arc<dyn SessionWriter> = Arc::new(NoopWriter);
+        let writer: Arc<dyn SessionWriter> = Arc::new(MockWriter);
         let callbacks = EventCallbacks::default();
         let state = State::new();
         let mut transcript = TranscriptBuffer::new();
@@ -1429,7 +1398,7 @@ mod tests {
         });
         let mut dispatcher = ToolDispatcher::new();
         dispatcher.register_function(Arc::new(tool));
-        let writer: Arc<dyn SessionWriter> = Arc::new(NoopWriter);
+        let writer: Arc<dyn SessionWriter> = Arc::new(MockWriter);
         let (tx, _rx) = tokio::sync::broadcast::channel(64);
         let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel::<ControlEvent>(8);
         handle_tool_calls(
@@ -1650,7 +1619,7 @@ mod tests {
         });
         let mut dispatcher = ToolDispatcher::new();
         dispatcher.register_function(Arc::new(t));
-        let writer: Arc<dyn SessionWriter> = Arc::new(NoopWriter);
+        let writer: Arc<dyn SessionWriter> = Arc::new(MockWriter);
         let (tx, _rx) = tokio::sync::broadcast::channel(64);
         let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel::<ControlEvent>(8);
         handle_tool_calls(
@@ -1888,7 +1857,7 @@ mod tests {
         let state = State::new();
         let mut transcript = TranscriptBuffer::new();
         transcript.push_input("Can I talk to a real person?");
-        let writer: Arc<dyn SessionWriter> = Arc::new(NoopWriter);
+        let writer: Arc<dyn SessionWriter> = Arc::new(MockWriter);
         let (tx, _rx) = tokio::sync::broadcast::channel(64);
         let (ctrl_tx, _ctrl_rx) = tokio::sync::mpsc::channel::<ControlEvent>(8);
         handle_tool_calls(

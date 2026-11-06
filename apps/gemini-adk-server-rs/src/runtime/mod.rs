@@ -469,7 +469,7 @@ impl Runtime {
 async fn build_extraction_llm() -> Result<Arc<dyn BaseLlm>, String> {
     use gemini_adk_fluent_rs::gemini_genai_rs::protocol::types::AccessToken;
     use gemini_adk_fluent_rs::gemini_genai_rs::transport::auth::GoogleAccessToken;
-    use gemini_adk_rs::llm::{GeminiLlm, GeminiLlmParams, TokenProvider};
+    use gemini_adk_rs::llm::{GeminiLlm, TokenProvider};
 
     struct Refreshing(AccessToken);
     impl TokenProvider for Refreshing {
@@ -478,13 +478,10 @@ async fn build_extraction_llm() -> Result<Arc<dyn BaseLlm>, String> {
         }
     }
 
-    let env = |key: &str| std::env::var(key).ok().filter(|v| !v.trim().is_empty());
-    let vertex = env("GOOGLE_GENAI_USE_VERTEXAI").is_some_and(|v| v.eq_ignore_ascii_case("true"));
-    let mut params = GeminiLlmParams {
-        model: env("GEMINI_EXTRACTION_MODEL"),
-        ..GeminiLlmParams::default()
-    };
-    if vertex && env("GOOGLE_ACCESS_TOKEN").is_none() {
+    use gemini_genai_rs::protocol::types::{non_empty_env, vertex_requested};
+
+    let mut params = crate::execution::extraction_llm_params();
+    if vertex_requested() && non_empty_env("GOOGLE_ACCESS_TOKEN").is_none() {
         let token = GoogleAccessToken::from_env()
             .into_access_token()
             .await
