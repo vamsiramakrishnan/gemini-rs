@@ -2,8 +2,8 @@
 
 > Status legend: ✅ shipped · 🚧 in progress · 📋 planned · 💭 exploratory
 >
-> Current release: **3.0.0** (staged for tagging, 2026-09-25). Milestones 7–9 and the
-> telephony endgame below shipped in it.
+> Current release: **4.0.0** (2026-10-02; MSRV 1.99). Milestones 7–8 and the
+> telephony endgame below shipped in 3.0.0; see `CHANGELOG.md` for 4.0.0.
 
 > **Strategy:** the full competitive analysis and sequencing live in
 > [`docs/plans/2026-06-11-100x-strategy-memo.md`](docs/plans/2026-06-11-100x-strategy-memo.md).
@@ -320,6 +320,27 @@ The most evidenced bet: every commercial voice-agent tester is LLM-vs-LLM
 - ❌ **OpenAI Realtime L0: deliberately not pursued** (decision 2026-06-11) —
   Gemini-native is the identity; the control plane stays provider-agnostic so
   the option remains open.
+
+## Milestone 11 — adk-fluent naming parity 📋
+
+Align `gemini-adk-fluent-rs` with the Python `adk-fluent` vocabulary where
+the two differ, so a reader moving between them finds the same words. This
+absorbs the former `plan.md`; of its proposals, `compose/eval.rs` (`E::`),
+`compose/guards.rs` (`G::`), `a2a.rs`, `patterns.rs`, `AgentBuilder::tool`
+and `ask` already exist. What remains is an audit, then the gaps:
+
+- 📋 Audit each remaining item against the crate: builder aliases
+  (`instruct`, `describe`), `Pipeline`/`FanOut`/`Loop` struct builders,
+  the `C::`/`P::`/`S::`/`M::`/`T::` method gaps (`C::budget`, `C::fit`,
+  `P::section`, `M::scope`, `T::confirm`, `T::timeout`, `T::cached`, …),
+  `chain`/`conditional`/`map_reduce` and the `a2a_*` patterns, `RemoteAgent`
+  and `A2AServer` builders, `MockBackend`/`AgentHarness`/`diagnose` in
+  `testing`, and `App`/`Runner`/`StreamRunner`.
+- 📋 Examples matching upstream (operator composition, context engineering,
+  state transforms, guards, A2A delegation, dispatch/join, inline testing,
+  middleware, map-over, loop patterns).
+- ❌ `pub type Agent = AgentBuilder` is **not** adopted: `Agent` is the
+  runtime trait (AGENTS.md); an alias would make the two collide.
 
 ## Milestone 10 — Rust-only endgames 💭
 

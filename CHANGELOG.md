@@ -82,6 +82,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`plan.md` folded into `ROADMAP.md`.** The adk-fluent naming-parity plan
+  is now Milestone 11 of the roadmap (its `Agent = AgentBuilder` alias is
+  declined, since `Agent` is the runtime trait); the roadmap header names the
+  current release and MSRV.
+- **README telephony section corrected.** SIP registration and SRTP have
+  shipped since 3.0.0; the sentence saying they were not implemented is
+  replaced by what is and is not supported, and `examples/sip-agent` now
+  registers with a PBX or trunk when `SIP_REGISTRAR`, `SIP_USERNAME` and
+  `SIP_PASSWORD` are set.
+
 - **Breaking: the minimum Rust is 1.99** (was 1.93), and the checked-in
   toolchain pins 1.99.0. Code mode runs programs in Monty, which needs it.
   `SipError::Sip` now boxes the SIP stack's error.
