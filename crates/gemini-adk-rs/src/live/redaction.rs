@@ -143,16 +143,24 @@ fn redact_cards(text: &str) -> String {
 }
 
 fn redact_digit_runs(text: &str, min: usize) -> String {
-    DIGIT_RUN_RE
-        .replace_all(text, |caps: &regex::Captures<'_>| {
-            let run = &caps[0];
-            if run.chars().count() >= min {
-                NUMBER_REPLACEMENT.to_string()
-            } else {
-                run.to_string()
-            }
-        })
-        .into_owned()
+    let mut out: Option<String> = None;
+    let mut copied = 0;
+    for m in DIGIT_RUN_RE.find_iter(text) {
+        if m.as_str().chars().count() < min {
+            continue;
+        }
+        let out = out.get_or_insert_with(|| String::with_capacity(text.len()));
+        out.push_str(&text[copied..m.start()]);
+        out.push_str(NUMBER_REPLACEMENT);
+        copied = m.end();
+    }
+    match out {
+        Some(mut out) => {
+            out.push_str(&text[copied..]);
+            out
+        }
+        None => text.to_string(),
+    }
 }
 
 /// The Luhn checksum every payment-card number satisfies (ISO/IEC 7812).

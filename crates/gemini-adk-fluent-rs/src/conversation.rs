@@ -857,14 +857,27 @@ impl Conversation {
         self
     }
 
-    /// The spec built so far.
+    /// The spec built so far. A setter called before any `.stage(..)` is
+    /// recorded as a misuse that [`compile`](Self::compile) and
+    /// [`try_into_spec`](Self::try_into_spec) report; this view does not.
     pub fn spec(&self) -> &ConversationSpec {
         &self.spec
     }
 
-    /// Consume into the underlying spec.
+    /// Consume into the underlying spec, discarding any recorded builder
+    /// misuse. Use [`try_into_spec`](Self::try_into_spec) to have it
+    /// reported instead.
     pub fn into_spec(self) -> ConversationSpec {
         self.spec
+    }
+
+    /// Consume into the underlying spec, or the builder misuse `compile`
+    /// would report (a setter called before any `.stage(..)`).
+    pub fn try_into_spec(self) -> Result<ConversationSpec, ConversationError> {
+        if !self.issues.is_empty() {
+            return Err(ConversationError::Spec(self.issues.join("; ")));
+        }
+        Ok(self.spec)
     }
 
     /// Compile from a [`ConversationSpec`] (e.g. parsed from JSON/YAML).
@@ -1556,6 +1569,29 @@ mod tests {
         };
         assert!(message.contains("`.instruction(..)`"), "{message}");
         assert!(message.contains("`.terminal(..)`"), "{message}");
+    }
+
+    #[test]
+    fn try_into_spec_reports_the_misuse_into_spec_discards() {
+        let misused = || {
+            Conversation::new("misused")
+                .instruction("hello")
+                .stage("only")
+        };
+        let err = misused()
+            .try_into_spec()
+            .expect_err("a setter before `.stage(..)` is reported");
+        assert!(matches!(err, ConversationError::Spec(_)), "{err}");
+        // The lossy form keeps working for callers that chained correctly
+        // and documents that it drops the record otherwise.
+        assert_eq!(misused().into_spec().stages.len(), 1);
+        assert!(
+            Conversation::new("ok")
+                .stage("only")
+                .instruction("hello")
+                .try_into_spec()
+                .is_ok()
+        );
     }
 
     fn booking() -> CompiledConversation {

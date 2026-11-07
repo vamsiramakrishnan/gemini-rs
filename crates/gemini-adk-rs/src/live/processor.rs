@@ -2313,7 +2313,13 @@ mod fast_lane_budget_tests {
         (pct(50), pct(99))
     }
 
+    // The two wall-clock tests run in the `bench-build` CI job (release
+    // build, `--ignored`, `just fast-lane-budget`): on a shared runner the
+    // ordinary test job runs them alongside every other test process, and
+    // twenty slow wake-ups in two thousand would fail a correct lane. The
+    // structural test below stays in the default run.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "wall-clock budget: run with --ignored in the bench job (just fast-lane-budget)"]
     async fn audio_dispatch_stays_under_one_millisecond() {
         // 2 000 frames of 40 ms of 24 kHz PCM16 (1 920 bytes), one subscriber:
         // the shape of a real session's audio stream.
@@ -2333,6 +2339,7 @@ mod fast_lane_budget_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "wall-clock budget: run with --ignored in the bench job (just fast-lane-budget)"]
     async fn subscribers_do_not_change_the_dispatch_cost_class() {
         let (_, p99_one) = measure(1_000, 1_920, 1).await;
         let (_, p99_eight) = measure(1_000, 1_920, 8).await;

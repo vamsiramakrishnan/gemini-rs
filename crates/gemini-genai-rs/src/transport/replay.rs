@@ -186,15 +186,14 @@ impl Transport for ReplayTransport {
         tokio::task::yield_now().await;
 
         // The queue cannot change while this future is suspended on the gate
-        // (`&mut self`), so the pop below always finds a frame; the loop makes
-        // an empty queue re-enter the idle branch instead of asserting.
+        // (`&mut self`), so the pop below always finds a frame.
         let frame = loop {
             if self.inbound.is_empty() {
                 let _ = self.drained_tx.send(true);
                 // Stay connected-but-idle; the session loop's `select!` drops this
                 // future when a command (e.g. Disconnect) arrives.
-                std::future::pending::<()>().await;
-                unreachable!("pending() never resolves");
+                let never: std::convert::Infallible = std::future::pending().await;
+                match never {}
             }
 
             if self.delivered >= self.ungated_prefix {

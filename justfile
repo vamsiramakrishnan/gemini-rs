@@ -220,6 +220,11 @@ fuzz seconds="60":
 bench-fast-lane:
     cargo bench -p gemini-adk-fluent-rs --bench fast_lane
 
+# The fast-lane dispatch budget (p99 under one millisecond per audio frame),
+# asserted by the processor's own tests in a release build
+fast-lane-budget:
+    cargo test -p gemini-adk-rs --lib --release fast_lane_budget -- --ignored --test-threads=1
+
 # Licences and advisories. Needs `cargo install cargo-deny`.
 deny:
     @command -v cargo-deny >/dev/null 2>&1 || { echo "cargo-deny is not installed. Run: cargo install cargo-deny"; exit 1; }

@@ -1,9 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 2885c7de9be7fae2afc2839a2fa30624db8b8ae1d6a5cd50eeee948c215cda3b # shrinks to shape = FlowShape { allow: [{}], done: [None], never: [] }, ops = []
-cc a855d9b4726080daa1155c96c82a2c13f00fbaaffdc99e3997b198e26bc2addd # shrinks to shape = FlowShape { allow: [{}], done: [None], never: [] }, ops = []
-cc 6838019528c71f8cda7453618a418488ff6687299f9b52964c0c478801ae131f # shrinks to shape = FlowShape { allow: [{}], done: [None], never: [] }, ops = [], probe = 0

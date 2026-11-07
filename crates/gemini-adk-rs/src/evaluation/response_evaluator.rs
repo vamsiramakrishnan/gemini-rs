@@ -233,16 +233,6 @@ mod tests {
     }
 
     #[test]
-    fn levenshtein_identical() {
-        assert_eq!(crate::utils::text::levenshtein("abc", "abc"), 0);
-    }
-
-    #[test]
-    fn levenshtein_one_edit() {
-        assert_eq!(crate::utils::text::levenshtein("abc", "ab"), 1);
-    }
-
-    #[test]
     fn similarity_identical() {
         assert!((string_similarity("hello", "hello") - 1.0).abs() < f64::EPSILON);
     }

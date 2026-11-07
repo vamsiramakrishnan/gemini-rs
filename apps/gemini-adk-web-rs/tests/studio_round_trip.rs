@@ -3,7 +3,11 @@
 //! The Studio prunes a document (`prune` in `apps/studio/src/spec/paths.ts`)
 //! before saving it. The runtime must load that document and write back the
 //! same thing, or the Studio would lose user data on the next load.
-#![allow(dead_code, unused_imports)]
+#![allow(
+    dead_code,
+    unused_imports,
+    reason = "the Studio router modules are included by path; this test uses a subset of them"
+)]
 
 // The web app is a binary crate, so the Studio router is compiled into this
 // test from its source file. `app` is needed by the module's own unit tests.

@@ -216,8 +216,8 @@ fn a_missing_spec_file_is_reported_by_path_with_a_non_zero_exit() {
     }
 }
 
-/// These commands exit non-zero but print a bare `Os { code: 2, .. }` without
-/// the path (a known defect; this test fails until the error carries it).
+/// These commands used to exit non-zero with a bare `Os { code: 2, .. }` and
+/// no path (`docs/cleanup/bugs.md` #2); the error names the file now.
 #[test]
 fn flow_session_and_replay_commands_name_a_missing_file() {
     let path = "/nonexistent/file.json";

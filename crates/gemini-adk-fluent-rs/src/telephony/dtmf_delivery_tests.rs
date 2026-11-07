@@ -1,6 +1,10 @@
-//! End-to-end DTMF delivery: a digit enters at the transport edge (Twilio
-//! `dtmf` frame, RFC 4733 RTP packet, in-band tones) and must land in session
-//! state under the shared `telephony:` keys, where flow guards read it.
+//! DTMF delivery into session state: a digit enters at the transport edge
+//! (Twilio `dtmf` frame, RFC 4733 RTP packet, in-band tones) and must land
+//! under the shared `telephony:` keys, where flow guards read it. The Twilio
+//! and in-band legs drive the real inbound paths; the RTP leg exercises the
+//! same parsing, deduplication and recording blocks `sip.rs` uses, through a
+//! test-local copy of its loop (`RtpEdge`), since the SIP loop needs a live
+//! socket pair.
 
 use std::time::Duration;
 

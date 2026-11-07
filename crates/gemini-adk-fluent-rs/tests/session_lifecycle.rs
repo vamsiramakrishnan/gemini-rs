@@ -177,12 +177,19 @@ async fn the_resumption_handle_survives_the_server_closing_after_go_away() {
     run.handle().done().await.ok();
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(run.handle().resume_handle().as_deref(), Some("handle-9"));
+    // The close reaches the application on both paths: the event stream
+    // and the `on_disconnected` callback.
     assert!(
         run.events()
             .iter()
-            .any(|e| matches!(e, LiveEvent::Disconnected { .. }))
-            || disconnected.load(Ordering::SeqCst) == 1,
-        "the close after GoAway reaches the application"
+            .any(|e| matches!(e, LiveEvent::Disconnected { .. })),
+        "the close after GoAway is not in the event stream: {:?}",
+        run.events()
+    );
+    assert_eq!(
+        disconnected.load(Ordering::SeqCst),
+        1,
+        "the close after GoAway did not reach on_disconnected exactly once"
     );
 }
 

@@ -253,8 +253,10 @@ jobs:
       - run: cargo test -p gemini-adk-rs --lib --release loom_ --locked
 
   # The benchmarks compile (they are not run: a shared runner's numbers mean
-  # nothing). The fast-lane budget itself is asserted by
-  # `fast_lane_budget_tests` in the ordinary test job.
+  # nothing). The fast-lane budget (`fast_lane_budget_tests`, one millisecond
+  # p99 per audio frame) is asserted here in a release build, on its own,
+  # rather than in the ordinary test job where every other test process
+  # competes for the runner's cores.
   bench-build:
     name: Benchmarks compile
     runs-on: ubuntu-latest
@@ -265,6 +267,7 @@ jobs:
           toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --workspace --no-run --locked
+      - run: cargo test -p gemini-adk-rs --lib --release --locked fast_lane_budget -- --ignored --test-threads=1
 
   # Supply chain: RustSec advisories, license allow-list, source whitelist.
   # Configuration lives in deny.toml.

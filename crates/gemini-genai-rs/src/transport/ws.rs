@@ -144,8 +144,10 @@ pub const HAS_TLS_BACKEND: bool = cfg!(any(feature = "tls-native", feature = "tl
 pub enum FramePayload {
     /// A frame carrying a server message, as bytes for the codec.
     Data(Vec<u8>),
-    /// The peer closed the connection, with its reason when it gave one.
-    Close(Option<String>),
+    /// The peer closed the connection, with its close code and a reason
+    /// text (code, and the server's text when it gave one) when it sent a
+    /// close frame.
+    Close(Option<(u16, String)>),
     /// A control frame (ping, pong, raw frame) the session loop ignores.
     Skip,
 }
@@ -162,11 +164,12 @@ pub fn frame_payload(message: Message) -> FramePayload {
         Message::Text(t) => FramePayload::Data(bytes::Bytes::from(t).into()),
         Message::Binary(b) => FramePayload::Data(b.into()),
         Message::Close(frame) => FramePayload::Close(frame.map(|cf| {
-            if cf.reason.is_empty() {
+            let reason = if cf.reason.is_empty() {
                 format!("server closed the connection ({})", cf.code)
             } else {
                 format!("server closed the connection ({}): {}", cf.code, cf.reason)
-            }
+            };
+            (u16::from(cf.code), reason)
         })),
         // Ping/Pong are handled internally by tungstenite; Frame is a
         // low-level variant.
@@ -242,9 +245,9 @@ impl Transport for TungsteniteTransport {
             match ws_read.next().await {
                 Some(Ok(message)) => match frame_payload(message) {
                     FramePayload::Data(bytes) => return Ok(Some(bytes)),
-                    FramePayload::Close(reason) => {
-                        if let Some(reason) = reason {
-                            tracing::warn!(%reason, "WebSocket close frame received");
+                    FramePayload::Close(close) => {
+                        if let Some((code, reason)) = close {
+                            tracing::warn!(code, %reason, "WebSocket close frame received");
                             // Kept, not merely logged: a `warn` is invisible
                             // unless the application configured a subscriber,
                             // and the reason is the only account of why the
@@ -430,9 +433,10 @@ mod tests {
         })));
         assert_eq!(
             close,
-            FramePayload::Close(Some(
+            FramePayload::Close(Some((
+                1008,
                 "server closed the connection (1008): quota exceeded".into()
-            ))
+            )))
         );
         let bare = frame_payload(Message::Close(Some(CloseFrame {
             code: CloseCode::Normal,
@@ -440,7 +444,7 @@ mod tests {
         })));
         assert_eq!(
             bare,
-            FramePayload::Close(Some("server closed the connection (1000)".into()))
+            FramePayload::Close(Some((1000, "server closed the connection (1000)".into())))
         );
         assert_eq!(
             frame_payload(Message::Ping(vec![1].into())),

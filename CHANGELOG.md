@@ -129,6 +129,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **One API-key rule for every surface.** `GeminiLlm::from_env`, the Live
+  session, the web app, the runtime and the CLI all read the key through
+  `gemini_genai_rs::protocol::types::api_key_from_env`: `GEMINI_API_KEY`,
+  then `GOOGLE_GENAI_API_KEY`, then `GOOGLE_API_KEY`, and an empty or
+  whitespace value counts as unset. `GeminiLlm::from_env` used to try
+  `GOOGLE_GENAI_API_KEY` first and accept an empty value, so a process
+  with both variables set may now pick the other key; the Vertex switch
+  accepts `"1"` as well as `"true"` on every surface, and `adk doctor` no
+  longer reads the undocumented `GOOGLE_PROJECT_ID` fallback (D18 in
+  `docs/cleanup/decisions.md`).
+- **Timestamps are RFC 3339.** `Session::created_at`/`updated_at`, the
+  server's `SessionData` timestamps, trace `started_at` and eval
+  `timestamp` were `"{unix_seconds}Z"`; they now read
+  `2024-02-29T12:34:56Z`, the form the Vertex session store already used.
+  A client that parsed the old value as an integer sees a different
+  string (D19 in `docs/cleanup/decisions.md`).
+- **The fast-lane budget tests run in the `bench-build` job**, in a release
+  build on their own (`just fast-lane-budget`), not in the ordinary test
+  job where they shared the runner with every other test process.
 - **Library code returns typed errors instead of panicking.** 67
   `unwrap`/`expect` sites in the published crates now return the crate's
   error or are restructured so nothing can fail: `HttpError::InvalidMethod`,
@@ -199,11 +218,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **G.711 encoders are bit-exact with the ITU-T G.191 / Sun `g711.c`
-  reference.** Negative samples at segment boundaries encoded one code off
-  (`-1` became µ-law negative zero, which decodes to 0); the encoders now
-  work in the reference's 14-bit (µ-law) and 13-bit (A-law) domain. The
-  decoders were already exact. Checked for every `i16` input and every byte.
+- **G.711 encoders are bit-exact with ITU-T G.191's `g711.c`**, the STL
+  reference implementation of G.711. The µ-law encoder disagreed with it at
+  127 negative inputs at segment boundaries (it truncated the 16-bit sample
+  toward zero instead of working in the 14-bit domain with one's complement
+  for negatives); A-law was already exact. Checked against a transcription
+  of the ITU source for every `i16` input and every byte, with literal
+  G.711 table pairs and a decode→encode round trip as independent anchors.
+  Note that the Sun `g711.c` formulation (sox, Asterisk) differs from G.191
+  by one code at negative step boundaries; decoders agree on both.
 - **Latency percentiles never count an unpublished sample.** Under two
   concurrent `record` calls the telemetry lane's recent-sample ring could
   expose a slot that was claimed but not yet written, so a percentile fell
