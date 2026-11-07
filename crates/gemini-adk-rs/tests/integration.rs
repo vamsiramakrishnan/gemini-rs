@@ -136,6 +136,7 @@ async fn full_tool_call_roundtrip() {
             name: "get_weather".to_string(),
             args: json!({"city": "London"}),
             id: Some("call-1".to_string()),
+            thought_signature: None,
         }]));
         // Give the agent time to dispatch the tool and send the response.
         tokio::time::sleep(Duration::from_millis(50)).await;

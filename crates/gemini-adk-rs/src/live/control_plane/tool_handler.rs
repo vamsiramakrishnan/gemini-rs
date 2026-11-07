@@ -718,6 +718,7 @@ impl CallPath<'_> {
                 name,
                 args,
                 id: Some(format!("{parent}.{}", program.calls().len() + 1)),
+                thought_signature: None,
             };
             let answer = if phase_tools.is_some_and(|tools| !tools.contains(&inner.name)) {
                 Err(format!(
@@ -921,6 +922,7 @@ mod tests {
                 name: "verify_identity".into(),
                 args: json!({}),
                 id: Some("c1".into()),
+                thought_signature: None,
             }],
             &EventCallbacks::default(),
             &dispatcher,
@@ -975,6 +977,7 @@ mod tests {
             name: "echo".into(),
             args: json!({ "x": 1 }),
             id: Some("c1".into()),
+            thought_signature: None,
         };
         handle_tool_calls(
             vec![call],
@@ -1138,6 +1141,7 @@ mod tests {
             name: "slow".into(),
             args: json!({}),
             id: Some("c1".into()),
+            thought_signature: None,
         };
         let ran = tokio::time::timeout(
             std::time::Duration::from_secs(2),
@@ -1218,6 +1222,7 @@ mod tests {
             name: "echo".into(),
             args: json!({}),
             id: Some("c1".into()),
+            thought_signature: None,
         };
         handle_tool_calls(
             vec![call],
@@ -1290,6 +1295,7 @@ mod tests {
             name: "echo".into(),
             args: json!({ "x": 1 }),
             id: Some("c1".into()),
+            thought_signature: None,
         };
         handle_tool_calls(
             vec![call],
@@ -1406,6 +1412,7 @@ mod tests {
                 name: "charge".into(),
                 args: json!({}),
                 id: Some("c1".into()),
+                thought_signature: None,
             }],
             &EventCallbacks::default(),
             &Some(Arc::new(dispatcher)),
@@ -1627,6 +1634,7 @@ mod tests {
                 name: tool.into(),
                 args: json!({}),
                 id: Some("c1".into()),
+                thought_signature: None,
             }],
             &EventCallbacks::default(),
             &Some(Arc::new(dispatcher)),
@@ -1865,6 +1873,7 @@ mod tests {
                 name: "transfer".into(),
                 args: json!({}),
                 id: Some("c1".into()),
+                thought_signature: None,
             }],
             &EventCallbacks::default(),
             &Some(Arc::new(dispatcher)),
@@ -1970,6 +1979,7 @@ mod tests {
                 name: "run_code".into(),
                 args: json!({ "code": program }),
                 id: Some("p1".into()),
+                thought_signature: None,
             }],
             &EventCallbacks::default(),
             &Some(Arc::new(teller(runs))),

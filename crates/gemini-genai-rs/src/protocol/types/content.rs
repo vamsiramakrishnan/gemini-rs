@@ -19,7 +19,7 @@ pub struct Blob {
 }
 
 /// A function call request from the model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionCall {
     /// Function name to call.
@@ -29,6 +29,16 @@ pub struct FunctionCall {
     /// Unique call ID for matching responses.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// The opaque `thoughtSignature` the model attached to this call's part.
+    ///
+    /// Thinking models (Gemini 3 and later) sign their function calls, and
+    /// `generateContent` rejects a history whose function-call part comes
+    /// back without its signature (HTTP 400, "Function call is missing a
+    /// thought_signature"). On the wire it is a sibling of `functionCall` in
+    /// the [`Part`], not a field inside it, so [`Part`] reads and writes it;
+    /// a model turn kept as received carries it into the next request.
+    #[serde(skip)]
+    pub thought_signature: Option<String>,
 }
 
 /// A function call response sent back to the model.
@@ -97,8 +107,7 @@ pub struct CodeExecutionResult {
 /// same precedence `#[serde(untagged)]` uses (thought, text, inline data,
 /// function call, function response, executable code, code execution result);
 /// see the `Deserialize` impl below.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Part {
     /// A thought/reasoning part from the model (when includeThoughts is enabled).
     Thought {
@@ -115,31 +124,26 @@ pub enum Part {
     /// An inline data blob (audio, image, etc.).
     InlineData {
         /// The blob data.
-        #[serde(rename = "inlineData")]
         inline_data: Blob,
     },
     /// A function call from the model.
     FunctionCall {
         /// The function call details.
-        #[serde(rename = "functionCall")]
         function_call: FunctionCall,
     },
     /// A function response sent back to the model.
     FunctionResponse {
         /// The function response details.
-        #[serde(rename = "functionResponse")]
         function_response: FunctionResponse,
     },
     /// Executable code returned by the model.
     ExecutableCode {
         /// The executable code details.
-        #[serde(rename = "executableCode")]
         executable_code: ExecutableCode,
     },
     /// Result of code execution.
     CodeExecutionResult {
         /// The code execution result details.
-        #[serde(rename = "codeExecutionResult")]
         code_execution_result: CodeExecutionResult,
     },
 }
@@ -152,8 +156,9 @@ impl<'de> Deserialize<'de> for Part {
     /// an audio part that meant copying the base64 payload twice and failing
     /// twice before reaching `InlineData`. This reads the fields directly and
     /// chooses the first variant whose fields are present, the same choice
-    /// `untagged` makes for any part the API sends. Unknown fields (such as
-    /// `thoughtSignature`) are ignored, as before.
+    /// `untagged` makes for any part the API sends. `thoughtSignature` is kept
+    /// on a function-call part (see [`FunctionCall::thought_signature`]) and
+    /// ignored on the others; other unknown fields are ignored.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -167,6 +172,7 @@ impl<'de> Deserialize<'de> for Part {
             function_response: Option<FunctionResponse>,
             executable_code: Option<ExecutableCode>,
             code_execution_result: Option<CodeExecutionResult>,
+            thought_signature: Option<String>,
         }
 
         let fields = Fields::deserialize(deserializer)?;
@@ -184,9 +190,13 @@ impl<'de> Deserialize<'de> for Part {
                 ..
             } => Part::InlineData { inline_data },
             Fields {
-                function_call: Some(function_call),
+                function_call: Some(mut function_call),
+                thought_signature,
                 ..
-            } => Part::FunctionCall { function_call },
+            } => {
+                function_call.thought_signature = thought_signature;
+                Part::FunctionCall { function_call }
+            }
             Fields {
                 function_response: Some(function_response),
                 ..
@@ -207,6 +217,40 @@ impl<'de> Deserialize<'de> for Part {
                 ));
             }
         })
+    }
+}
+
+impl Serialize for Part {
+    /// The shape `#[serde(untagged)]` wrote, plus a function call's
+    /// `thoughtSignature` as a sibling of `functionCall`, where the API
+    /// expects it.
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        match self {
+            Part::Thought { text, thought } => {
+                map.serialize_entry("text", text)?;
+                map.serialize_entry("thought", thought)?;
+            }
+            Part::Text { text } => map.serialize_entry("text", text)?,
+            Part::InlineData { inline_data } => map.serialize_entry("inlineData", inline_data)?,
+            Part::FunctionCall { function_call } => {
+                map.serialize_entry("functionCall", function_call)?;
+                if let Some(signature) = &function_call.thought_signature {
+                    map.serialize_entry("thoughtSignature", signature)?;
+                }
+            }
+            Part::FunctionResponse { function_response } => {
+                map.serialize_entry("functionResponse", function_response)?;
+            }
+            Part::ExecutableCode { executable_code } => {
+                map.serialize_entry("executableCode", executable_code)?;
+            }
+            Part::CodeExecutionResult {
+                code_execution_result,
+            } => map.serialize_entry("codeExecutionResult", code_execution_result)?,
+        }
+        map.end()
     }
 }
 
@@ -417,6 +461,51 @@ mod tests {
     }
 
     #[test]
+    fn function_call_signature_round_trips_beside_the_call() {
+        let wire =
+            r#"{"functionCall":{"name":"f","args":{"a":1},"id":"c1"},"thoughtSignature":"c2ln"}"#;
+        let part: Part = serde_json::from_str(wire).unwrap();
+        let Part::FunctionCall { function_call } = &part else {
+            panic!("expected a function call, got {part:?}");
+        };
+        assert_eq!(function_call.thought_signature.as_deref(), Some("c2ln"));
+        assert_eq!(
+            serde_json::to_value(&part).unwrap(),
+            serde_json::from_str::<serde_json::Value>(wire).unwrap()
+        );
+        // The call on its own (a Live tool call, say) never carries it.
+        assert!(
+            serde_json::to_value(function_call)
+                .unwrap()
+                .get("thoughtSignature")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn parts_serialize_as_before() {
+        let call = FunctionCall {
+            name: "f".into(),
+            args: serde_json::json!({}),
+            ..Default::default()
+        };
+        for (part, wire) in [
+            (Part::text("hi"), r#"{"text":"hi"}"#),
+            (Part::thought("hmm"), r#"{"text":"hmm","thought":true}"#),
+            (
+                Part::inline_data("audio/pcm", "AA=="),
+                r#"{"inlineData":{"mimeType":"audio/pcm","data":"AA=="}}"#,
+            ),
+            (
+                Part::function_call(call),
+                r#"{"functionCall":{"name":"f","args":{}}}"#,
+            ),
+        ] {
+            assert_eq!(serde_json::to_string(&part).unwrap(), wire);
+        }
+    }
+
+    #[test]
     fn part_decoding_matches_untagged() {
         let blob = r#"{"mimeType":"audio/pcm;rate=24000","data":"AAEC/+8="}"#;
         let corpus = [
@@ -468,6 +557,7 @@ mod tests {
                     name: "f".into(),
                     args: serde_json::json!({"a": 1}),
                     id: Some("c1".into()),
+                    thought_signature: None,
                 },
             },
             Part::ExecutableCode {
@@ -547,6 +637,7 @@ mod tests {
                 name: "get_weather".to_string(),
                 args: serde_json::json!({"city": "London"}),
                 id: Some("call-1".to_string()),
+                thought_signature: None,
             },
         };
         let json = serde_json::to_string(&part).unwrap();
@@ -663,6 +754,7 @@ mod tests {
             name: "test".to_string(),
             args: serde_json::json!({}),
             id: None,
+            thought_signature: None,
         };
         let p = Part::function_call(call.clone());
         assert_eq!(

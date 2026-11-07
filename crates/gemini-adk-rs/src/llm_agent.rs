@@ -679,6 +679,7 @@ mod tests {
                 name: "get_weather".to_string(),
                 args: json!({"city": "London"}),
                 id: Some("call-1".to_string()),
+                thought_signature: None,
             }]));
             // The tool response will be sent back; then end the turn.
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -720,6 +721,7 @@ mod tests {
                 name: "nonexistent_tool".to_string(),
                 args: json!({}),
                 id: Some("call-1".to_string()),
+                thought_signature: None,
             }]));
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             let _ = evt_tx.send(SessionEvent::TurnComplete);
@@ -761,6 +763,7 @@ mod tests {
                 name: "transfer_to_billing".to_string(),
                 args: json!({}),
                 id: Some("call-1".to_string()),
+                thought_signature: None,
             }]));
         });
 
@@ -900,6 +903,7 @@ mod tests {
                 name: "failing_tool".to_string(),
                 args: json!({}),
                 id: Some("call-1".to_string()),
+                thought_signature: None,
             }]));
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             let _ = evt_tx.send(SessionEvent::TurnComplete);

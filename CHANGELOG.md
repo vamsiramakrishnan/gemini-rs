@@ -259,6 +259,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Text agents with tools work on thinking models (Gemini 3 and later).**
+  These models sign each function call with a `thoughtSignature`, and
+  `generateContent` rejects a history that sends the call back without it
+  (HTTP 400, "Function call is missing a thought_signature in functionCall
+  parts"), so every tool round trip on, for example,
+  `gemini-flash-lite-latest` failed on its second model call, from Rust and
+  from Python alike. `Part` now keeps the signature it receives on a
+  function-call part and writes it back beside `functionCall`; the new
+  public field `FunctionCall::thought_signature` holds it (decision D22).
+  Found by the real-API benchmark in `bench/python/live_api.py`.
 - **G.711 encoders are bit-exact with ITU-T G.191's `g711.c`**, the STL
   reference implementation of G.711. The µ-law encoder disagreed with it at
   127 negative inputs at segment boundaries (it truncated the 16-bit sample
