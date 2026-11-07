@@ -207,11 +207,30 @@ def _param_docs(doc: str) -> dict[str, str]:
     return docs
 
 
+def _unwrap_partial(func: Callable[..., Any]) -> Callable[..., Any]:
+    """The function under a ``functools.partial`` (or the callable itself).
+    ``typing.get_type_hints`` rejects partial objects; the signature, which
+    ``inspect`` adjusts for the bound arguments, is still read from the
+    partial."""
+    import functools
+
+    while isinstance(func, functools.partial):
+        func = func.func
+    return func
+
+
 def schema_for(func: Callable[..., Any]) -> dict[str, Any]:
     """The JSON Schema of ``func``'s keyword arguments, from its type hints
-    and the ``Args:`` section of its docstring."""
-    hints = typing.get_type_hints(func, include_extras=True)
-    docs = _param_docs(inspect.getdoc(func) or "")
+    and the ``Args:`` section of its docstring. A ``functools.partial`` is
+    described by its remaining parameters."""
+    target = _unwrap_partial(func)
+    try:
+        hints = typing.get_type_hints(target, include_extras=True)
+    except TypeError:
+        # A callable object: hints live on its __call__.
+        call = getattr(target, "__call__", None)
+        hints = typing.get_type_hints(call, include_extras=True) if call is not None else {}
+    docs = _param_docs(inspect.getdoc(target) or "")
     properties: dict[str, Any] = {}
     required: list[str] = []
     for index, (name, param) in enumerate(inspect.signature(func).parameters.items()):
@@ -255,11 +274,12 @@ def tool(func: Any = None, /, *, name: str | None = None, description: str | Non
     """
 
     def wrap(f: Callable[..., Any]) -> Tool:
+        target = _unwrap_partial(f)
         own_name = getattr(f, "__name__", None)
         tool_name = name or own_name
         if not tool_name or tool_name == "<lambda>":
             raise TypeError("this callable has no usable __name__; pass tool(name=...)")
-        doc = inspect.getdoc(f) or ""
+        doc = inspect.getdoc(target) or ""
         summary = doc.split("\n\n", 1)[0].strip() if doc else ""
         return Tool(
             f,

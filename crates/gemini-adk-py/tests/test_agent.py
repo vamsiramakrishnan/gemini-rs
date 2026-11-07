@@ -402,6 +402,30 @@ def test_schema_for_covers_the_hint_shapes():
         adk.tool(lambda a: a)
     assert adk.tool(name="add_one")(lambda a: a + 1).name == "add_one"
 
+    def add(a: int, b: int) -> int:
+        """Add two numbers.
+
+        Args:
+            a: left
+            b: right
+        """
+        return a + b
+
+    # A named partial registers with the remaining parameter only, typed from
+    # the underlying function (get_type_hints rejects partial objects).
+    add_one = adk.tool(name="add_one")(functools.partial(add, 1))
+    assert add_one.parameters == {
+        "type": "object",
+        "properties": {"b": {"type": "integer", "description": "right"}},
+        "required": ["b"],
+    }
+    assert add_one.description == "Add two numbers."
+    assert add_one(b=2) == 3
+    llm = adk.MockLlm([{"tool": "add_one", "args": {"b": 41}}, "42"])
+    assert adk.Agent("a", tools=[add_one], llm=llm).ask("one more") == "42"
+    # The second model call carries the tool's result (42; the argument was 41).
+    assert "42" in json.dumps(llm.requests()[1])
+
 
 def test_exactly_one_runtime():
     """Every surface shares one Tokio runtime: exercising agents, sims and
