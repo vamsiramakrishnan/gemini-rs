@@ -44,7 +44,9 @@ pub fn upgrade_app_socket(
             Some(app) => handle_ws(socket, app, span_rx).await,
             None => {
                 use futures::SinkExt as _;
-                tracing::warn!("Agent '{name}' not found");
+                // The name comes from the request path: Debug formatting escapes
+                // control characters so a client cannot forge log lines.
+                tracing::warn!("agent {name:?} not found");
                 let _ = socket.close().await;
             }
         }
