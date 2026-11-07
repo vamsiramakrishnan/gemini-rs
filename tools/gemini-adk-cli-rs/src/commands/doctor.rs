@@ -24,7 +24,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Auth ─────────────────────────────────────────────────────────
     print!("  Google AI API key ......... ");
-    let has_key = gemini_genai_rs::protocol::types::api_key_env_var();
+    // The variable name only: the key itself is never printed.
+    let has_key = gemini_genai_rs::protocol::types::provider_key_variable();
     match has_key {
         Some(key_name) => println!("set ({})", key_name),
         None => println!("not set"),

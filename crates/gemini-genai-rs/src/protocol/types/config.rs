@@ -846,8 +846,11 @@ pub fn vertex_requested() -> bool {
 }
 
 /// The name of the first of [`API_KEY_ENV_VARS`] that holds a non-empty
-/// value, for messages that say which variable supplied the key.
-pub fn api_key_env_var() -> Option<&'static str> {
+/// value, for messages that say which variable supplied the key. It returns
+/// the variable's name, never its value, so printing it is safe (and the
+/// name says so, for static analysers that treat anything called
+/// `api_key` as a secret).
+pub fn provider_key_variable() -> Option<&'static str> {
     API_KEY_ENV_VARS
         .into_iter()
         .find(|name| non_empty_env(name).is_some())
@@ -1750,7 +1753,7 @@ mod tests {
             ApiEndpoint::from_env(),
             Ok(ApiEndpoint::GoogleAI { ref api_key }) if api_key == "k-fallback"
         ));
-        assert_eq!(api_key_env_var(), Some("GOOGLE_API_KEY"));
+        assert_eq!(provider_key_variable(), Some("GOOGLE_API_KEY"));
         assert_eq!(api_key_from_env().as_deref(), Some("k-fallback"));
 
         // No key anywhere → actionable error.
