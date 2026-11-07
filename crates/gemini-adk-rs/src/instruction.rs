@@ -8,8 +8,10 @@ use std::sync::LazyLock;
 
 use crate::state::State;
 
-static PLACEHOLDER_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\{([a-zA-Z_][a-zA-Z0-9_:]*)\??\}").unwrap());
+static PLACEHOLDER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\{([a-zA-Z_][a-zA-Z0-9_:]*)\??\}")
+        .expect("PLACEHOLDER_RE literal is a valid regex")
+});
 
 /// Replace `{key}` placeholders in `template` with values from `state`.
 ///
@@ -111,7 +113,7 @@ impl TemplateInstruction {
             }
         }
         top.insert("state".into(), serde_json::Value::Object(all));
-        minijinja::Value::from_serialize(serde_json::Value::Object(top))
+        minijinja::Value::from(minijinja::value::Serde(serde_json::Value::Object(top)))
     }
 }
 
@@ -135,6 +137,12 @@ fn value_to_string(value: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn placeholder_regex_literal_compiles() {
+        // Forces the `LazyLock`: a bad literal fails here, not at runtime.
+        LazyLock::force(&PLACEHOLDER_RE);
+    }
 
     #[test]
     fn closure_is_an_instruction_provider() {

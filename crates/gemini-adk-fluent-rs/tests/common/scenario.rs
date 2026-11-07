@@ -34,7 +34,10 @@
 //! to *say* something it should not is a different (and in some ways worse)
 //! finding than one that gets a tool to run, and the report keeps them apart.
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared test helpers: each test binary uses a subset"
+)]
 
 use std::sync::{Arc, Mutex};
 

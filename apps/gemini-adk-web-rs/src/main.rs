@@ -16,7 +16,6 @@ mod apps;
 mod bridge;
 mod span_layer;
 mod studio;
-mod ws_handler;
 
 use app::{AppRegistry, ServerMessage};
 
@@ -33,8 +32,10 @@ pub struct AppState {
 async fn main() {
     dotenvy::dotenv().ok();
 
-    // Initialize telemetry with WebSocketSpanLayer wired in
-    let (_telemetry_guard, span_tx) = init_telemetry().await;
+    // Logging and export from the environment, with the browser's span
+    // stream (WebSocketSpanLayer) wired in.
+    let (ws_layer, span_tx) = span_layer::WebSocketSpanLayer::new(256);
+    let _telemetry_guard = gemini_adk_server_rs::telemetry::init_telemetry(ws_layer).await;
 
     let mut registry = AppRegistry::new();
     apps::register_all(&mut registry);
@@ -76,68 +77,6 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-/// Logging, the browser's span stream, and, when the environment asks for
-/// it, trace and metric export (`TelemetryConfig::from_env`):
-/// `OTEL_EXPORTER_OTLP_ENDPOINT` with the `otel-otlp` feature, or
-/// `ADK_TELEMETRY=gcp` with `otel-gcp`.
-#[cfg_attr(
-    not(feature = "otel-gcp"),
-    allow(clippy::unused_async, reason = "Cloud Trace setup is async")
-)]
-async fn init_telemetry() -> (
-    gemini_genai_rs::telemetry::TelemetryGuard,
-    broadcast::Sender<ServerMessage>,
-) {
-    use tracing_subscriber::EnvFilter;
-    use tracing_subscriber::prelude::*;
-
-    // Create the WebSocketSpanLayer (bridges tracing spans → browser)
-    let (ws_layer, span_tx) = span_layer::WebSocketSpanLayer::new(256);
-    let config = gemini_genai_rs::telemetry::TelemetryConfig::from_env();
-    let filter = EnvFilter::try_new(&config.log_filter).unwrap_or_else(|_| EnvFilter::new("info"));
-    let registry = tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer())
-        .with(ws_layer);
-
-    #[cfg(any(feature = "otel-otlp", feature = "otel-gcp"))]
-    {
-        let exporters = if config.wants_gcp() {
-            #[cfg(feature = "otel-gcp")]
-            {
-                config.build_gcp().await
-            }
-            #[cfg(not(feature = "otel-gcp"))]
-            {
-                Err("ADK_TELEMETRY=gcp needs the otel-gcp feature".into())
-            }
-        } else if config.otel_traces || config.otel_metrics {
-            #[cfg(feature = "otel-otlp")]
-            {
-                config.build_otlp()
-            }
-            #[cfg(not(feature = "otel-otlp"))]
-            {
-                Err("OTEL_EXPORTER_OTLP_ENDPOINT needs the otel-otlp feature".into())
-            }
-        } else {
-            Ok(gemini_genai_rs::telemetry::Exporters::default())
-        };
-        match exporters {
-            Ok(exporters) => {
-                let subscriber = registry.with(exporters.layer());
-                tracing::subscriber::set_global_default(subscriber)
-                    .expect("Failed to set tracing subscriber");
-                return (exporters.guard, span_tx);
-            }
-            Err(e) => eprintln!("telemetry export disabled: {e}"),
-        }
-    }
-
-    tracing::subscriber::set_global_default(registry).expect("Failed to set tracing subscriber");
-    (Default::default(), span_tx)
-}
-
 /// Disable caching for static files during development.
 async fn no_cache_static(request: axum::http::Request<axum::body::Body>, next: Next) -> Response {
     let is_static = request.uri().path().starts_with("/static");
@@ -169,10 +108,7 @@ async fn cross_origin_isolation(
 }
 
 async fn favicon() -> impl IntoResponse {
-    (
-        [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F680;</text></svg>",
-    )
+    gemini_adk_server_rs::web_handlers::favicon("\u{1F680}")
 }
 
 async fn landing_page() -> impl IntoResponse {
@@ -188,7 +124,7 @@ async fn app_page(Path(name): Path<String>, State(state): State<AppState>) -> im
 }
 
 async fn list_apps(State(state): State<AppState>) -> Json<Vec<app::AppInfo>> {
-    Json(state.registry.list())
+    gemini_adk_server_rs::web_handlers::list_apps(&state.registry)
 }
 
 async fn ws_upgrade(
@@ -196,14 +132,10 @@ async fn ws_upgrade(
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    if let Some(app) = state.registry.get(&name) {
-        let span_rx = state.span_tx.subscribe();
-        ws.on_upgrade(move |socket| ws_handler::handle_ws(socket, app, span_rx))
-    } else {
-        // Return 404 — upgrade and immediately close
-        ws.on_upgrade(|mut socket| async move {
-            use futures::SinkExt as _;
-            let _ = socket.close().await;
-        })
-    }
+    gemini_adk_server_rs::web_handlers::upgrade_app_socket(
+        ws,
+        &state.registry,
+        name,
+        Some(state.span_tx.subscribe()),
+    )
 }

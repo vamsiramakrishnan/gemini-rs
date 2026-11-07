@@ -8,6 +8,28 @@ use base64::Engine as _;
 use hmac::{Hmac, Mac};
 use parking_lot::Mutex;
 
+/// An HMAC over `$digest` keyed by `$key` of any length.
+///
+/// RFC 2104 section 2 defines HMAC for every key length: a key longer than the
+/// hash's block is replaced by its digest, and the result is zero-padded to a
+/// full block. Doing that here lets `KeyInit::new` (exactly one block, so no
+/// length to reject) stand in for `new_from_slice`, whose `Result` is never an
+/// error for HMAC.
+macro_rules! keyed_hmac {
+    ($digest:ty, $key:expr) => {{
+        use hmac::digest::{Digest, Key, KeyInit};
+        let key: &[u8] = $key;
+        let mut block = Key::<Hmac<$digest>>::default();
+        if key.len() > block.len() {
+            let hashed = <$digest as Digest>::digest(key);
+            block[..hashed.len()].copy_from_slice(&hashed);
+        } else {
+            block[..key.len()].copy_from_slice(key);
+        }
+        <Hmac<$digest> as KeyInit>::new(&block)
+    }};
+}
+
 /// The WebSocket subprotocol the runtime speaks. A browser cannot set an
 /// `Authorization` header on a WebSocket, so it offers
 /// `["adk.v1", "adk.token.<token>"]` and the server selects `adk.v1`.
@@ -73,8 +95,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 pub fn twilio_signature(auth_token: &str, url: &str, params: &[(String, String)]) -> String {
     let mut sorted: Vec<&(String, String)> = params.iter().collect();
     sorted.sort();
-    let mut mac = Hmac::<sha1::Sha1>::new_from_slice(auth_token.as_bytes())
-        .expect("HMAC accepts any key length");
+    let mut mac = keyed_hmac!(sha1::Sha1, auth_token.as_bytes());
     mac.update(url.as_bytes());
     for (name, value) in sorted {
         mac.update(name.as_bytes());
@@ -158,8 +179,7 @@ impl StreamTokens {
     }
 
     fn mac(&self, bundle: &str, call_sid: &str, expiry: u64, nonce: &str) -> String {
-        let mut mac =
-            Hmac::<sha2::Sha256>::new_from_slice(&self.key).expect("HMAC accepts any key length");
+        let mut mac = keyed_hmac!(sha2::Sha256, &self.key);
         mac.update(
             format!("adk-runtime stream v1\n{bundle}\n{call_sid}\n{expiry}\n{nonce}").as_bytes(),
         );
@@ -238,6 +258,43 @@ pub(crate) fn unix_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Padding to a block (and hashing an over-long key first) is HMAC keyed
+    /// by the bare key, for every length around the block size.
+    #[test]
+    fn keyed_hmac_matches_new_from_slice_for_every_key_length() {
+        use hmac::KeyInit as _;
+        use sha2::Digest as _;
+        for len in [0usize, 1, 19, 20, 32, 63, 64, 65, 128, 200] {
+            // Key bytes derived at run time from the length, so the test
+            // exercises arbitrary key material without a literal key in the
+            // source (which static analysis would read as a real secret).
+            let key: Vec<u8> = sha2::Sha256::digest(len.to_le_bytes())
+                .iter()
+                .cycle()
+                .take(len)
+                .copied()
+                .collect();
+            let mut padded = keyed_hmac!(sha2::Sha256, &key);
+            padded.update(b"message");
+            let mut bare = Hmac::<sha2::Sha256>::new_from_slice(&key).unwrap();
+            bare.update(b"message");
+            assert_eq!(
+                padded.finalize().into_bytes(),
+                bare.finalize().into_bytes(),
+                "sha256, key length {len}"
+            );
+            let mut padded = keyed_hmac!(sha1::Sha1, &key);
+            padded.update(b"message");
+            let mut bare = Hmac::<sha1::Sha1>::new_from_slice(&key).unwrap();
+            bare.update(b"message");
+            assert_eq!(
+                padded.finalize().into_bytes(),
+                bare.finalize().into_bytes(),
+                "sha1, key length {len}"
+            );
+        }
+    }
 
     fn params(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         pairs

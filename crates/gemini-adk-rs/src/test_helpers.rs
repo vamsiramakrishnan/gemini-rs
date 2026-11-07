@@ -4,6 +4,25 @@ use async_trait::async_trait;
 use gemini_genai_rs::prelude::FunctionResponse;
 use gemini_genai_rs::session::{SessionError, SessionWriter};
 
+use crate::agent::Agent;
+use crate::context::InvocationContext;
+use crate::error::AgentError;
+
+/// Agent that completes immediately.
+pub(crate) struct NoopAgent {
+    pub(crate) name: String,
+}
+
+#[async_trait]
+impl Agent for NoopAgent {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    async fn run_live(&self, _ctx: &mut InvocationContext) -> Result<(), AgentError> {
+        Ok(())
+    }
+}
+
 /// Mock writer that accepts all commands without error.
 pub(crate) struct MockWriter;
 

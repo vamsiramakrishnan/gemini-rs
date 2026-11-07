@@ -237,16 +237,12 @@ impl LiveHandle {
             if processors.is_empty() {
                 data
             } else {
-                let mut frame: Vec<i16> = data
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|b| i16::from_le_bytes([b[0], b[1]]))
-                    .collect();
+                let mut frame: Vec<i16> =
+                    gemini_genai_rs::buffer::convert::pcm16_le_samples(&data).collect();
                 for processor in processors.iter_mut() {
                     processor.process_frame(&mut frame);
                 }
-                frame.iter().flat_map(|s| s.to_le_bytes()).collect()
+                gemini_genai_rs::buffer::convert::i16_to_pcm16_le(&frame).into()
             }
         };
         let (vad_events, sample_rate) = {

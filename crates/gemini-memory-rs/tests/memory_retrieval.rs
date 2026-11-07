@@ -15,8 +15,11 @@
 //! ranking regression fails in CI rather than waiting for someone with
 //! credentials to notice.
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use common::corpus::{self, PROBES, UNANSWERABLE, payload_statements, says, says_any};
 use common::{ScratchDir, file_backed_engine};
 

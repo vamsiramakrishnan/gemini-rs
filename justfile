@@ -59,15 +59,19 @@ fmt-check:
 warn-check:
     RUSTFLAGS="-D warnings" cargo check --workspace --all-targets --locked
 
-# Run clippy lints (includes -D warnings for all targets)
+# Run clippy lints (includes -D warnings for all targets, every feature on, as CI does)
 lint:
-    RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets --locked -- -D warnings
+    RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
 # ─── Testing ─────────────────────────────────────────────────
 
 # Run all workspace tests (with warnings as errors, matches CI)
 test:
     RUSTFLAGS="-D warnings" cargo test --workspace --locked
+
+# The suite with every feature on (CI's `test-all-features` job)
+test-all:
+    RUSTFLAGS="-D warnings" cargo test --workspace --all-features --locked
 
 # Run fast lib-only tests (no doc tests, no -D warnings)
 test-fast:
@@ -185,7 +189,7 @@ watch-check:
 # compiling without it noticing.
 #
 # Compile every test file, including those behind non-default features
-test-all-features:
+check-all-features:
     cargo check --workspace --all-features --all-targets --locked
 
 # `--no-default-features` is the end that catches a type which only exists
@@ -196,13 +200,30 @@ features:
     cargo check --workspace --no-default-features --locked
     cargo check --workspace --all-features --locked
 
-# No `--locked`: `--no-dev-deps` rewrites Cargo.toml while cargo-hack runs, so
-# the resolution changes and the lockfile has to move. The two are exclusive.
-#
-# Every feature on its own. Needs `cargo install cargo-hack`.
+# Every feature on its own and beside any one other (about 950 checks; CI
+# splits them over eight runners). Needs `cargo install cargo-hack`.
 feature-isolation:
     @command -v cargo-hack >/dev/null 2>&1 || { echo "cargo-hack is not installed. Run: cargo install cargo-hack"; exit 1; }
-    cargo hack check --each-feature --no-dev-deps -p gemini-genai-rs -p gemini-adk-rs -p gemini-adk-fluent-rs -p gemini-memory-rs
+    cargo hack check --workspace --feature-powerset --depth 2 --locked
+
+# The telemetry lane's atomics over every interleaving (CI's `loom` job)
+loom:
+    RUSTFLAGS="-D warnings --cfg gemini_adk_loom" cargo test -p gemini-adk-rs --lib --release loom_ --locked
+
+# The Live frame decoder under libFuzzer for a minute per target. Needs a
+# nightly toolchain and `cargo install cargo-fuzz`.
+fuzz seconds="60":
+    cd crates/gemini-genai-rs/fuzz && cargo +nightly fuzz run decode_server_message -- -max_total_time={{seconds}} -timeout=10
+    cd crates/gemini-genai-rs/fuzz && cargo +nightly fuzz run server_frame_structured -- -max_total_time={{seconds}} -timeout=10
+
+# The fast-lane benchmark, end to end through the public API
+bench-fast-lane:
+    cargo bench -p gemini-adk-fluent-rs --bench fast_lane
+
+# The fast-lane dispatch budget (p99 under one millisecond per audio frame),
+# asserted by the processor's own tests in a release build
+fast-lane-budget:
+    cargo test -p gemini-adk-rs --lib --release fast_lane_budget -- --ignored --test-threads=1
 
 # Licences and advisories. Needs `cargo install cargo-deny`.
 deny:
@@ -224,7 +245,7 @@ generated-projects:
 # slower than `just check` because CI is slower than `just check`.
 #
 # Every job GitHub Actions runs, in one command
-ci: fmt-check lint doc-check test test-all-features features feature-isolation deny conversations
+ci: fmt-check lint doc-check test test-all check-all-features features feature-isolation loom deny conversations
     @echo ""
     @echo "✓ Every job GitHub Actions runs has passed locally."
 

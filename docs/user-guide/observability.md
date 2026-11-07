@@ -30,10 +30,32 @@ Configuration comes from the environment through
 | Variable | Effect | Feature |
 |---|---|---|
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | export traces and metrics over OTLP/gRPC to that collector | `otel-otlp` |
-| `ADK_TELEMETRY=gcp` | export to Cloud Trace and Cloud Monitoring (project from `GOOGLE_CLOUD_PROJECT`, else detected) | `otel-gcp` |
+| `ADK_TELEMETRY=gcp` | export spans to Cloud Trace and metrics to Cloud Monitoring over OTLP (project from `GOOGLE_CLOUD_PROJECT`, else detected; see below) | `otel-gcp` |
+| `OTEL_RESOURCE_ATTRIBUTES` | extra resource attributes; with `ADK_TELEMETRY=gcp`, `cloud.region=<region>` sets where metrics are stored when the metadata server cannot say | |
 | `OTEL_SERVICE_NAME` | the service name (default `gemini-live`) | |
 | `ADK_METRICS_ADDR` | serve Prometheus metrics at this address, e.g. `0.0.0.0:9464` | `metrics` |
 | `RUST_LOG` | log filter (default `info`) | |
+
+### Google Cloud metrics
+
+With `ADK_TELEMETRY=gcp`, metrics go over OTLP to Google's Telemetry API
+(`telemetry.googleapis.com`), authenticated with Application Default
+Credentials. Cloud Monitoring stores them as `prometheus.googleapis.com/...`
+metrics on the `prometheus_target` resource, which needs three things:
+
+- **A project**: `GOOGLE_CLOUD_PROJECT`, else the one the credentials or the
+  metadata server name.
+- **A region or zone** (Cloud Monitoring rejects `global`): `cloud.region`
+  or `location` in `OTEL_RESOURCE_ATTRIBUTES`, else the region (Cloud Run) or
+  zone (GCE, GKE) the metadata server reports. Outside Google Cloud, set it
+  to the region nearest the deployment. Without one, metric export is not
+  set up and the error says what to set.
+- **An instance**: `service.instance.id` from `OTEL_RESOURCE_ATTRIBUTES`
+  (or a pod name or host id), else a fresh UUID per process.
+
+The service account needs `roles/telemetry.writer`. The Telemetry API takes
+at most 200 data points per request, so an application with many attribute
+combinations on one meter can see rejected exports.
 
 An application that owns its subscriber can call `TelemetryConfig::init()`
 (or `init_gcp()`). One that builds its own subscriber, for example to add a

@@ -199,21 +199,9 @@ mod tests {
     fn build_prompt_includes_rubric() {
         use crate::evaluation::eval_case::InvocationTurn;
 
-        struct DummyLlm;
-        #[async_trait]
-        impl BaseLlm for DummyLlm {
-            fn model_id(&self) -> &str {
-                "dummy"
-            }
-            async fn generate(
-                &self,
-                _req: crate::llm::LlmRequest,
-            ) -> Result<crate::llm::LlmResponse, crate::llm::LlmError> {
-                unreachable!()
-            }
-        }
-
-        let judge = LlmAsJudge::new(Arc::new(DummyLlm), LlmAsJudgeConfig::default());
+        // Building the prompt must not call the model.
+        let llm = crate::llm::MockLlm::script([]);
+        let judge = LlmAsJudge::new(Arc::new(llm.clone()), LlmAsJudgeConfig::default());
         let inv = Invocation {
             id: "test".into(),
             turns: vec![InvocationTurn {
@@ -227,5 +215,6 @@ mod tests {
         let prompt = judge.build_prompt(&inv, None);
         assert!(prompt.contains("Rubric:"));
         assert!(prompt.contains("[user]: Hello"));
+        assert_eq!(llm.call_count(), 0);
     }
 }

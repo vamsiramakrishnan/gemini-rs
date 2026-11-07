@@ -663,7 +663,10 @@ impl schemars::JsonSchema for Edge {
     fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         #[derive(schemars::JsonSchema)]
         #[serde(untagged)]
-        #[allow(dead_code)]
+        #[allow(
+            dead_code,
+            reason = "variants exist only to derive the JSON schema; never constructed"
+        )]
         enum EdgeSchema {
             Simple(String),
             Conditional { step: String, when: Option<Pred> },
@@ -2295,13 +2298,21 @@ pub struct FlowBuilder {
     constraints: Vec<Constraint>,
     confirm_tools: Vec<String>,
     ambient: Vec<String>,
+    /// Builder misuse found while chaining, reported by [`build`](Self::build).
+    issues: Vec<String>,
 }
 
 impl FlowBuilder {
-    fn current(&mut self) -> &mut Step {
-        self.steps
-            .last_mut()
-            .expect("call `.step(id)` before configuring a step")
+    /// Apply `configure` to the step most recently declared with
+    /// [`step`](Self::step). With no step declared there is nothing to
+    /// configure: the misuse is recorded and [`build`](Self::build) reports it.
+    fn configure_step(&mut self, method: &str, configure: impl FnOnce(&mut Step)) {
+        match self.steps.last_mut() {
+            Some(step) => configure(step),
+            None => self.issues.push(format!(
+                "`.{method}(..)` was called before `.step(id)`: there is no step to configure"
+            )),
+        }
     }
 
     /// Declare a new step.
@@ -2322,35 +2333,35 @@ impl FlowBuilder {
     }
     /// Add a dependency (call multiple times for multiple deps).
     pub fn after(mut self, dep: impl Into<String>) -> Self {
-        self.current().after.push(Edge::to(dep));
+        self.configure_step("after", |step| step.after.push(Edge::to(dep)));
         self
     }
     /// Add a **conditional** dependency: satisfied only while `when` holds.
     /// Conditional edges out of one source are how a flow branches; pair with
     /// [`join_any`](Self::join_any) on the merge step.
     pub fn after_when(mut self, dep: impl Into<String>, when: Guard) -> Self {
-        self.current().after.push(Edge::when(dep, when));
+        self.configure_step("after_when", |step| step.after.push(Edge::when(dep, when)));
         self
     }
     /// Any one satisfied edge makes this step eligible (the merge node after
     /// a branch). Default is `all` — a synchronizing join.
     pub fn join_any(mut self) -> Self {
-        self.current().join = Join::Any;
+        self.configure_step("join_any", |step| step.join = Join::Any);
         self
     }
     /// Extra eligibility guard beyond dependencies.
     pub fn gate(mut self, g: Guard) -> Self {
-        self.current().gate = Some(g);
+        self.configure_step("gate", |step| step.gate = Some(g));
         self
     }
     /// Completion condition.
     pub fn done(mut self, g: Guard) -> Self {
-        self.current().done = Some(g);
+        self.configure_step("done", |step| step.done = Some(g));
         self
     }
     /// Instruction imposed while active.
     pub fn posture(mut self, text: impl Into<String>) -> Self {
-        self.current().posture = Some(text.into());
+        self.configure_step("posture", |step| step.posture = Some(text.into()));
         self
     }
     /// A grounding template projected while active — a curated, `State`-
@@ -2358,7 +2369,7 @@ impl FlowBuilder {
     /// interpolates a value; `{key?yes:no}` picks by truthiness. See
     /// [`render_ground`].
     pub fn ground(mut self, template: impl Into<String>) -> Self {
-        self.current().ground = Some(template.into());
+        self.configure_step("ground", |step| step.ground = Some(template.into()));
         self
     }
     /// Tools available while active (whitelist).
@@ -2367,9 +2378,9 @@ impl FlowBuilder {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.current()
-            .allow
-            .extend(tools.into_iter().map(Into::into));
+        self.configure_step("allow", |step| {
+            step.allow.extend(tools.into_iter().map(Into::into));
+        });
         self
     }
     /// Tools forbidden while active.
@@ -2378,14 +2389,14 @@ impl FlowBuilder {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.current()
-            .deny
-            .extend(tools.into_iter().map(Into::into));
+        self.configure_step("deny", |step| {
+            step.deny.extend(tools.into_iter().map(Into::into));
+        });
         self
     }
     /// Mark the current step terminal.
     pub fn terminal(mut self) -> Self {
-        self.current().terminal = true;
+        self.configure_step("terminal", |step| step.terminal = true);
         self
     }
 
@@ -2473,14 +2484,22 @@ impl FlowBuilder {
     }
 
     /// Finalize and validate the flow.
+    ///
+    /// Fails if a step-level verb (`after`, `gate`, `allow`, ...) was chained
+    /// before the first [`step`](Self::step), as well as on any validation
+    /// issue; every problem found is reported.
     pub fn build(self) -> Result<Flow, ConfigError> {
+        let mut issues = self.issues;
         let flow = Flow {
             steps: self.steps,
             constraints: self.constraints,
             confirm_tools: self.confirm_tools,
             ambient: self.ambient,
         };
-        flow.validate()?;
+        if let Err(err) = flow.validate() {
+            issues.extend(err.issues);
+        }
+        ConfigError::from_issues(issues)?;
         Ok(flow)
     }
 }
@@ -2523,6 +2542,24 @@ impl ResetBuilder {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn step_verbs_before_the_first_step_fail_at_build() {
+        let err = Flow::new()
+            .after("greet")
+            .terminal()
+            .step("greet")
+            .build()
+            .expect_err("verbs chained before `.step(id)` have no step to configure");
+        assert!(
+            err.issues.iter().any(|i| i.contains("`.after(..)`")),
+            "{err:?}"
+        );
+        assert!(
+            err.issues.iter().any(|i| i.contains("`.terminal(..)`")),
+            "{err:?}"
+        );
+    }
 
     /// A refusal must say what would succeed, not only what failed.
     ///

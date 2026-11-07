@@ -361,7 +361,9 @@ impl TaskRuntime {
         {
             operation.snapshot.status = OperationStatus::Declined;
             operation.snapshot.error = Some(reason.into());
-            self.tasks.get_mut(id).expect("task owns proposal").pending = None;
+            if let Some(task) = self.tasks.get_mut(id) {
+                task.pending = None;
+            }
         }
     }
     fn invalidate_work(&mut self, id: &TaskId) {
@@ -398,7 +400,7 @@ impl TaskRuntime {
         state.set_clock(self.clock.clone());
         let services = ServiceState::create(&task.skill.services, &state).map_err(err)?;
         self.invalidate_work(id);
-        let task = self.tasks.get_mut(id).expect("validated task");
+        let task = self.tasks.get_mut(id).ok_or_else(|| unknown_task(id))?;
         task.revision += 1;
         task.state = state;
         task.flow = flow;
@@ -415,7 +417,7 @@ impl TaskRuntime {
         }
         self.require_live(id)?;
         self.invalidate_work(id);
-        let task = self.tasks.get_mut(id).expect("validated task");
+        let task = self.tasks.get_mut(id).ok_or_else(|| unknown_task(id))?;
         task.revision += 1;
         task.status = TaskStatus::Cancelled;
         task.deferred.clear();
@@ -451,7 +453,7 @@ impl TaskRuntime {
             None => output,
         };
         (task.skill.validate_output)(&output).map_err(err)?;
-        let task = self.tasks.get_mut(id).expect("validated task");
+        let task = self.tasks.get_mut(id).ok_or_else(|| unknown_task(id))?;
         task.output = Some(output);
         task.status = TaskStatus::Completed;
         self.resume_parent(id);
@@ -636,7 +638,10 @@ impl TaskRuntime {
                 receipt_observed: false,
             },
         );
-        self.tasks.get_mut(id).expect("validated task").pending = Some(operation_id);
+        self.tasks
+            .get_mut(id)
+            .ok_or_else(|| unknown_task(id))?
+            .pending = Some(operation_id);
         Ok(invocation)
     }
     fn decide(
@@ -660,12 +665,15 @@ impl TaskRuntime {
             return Err(err("approval owner is no longer current"));
         }
         if !approve {
-            let operation = self.operations.get_mut(id).expect("validated proposal");
+            let operation = self
+                .operations
+                .get_mut(id)
+                .ok_or_else(|| unknown_operation(id))?;
             operation.snapshot.status = OperationStatus::Declined;
             operation.snapshot.error = Some("user declined the operation".into());
             self.tasks
                 .get_mut(&owner.task)
-                .expect("validated task")
+                .ok_or_else(|| unknown_task(&owner.task))?
                 .pending = None;
             return Ok(None);
         }
@@ -689,7 +697,10 @@ impl TaskRuntime {
             None,
             self.scope.clone(),
         )?;
-        let operation = self.operations.get_mut(id).expect("validated proposal");
+        let operation = self
+            .operations
+            .get_mut(id)
+            .ok_or_else(|| unknown_operation(id))?;
         operation.snapshot.status = OperationStatus::Running;
         operation.baseline = independent_state(&invocation.state);
         Ok(Some(invocation))
@@ -774,7 +785,7 @@ impl TaskRuntime {
         };
         self.next_service += 1;
         self.service_effects
-            .extend(settle_task_services(task, service_before, None, service_owner).0);
+            .extend(settle_task_services(task, service_before, None, service_owner, Vec::new()).0);
         if let Some(flow) = &mut task.flow {
             if result.is_ok() && !already_applied {
                 let _ = task.state.set(crate::flow::TOOL_RESULT_KEY, serde_json::json!({"tool": operation.snapshot.tool, "id": owner.operation.0, "ok": true}));
@@ -822,7 +833,7 @@ impl TaskRuntime {
         let task = self
             .tasks
             .get(&owner.task)
-            .expect("operation retains its owner");
+            .ok_or_else(|| unknown_task(&owner.task))?;
         let current = task.revision == owner.revision
             && task.pending.as_ref() == Some(id)
             && matches!(task.status, TaskStatus::Running | TaskStatus::Suspended);
@@ -849,7 +860,10 @@ impl TaskRuntime {
             ReconciledOutcome::Failed { .. } => Ok(()),
         };
         let succeeded = matches!(outcome, ReconciledOutcome::Succeeded { .. });
-        let operation = self.operations.get_mut(id).expect("validated operation");
+        let operation = self
+            .operations
+            .get_mut(id)
+            .ok_or_else(|| unknown_operation(id))?;
         match outcome {
             ReconciledOutcome::Succeeded { result } => {
                 operation.snapshot.status = OperationStatus::Succeeded;
@@ -867,7 +881,10 @@ impl TaskRuntime {
             }
         }
         if current {
-            let task = self.tasks.get_mut(&owner.task).expect("validated task");
+            let task = self
+                .tasks
+                .get_mut(&owner.task)
+                .ok_or_else(|| unknown_task(&owner.task))?;
             task.pending = None;
             if application.is_ok() {
                 let before = task.state.to_hashmap();
@@ -881,7 +898,7 @@ impl TaskRuntime {
                 };
                 self.next_service += 1;
                 self.service_effects
-                    .extend(settle_task_services(task, before, None, service_owner).0);
+                    .extend(settle_task_services(task, before, None, service_owner, Vec::new()).0);
                 if let Some(flow) = &mut task.flow {
                     flow.observe_tool(&tool, succeeded, &task.state);
                 }
@@ -1238,8 +1255,11 @@ impl TaskRuntime {
             }
             return Ok(());
         }
-        let task = self.tasks.get_mut(id).expect("validated task");
-        let services = task.services.as_mut().expect("services checked");
+        let task = self.tasks.get_mut(id).ok_or_else(|| unknown_task(id))?;
+        let services = task
+            .services
+            .as_mut()
+            .ok_or_else(|| err(format!("task '{}' has no services", id.0)))?;
         if services.queue.len() >= 128 {
             return Err(err("task service observation queue is full"));
         }
@@ -1282,14 +1302,9 @@ impl TaskRuntime {
         let Some(services) = &mut task.services else {
             return false;
         };
-        if !services
-            .pending
-            .as_ref()
-            .is_some_and(|pending| pending.owner == owner)
-        {
+        let Some(pending) = services.pending.take_if(|pending| pending.owner == owner) else {
             return false;
-        }
-        let pending = services.pending.take().expect("matched service ticket");
+        };
         services.advance_clock(&task.state, false);
         let mut errors = Vec::new();
         match result {
@@ -1358,15 +1373,13 @@ impl TaskRuntime {
             }
             ServiceResult::Memory(Err(error)) | ServiceResult::Failed(error) => errors.push(error),
         }
-        let (mut effects, changed) =
-            settle_task_services(task, pending.before, Some(&pending.event), owner.clone());
-        for error in errors {
-            effects.extend(record_service_effect(
-                task,
-                owner.clone(),
-                TaskEffect::Error(error),
-            ));
-        }
+        let (effects, changed) = settle_task_services(
+            task,
+            pending.before,
+            Some(&pending.event),
+            owner.clone(),
+            errors,
+        );
         self.service_effects.extend(effects);
         if changed {
             self.invalidate_approval(
@@ -1379,7 +1392,7 @@ impl TaskRuntime {
     }
     fn drive_services_for(&mut self, id: &TaskId) {
         loop {
-            let Some(task) = self.tasks.get(id) else {
+            let Some(task) = self.tasks.get_mut(id) else {
                 return;
             };
             if !matches!(task.status, TaskStatus::Running | TaskStatus::Suspended)
@@ -1387,15 +1400,15 @@ impl TaskRuntime {
             {
                 return;
             }
-            let Some(services) = &task.services else {
+            let Some(services) = task.services.as_mut() else {
                 return;
             };
-            if services.pending.is_some() || services.queue.is_empty() {
+            if services.pending.is_some() {
                 return;
             }
-            let task = self.tasks.get_mut(id).expect("task checked");
-            let services = task.services.as_mut().expect("services checked");
-            let event = services.queue.pop_front().expect("queue checked");
+            let Some(event) = services.queue.pop_front() else {
+                return;
+            };
             let owner = TaskOwner {
                 task: id.clone(),
                 revision: task.revision,
@@ -1412,7 +1425,8 @@ impl TaskRuntime {
                 self.ready_services.push(work);
                 return;
             }
-            let (effects, changed) = settle_task_services(task, before, Some(&event), owner);
+            let (effects, changed) =
+                settle_task_services(task, before, Some(&event), owner, Vec::new());
             self.service_effects.extend(effects);
             if changed {
                 self.invalidate_approval(id, "approval invalidated by accepted service state");
@@ -1446,11 +1460,16 @@ impl TaskRuntime {
     }
 }
 
+/// Settle the task's services after `event` (or a state change with none),
+/// recording the effects they produced followed by `errors` as
+/// [`TaskEffect::Error`]s. Returns the accepted effects and whether the
+/// settled state differs from `before`.
 fn settle_task_services(
     task: &mut Task,
     before: HashMap<String, Value>,
     event: Option<&ServiceEvent>,
     owner: TaskOwner,
+    errors: Vec<String>,
 ) -> (Vec<AcceptedTaskEffect>, bool) {
     let Some(services) = &mut task.services else {
         return (Vec::new(), false);
@@ -1487,17 +1506,17 @@ fn settle_task_services(
     (
         effects
             .into_iter()
-            .flat_map(|effect| record_service_effect(task, owner.clone(), effect))
+            .chain(errors.into_iter().map(TaskEffect::Error))
+            .flat_map(|effect| record_service_effect(services, owner.clone(), effect))
             .collect(),
         changed,
     )
 }
 fn record_service_effect(
-    task: &mut Task,
+    services: &mut ServiceState,
     owner: TaskOwner,
     effect: TaskEffect,
 ) -> Vec<AcceptedTaskEffect> {
-    let services = task.services.as_mut().expect("task has services");
     match &effect {
         TaskEffect::Remember(note) => {
             if services.plan.memory.is_some() {
@@ -1506,7 +1525,7 @@ fn record_service_effect(
                     .push_back(ServiceEvent::Remember { note: note.clone() });
             } else {
                 return record_service_effect(
-                    task,
+                    services,
                     owner,
                     TaskEffect::Error("remember effect requires task memory".into()),
                 );
@@ -1533,6 +1552,12 @@ fn record_service_effect(
 
 fn err(message: impl Into<String>) -> TaskError {
     TaskError(message.into())
+}
+fn unknown_task(id: &TaskId) -> TaskError {
+    err(format!("unknown task '{}'", id.0))
+}
+fn unknown_operation(id: &OperationId) -> TaskError {
+    err(format!("unknown operation '{}'", id.0))
 }
 fn independent_state(source: &State) -> State {
     let state = State::new();

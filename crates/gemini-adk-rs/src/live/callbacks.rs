@@ -112,7 +112,10 @@ pub struct EventCallbacks {
     /// Return `None` to use auto-dispatch (ToolDispatcher), `Some` to override.
     /// Receives State for natural state promotion from tool results.
     pub on_tool_call: Option<ToolCallCallback>,
-    /// Called when server cancels pending tool calls.
+    /// Called when pending tool calls are cancelled: by the server (a
+    /// `toolCallCancellation` frame) or locally, when a user barge-in
+    /// interrupted an inline tool that was still running. No response is
+    /// sent for a cancelled call.
     pub on_tool_cancelled: Option<AsyncCallbackWith<Vec<String>>>,
     /// Called when the model completes its turn.
     pub on_turn_complete: Option<AsyncCallback>,

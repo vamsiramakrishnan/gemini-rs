@@ -176,8 +176,9 @@ impl TranscriptBuffer {
         if self.turns.len() >= self.max_turns {
             self.turns.pop_front();
         }
+        let completed = turn.clone();
         self.turns.push_back(turn);
-        Some(self.turns.back().unwrap().clone())
+        Some(completed)
     }
 
     /// Get the last `n` completed turns as a contiguous slice.

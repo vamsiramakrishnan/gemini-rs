@@ -272,7 +272,10 @@ mod tests {
             .model(ModelId::from_static("models/gemini-2.0-flash-live-001"));
         let url = client.rest_url(ServiceEndpoint::GenerateContent);
         assert!(url.contains(":generateContent"));
-        assert!(!url.contains("my-key"), "the key rides in a header: {url}");
+        // The key rides in a header, never in the URL. The message is a
+        // constant: anything derived from the URL here reads, to a taint
+        // analysis, as logging the credential the client was built with.
+        assert!(!url.contains("my-key"), "the key must not be in the URL");
     }
 
     #[test]

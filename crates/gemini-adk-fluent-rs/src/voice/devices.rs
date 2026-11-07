@@ -1,9 +1,10 @@
 //! The `cpal` device adapter behind [`Talk`] — default microphone in, default
 //! speakers out, barge-in flush, drain signaling. Feature `voice-io`.
 
+use parking_lot::Mutex;
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -89,7 +90,7 @@ impl Talk for LiveHandle {
             let was_playing = was_playing.clone();
             tokio::spawn(async move {
                 while let Some(playback) = spk_rx.recv().await {
-                    let mut ring = ring.lock().expect("playback ring poisoned");
+                    let mut ring = ring.lock();
                     match playback {
                         Playback::Chunk(samples) => {
                             ring.extend(samples);
@@ -119,7 +120,7 @@ impl Talk for LiveHandle {
             let mut interval = tokio::time::interval(Duration::from_millis(50));
             loop {
                 interval.tick().await;
-                let empty = ring.lock().expect("playback ring poisoned").is_empty();
+                let empty = ring.lock().is_empty();
                 if empty && was_playing.swap(false, Ordering::Relaxed) {
                     let _ = drain_handle.playback_drained().await;
                 }
@@ -194,7 +195,7 @@ fn build_output_stream(
             .build_output_stream(
                 stream_config,
                 move |data: &mut [i16], _| {
-                    let mut ring = ring.lock().expect("playback ring poisoned");
+                    let mut ring = ring.lock();
                     for frame in data.chunks_mut(channels) {
                         let sample = ring.pop_front().unwrap_or(0);
                         frame.fill(sample);
@@ -208,7 +209,7 @@ fn build_output_stream(
             .build_output_stream(
                 stream_config,
                 move |data: &mut [f32], _| {
-                    let mut ring = ring.lock().expect("playback ring poisoned");
+                    let mut ring = ring.lock();
                     for frame in data.chunks_mut(channels) {
                         let sample = ring.pop_front().unwrap_or(0) as f32 / i16::MAX as f32;
                         frame.fill(sample);

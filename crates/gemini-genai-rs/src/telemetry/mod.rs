@@ -5,11 +5,17 @@
 //!   via `TelemetryConfig::init` (the `tracing` facade itself is always available)
 //! - `metrics`: Prometheus metric definitions and export
 //! - `otel-otlp`: OTLP trace and metric export to any OTel collector
-//! - `otel-gcp`: Google Cloud-native trace and metric export (Cloud Trace + Cloud Monitoring)
+//! - `otel-gcp`: Google Cloud export: spans to Cloud Trace, metrics to Cloud
+//!   Monitoring over OTLP (the Telemetry API)
 
+#[cfg(feature = "otel-gcp")]
+mod gcp;
 pub mod logging;
 pub mod metrics;
 pub mod spans;
+
+#[cfg(feature = "otel-gcp")]
+pub use gcp::GcpExportError;
 
 /// The Prometheus exporter crate, for [`TelemetryConfig::prometheus_recorder`]'s handle.
 #[cfg(feature = "metrics")]
@@ -70,6 +76,9 @@ pub struct TelemetryGuard {
     _tracer_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
     #[cfg(feature = "otel-base")]
     _meter_provider: Option<opentelemetry_sdk::metrics::SdkMeterProvider>,
+    /// Keeps the metric exporter's Google Cloud credentials current.
+    #[cfg(feature = "otel-gcp")]
+    _gcp_auth: Option<gcp::AuthRefresh>,
     #[cfg(not(feature = "otel-base"))]
     _private: (),
 }
@@ -251,13 +260,20 @@ impl TelemetryConfig {
         Ok(guard)
     }
 
-    /// Initialize telemetry with Google Cloud-native exporters (Cloud Trace + Cloud Monitoring).
+    /// Initialize telemetry with Google Cloud exporters (Cloud Trace + Cloud Monitoring).
     ///
-    /// This is the GCP counterpart to `init()`. It uses `opentelemetry-gcloud-trace` for
-    /// span export and `opentelemetry_gcloud_monitoring_exporter` for metrics.
+    /// This is the GCP counterpart to `init()`. Spans go to Cloud Trace through
+    /// `opentelemetry-gcloud-trace`; metrics go to Cloud Monitoring over OTLP
+    /// (the Telemetry API, `telemetry.googleapis.com`), authenticated with
+    /// Application Default Credentials. They land as
+    /// `prometheus.googleapis.com/...` metrics on the `prometheus_target`
+    /// resource, which needs a region: set `cloud.region` (or `location`) in
+    /// `OTEL_RESOURCE_ATTRIBUTES`, or run where the metadata server reports one
+    /// (Cloud Run, GCE, GKE). Without one, metric setup fails with
+    /// [`GcpExportError::NoLocation`]. The caller needs `roles/telemetry.writer`.
     ///
     /// If `otel_gcp_project` is set, it is used as the GCP project ID. Otherwise the
-    /// project ID is auto-detected from ADC or the environment.
+    /// project ID is auto-detected from the environment, ADC or the metadata server.
     ///
     /// The returned `TelemetryGuard` must be held alive for the duration of the
     /// application. Dropping it triggers a flush and shutdown of all exporters.
@@ -276,7 +292,8 @@ impl TelemetryConfig {
     }
 
     /// Build the Cloud Trace and Cloud Monitoring exporters this config asks
-    /// for, without installing a subscriber. The meter provider, when
+    /// for, without installing a subscriber (see [`init_gcp`](Self::init_gcp)
+    /// for what metric export needs). The meter provider, when
     /// metrics are on, is installed globally.
     #[cfg(feature = "otel-gcp")]
     pub async fn build_gcp(&self) -> Result<Exporters, Box<dyn std::error::Error + Send + Sync>> {
@@ -304,32 +321,36 @@ impl TelemetryConfig {
             None
         };
 
-        // --- GCP Cloud Monitoring metrics ---
+        // --- Cloud Monitoring metrics, over OTLP to the Telemetry API ---
         if self.otel_metrics {
-            use opentelemetry_gcloud_monitoring_exporter::{
-                GCPMetricsExporter, GCPMetricsExporterConfig,
+            use opentelemetry_otlp::{WithExportConfig as _, WithTonicConfig as _};
+            use opentelemetry_sdk::resource::EnvResourceDetector;
+
+            let env = opentelemetry_sdk::Resource::builder_empty()
+                .with_detectors(&[Box::new(EnvResourceDetector::new())])
+                .build();
+            let project = gcp::project(self.otel_gcp_project.as_deref()).await?;
+            let location = if gcp::has_location(&env) {
+                None
+            } else {
+                gcp::metadata_location().await
             };
-
-            let mut metrics_cfg = GCPMetricsExporterConfig {
-                prefix: format!("custom.googleapis.com/{}", self.otel_service_name),
-                ..Default::default()
-            };
-            if let Some(ref project_id) = self.otel_gcp_project {
-                metrics_cfg.project_id = Some(project_id.clone());
-            }
-            let metrics_exporter = GCPMetricsExporter::init(metrics_cfg).await?;
-
-            use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
-            let reader =
-                PeriodicReader::builder(metrics_exporter, opentelemetry_sdk::runtime::Tokio)
-                    .build();
-
+            let resource =
+                gcp::metrics_resource(&env, &self.otel_service_name, &project, location)?;
+            let (interceptor, refresh) = gcp::auth().await?;
+            let exporter = opentelemetry_otlp::MetricExporter::builder()
+                .with_tonic()
+                .with_channel(gcp::channel().await?)
+                .with_interceptor(interceptor)
+                .with_endpoint(gcp::TELEMETRY_ENDPOINT)
+                .build()?;
             let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
-                .with_resource(self.otel_resource())
-                .with_reader(reader)
+                .with_resource(resource)
+                .with_periodic_exporter(exporter)
                 .build();
             opentelemetry::global::set_meter_provider(meter_provider.clone());
             guard._meter_provider = Some(meter_provider);
+            guard._gcp_auth = Some(refresh);
         }
 
         Ok(Exporters {
@@ -343,7 +364,10 @@ impl TelemetryConfig {
     /// Used when `tracing-subscriber` is on but neither `otel-otlp` nor `otel-gcp`
     /// provides a tracer, or when called from `init()` without OTLP.
     #[cfg(feature = "tracing-subscriber")]
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "only called when the `otel-otlp` feature is off; the tracer variant is used otherwise"
+    )]
     fn init_tracing_subscriber(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.init_tracing_subscriber_with_tracer(None)
     }

@@ -169,9 +169,10 @@ enum Command {
         /// Google Cloud project ID.
         #[arg(long)]
         project: Option<String>,
-        /// Google Cloud region.
-        #[arg(long, default_value = "us-central1")]
-        region: String,
+        /// Google Cloud location (the SDK's `GOOGLE_CLOUD_LOCATION`). `--region`
+        /// is accepted as an alias.
+        #[arg(long, alias = "region", default_value = "us-central1")]
+        location: String,
         /// Cloud Run service name, and the image name when building.
         #[arg(long, default_value = "adk-runtime")]
         service_name: String,
@@ -187,12 +188,16 @@ enum Command {
         /// The gemini-rs checkout that holds deploy/Dockerfile.
         #[arg(long, default_value = ".")]
         source: String,
-        /// Secret Manager secret holding ADK_RUNTIME_TOKENS.
-        #[arg(long, default_value = "adk-runtime-tokens")]
-        tokens_secret: String,
-        /// Secret Manager secret holding TWILIO_AUTH_TOKEN (enables phone calls).
-        #[arg(long)]
-        twilio_secret: Option<String>,
+        /// Name of the Secret Manager secret holding ADK_RUNTIME_TOKENS.
+        #[arg(
+            long = "tokens-secret",
+            value_name = "SECRET_NAME",
+            default_value = "adk-runtime-tokens"
+        )]
+        runtime_vault_entry: String,
+        /// Name of the Secret Manager secret holding TWILIO_AUTH_TOKEN (enables phone calls).
+        #[arg(long = "twilio-secret", value_name = "SECRET_NAME")]
+        phone_vault_entry: Option<String>,
         /// Service account to run as; default adk-runtime@PROJECT.iam.gserviceaccount.com.
         #[arg(long)]
         service_account: Option<String>,
@@ -643,14 +648,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Deploy {
             target,
             project,
-            region,
+            location,
             service_name,
             bundles,
             serve,
             image,
             source,
-            tokens_secret,
-            twilio_secret,
+            runtime_vault_entry,
+            phone_vault_entry,
             service_account,
             max_sessions,
             min_instances,
@@ -662,14 +667,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 DeployTarget::AgentEngine => commands::deploy::Target::AgentEngine,
             },
             project,
-            region,
+            location,
             service_name,
             bundles: bundles.or_else(|| std::env::var("ADK_BUNDLES").ok()),
             serve,
             image,
             source,
-            tokens_secret,
-            twilio_secret,
+            runtime_vault_entry,
+            phone_vault_entry,
             service_account,
             max_sessions,
             min_instances,

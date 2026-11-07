@@ -850,8 +850,7 @@ impl FlowStack {
         // A correction can come while a digression drives; its flag stays
         // raised until the main flow advances and sees it.
         self.detect_corrections(state);
-        if self.active_is_closing() {
-            let closed = self.active.pop().expect("checked above");
+        if let Some(closed) = self.active.pop_if(|a| a.monitor.is_complete()) {
             self.apply_resume(closed.name, closed.resume, state);
             if self.terminated.is_some() {
                 return;

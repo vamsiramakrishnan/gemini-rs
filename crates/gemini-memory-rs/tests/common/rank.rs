@@ -9,7 +9,10 @@
 //! Everything here mirrors what `LocalMemoryRetriever` does on the real path,
 //! including using the crate's own [`reciprocal_rank_fusion`].
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared test helpers: each test binary uses a subset"
+)]
 
 use gemini_memory_rs::bm25::{MemoryIndex, MemoryOrigin, Query, SearchExplanation, SearchHit};
 use gemini_memory_rs::core::{MemoryId, MemoryKind};

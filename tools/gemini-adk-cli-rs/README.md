@@ -235,7 +235,7 @@ adk deploy gke --project my-gcp-project
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--project` | required | GCP project ID |
-| `--region` | `us-central1` | GCP region |
+| `--location` | `us-central1` | Google Cloud location (`--region` is an alias) |
 | `--bundles` | `$ADK_BUNDLES` | Bundle store, `gs://bucket/prefix` (Cloud Run) |
 | `--serve` | required (Cloud Run) | Bundles to serve, e.g. `booking:prod` |
 | `--service-name` | `adk-runtime` | Service and image name |

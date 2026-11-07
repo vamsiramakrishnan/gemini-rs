@@ -39,12 +39,11 @@ pub(crate) fn voice_runtime_message(handle: &LiveHandle) -> ServerMessage {
 /// Bridge between a demo app's WebSocket sender and a Live session builder.
 ///
 /// Call `bridge.wire_live(builder)` to attach all standard callbacks,
-/// then `bridge.recv_loop(handle, rx)` to run the browser->Gemini forwarding loop.
+/// then `bridge.run(...)` to drive the full session.
 pub struct SessionBridge {
     tx: WsSender,
 }
 
-#[allow(dead_code)]
 impl SessionBridge {
     pub fn new(tx: WsSender) -> Self {
         Self { tx }
@@ -221,117 +220,6 @@ impl SessionBridge {
                 }
             }
         })
-    }
-
-    /// Run the browser->Gemini forwarding loop.
-    ///
-    /// Handles Audio, Text, and Stop messages from the browser.
-    /// Also spawns a periodic telemetry sender that emits `Telemetry`
-    /// and `TurnMetrics` messages automatically.
-    /// Returns when the client sends Stop or disconnects.
-    pub async fn recv_loop(
-        &self,
-        handle: &LiveHandle,
-        rx: &mut mpsc::UnboundedReceiver<crate::app::ClientMessage>,
-    ) {
-        use crate::app::ClientMessage;
-
-        let telem_task = self.spawn_telemetry(handle);
-
-        let b64 = base64::engine::general_purpose::STANDARD;
-        while let Some(msg) = rx.recv().await {
-            match msg {
-                ClientMessage::Audio { data } => {
-                    if let Ok(pcm_bytes) = b64.decode(&data) {
-                        let was_speaking = handle.voice_state().user_speaking;
-                        if let Err(e) = handle.send_audio(pcm_bytes).await {
-                            warn!("Failed to send audio: {e}");
-                            let _ = self.tx.send(ServerMessage::Error {
-                                message: e.to_string(),
-                            });
-                        } else {
-                            let is_speaking = handle.voice_state().user_speaking;
-                            if is_speaking && !was_speaking {
-                                let _ = self.tx.send(ServerMessage::VoiceActivityStart);
-                            } else if !is_speaking && was_speaking {
-                                let _ = self.tx.send(ServerMessage::VoiceActivityEnd);
-                            }
-                            self.send_voice_runtime_state(handle);
-                        }
-                    }
-                }
-                ClientMessage::Text { text } => {
-                    if let Err(e) = handle.send_text(&text).await {
-                        warn!("Failed to send text: {e}");
-                        let _ = self.tx.send(ServerMessage::Error {
-                            message: e.to_string(),
-                        });
-                    }
-                }
-                ClientMessage::PlaybackDrained => {
-                    if let Err(e) = handle.playback_drained().await {
-                        warn!("Failed to handle playback drained: {e}");
-                        let _ = self.tx.send(ServerMessage::Error {
-                            message: e.to_string(),
-                        });
-                    } else {
-                        self.send_voice_runtime_state(handle);
-                    }
-                }
-                ClientMessage::UserSpeechStarted => {
-                    if let Err(e) = handle.user_speech_started().await {
-                        warn!("Failed to handle user speech start: {e}");
-                        let _ = self.tx.send(ServerMessage::Error {
-                            message: e.to_string(),
-                        });
-                    } else {
-                        self.send_voice_runtime_state(handle);
-                    }
-                }
-                ClientMessage::UserSpeechEnded => {
-                    if let Err(e) = handle.user_speech_ended().await {
-                        warn!("Failed to handle user speech end: {e}");
-                        let _ = self.tx.send(ServerMessage::Error {
-                            message: e.to_string(),
-                        });
-                    } else {
-                        self.send_voice_runtime_state(handle);
-                    }
-                }
-                ClientMessage::UpdateFlowPostures { postures, grounds } => {
-                    for (step, text) in postures {
-                        let posture = (!text.trim().is_empty()).then_some(text);
-                        handle.update_step_posture(&step, posture);
-                    }
-                    for (step, text) in grounds {
-                        let ground = (!text.trim().is_empty()).then_some(text);
-                        handle.update_step_ground(&step, ground);
-                    }
-                }
-                ClientMessage::TaskCommand { command } => {
-                    match handle.task_command(command).await {
-                        Ok(status) => {
-                            let _ = self.tx.send(ServerMessage::TasksStatus { status });
-                        }
-                        Err(message) => {
-                            let _ = self.tx.send(ServerMessage::Error { message });
-                        }
-                    }
-                }
-                ClientMessage::Stop => {
-                    let _ = handle.disconnect().await;
-                    break;
-                }
-                _ => {}
-            }
-        }
-
-        telem_task.abort();
-    }
-
-    /// Get a clone of the sender for custom callbacks.
-    pub fn sender(&self) -> WsSender {
-        self.tx.clone()
     }
 
     /// Run a complete demo session with LiveEvent stream.

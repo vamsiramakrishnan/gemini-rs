@@ -60,7 +60,7 @@ pub struct Session {
 impl Session {
     /// Create a new session.
     pub fn new(app_name: impl Into<String>, user_id: impl Into<String>) -> Self {
-        let now = now_iso8601();
+        let now = crate::utils::time::now_rfc3339();
         Self {
             id: SessionId::new(),
             app_name: app_name.into(),
@@ -112,17 +112,27 @@ impl Session {
     }
 }
 
-fn now_iso8601() -> String {
-    // Simple UTC timestamp without chrono dependency
-    let dur = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}Z", dur.as_secs())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_session_is_stamped_with_rfc_3339_times() {
+        let session = Session::new("app", "user");
+        assert_eq!(session.created_at, session.updated_at);
+        let b = session.created_at.as_bytes();
+        assert_eq!(
+            b.len(),
+            "2024-02-29T12:34:56Z".len(),
+            "{}",
+            session.created_at
+        );
+        assert!(
+            b[4] == b'-' && b[10] == b'T' && b[19] == b'Z',
+            "{}",
+            session.created_at
+        );
+    }
 
     #[test]
     fn session_id_display() {

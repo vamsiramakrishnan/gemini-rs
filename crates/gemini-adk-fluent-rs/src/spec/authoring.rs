@@ -45,9 +45,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use super::{MEMORY_TOOL_NAMES, RUNTIME_WRITTEN, SessionSpec, levenshtein};
+use super::{MEMORY_TOOL_NAMES, RUNTIME_WRITTEN, SessionSpec};
 use crate::conversation::StageSpec;
 use crate::policy::Policy;
+use gemini_adk_rs::utils::text::levenshtein;
 
 /// Version of the authoring interface. Bumped when an operation's output
 /// changes incompatibly.

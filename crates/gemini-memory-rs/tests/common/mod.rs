@@ -6,7 +6,10 @@
 //! all (scratch directories, corpus rendering, the haystack fixture) are not
 //! gated, so a retrieval test can use them on a default build.
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared test helpers: each test binary uses a subset"
+)]
 
 pub mod corpus;
 #[cfg(feature = "gemini-llm")]

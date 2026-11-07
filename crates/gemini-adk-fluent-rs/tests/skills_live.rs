@@ -24,8 +24,11 @@
 //! | `SKILLS_LIVE_MODEL` | `models/gemini-3.8-live` | Live model |
 //! | `SKILLS_LIVE_RUNS` | `3` | Runs per arm |
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

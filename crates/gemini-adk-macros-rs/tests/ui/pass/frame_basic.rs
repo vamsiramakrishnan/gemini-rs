@@ -4,7 +4,7 @@ use gemini_adk_macros_rs::Frame;
 
 #[derive(Frame)]
 #[frame(name = "booking")]
-#[allow(dead_code)]
+#[allow(dead_code, reason = "the trybuild fixture only has to compile")]
 struct Booking {
     #[slot(
         prompt = "For how many people?",

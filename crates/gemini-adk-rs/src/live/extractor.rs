@@ -140,23 +140,6 @@ pub(crate) fn nothing_new_from_caller(window: &[TranscriptTurn]) -> bool {
         && window.iter().any(|t| !t.user.trim().is_empty())
 }
 
-/// Strip markdown code fences from LLM output.
-///
-/// Handles `` ```json\n...\n``` ``, `` ```\n...\n``` ``, and bare JSON.
-fn strip_code_fences(text: &str) -> &str {
-    let trimmed = text.trim();
-    if let Some(rest) = trimmed.strip_prefix("```") {
-        // Skip optional language tag (e.g., "json") on the first line
-        let rest = rest.trim_start_matches(|c: char| c != '\n');
-        let rest = rest.strip_prefix('\n').unwrap_or(rest);
-        // Strip trailing ```
-        let rest = rest.trim_end();
-        rest.strip_suffix("```").unwrap_or(rest).trim()
-    } else {
-        trimmed
-    }
-}
-
 /// Trait for between-turn extraction from transcript windows.
 ///
 /// Implementations receive a window of recent transcript turns and produce
@@ -573,7 +556,7 @@ impl LlmExtractor {
         let text = response.text();
 
         // Fallback: strip markdown code fences if the model still wraps output
-        let cleaned = strip_code_fences(&text);
+        let cleaned = crate::utils::text::strip_code_fence(&text);
 
         serde_json::from_str(cleaned).map_err(|e| {
             LlmError::Other(format!(
@@ -713,32 +696,9 @@ impl TurnExtractor for LlmExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::LlmResponse;
+    use crate::llm::{LlmResponse, MockLlm};
     use gemini_genai_rs::prelude::{Content, Part, Role};
     use std::time::Instant;
-
-    struct MockLlm {
-        response: String,
-    }
-
-    #[async_trait]
-    impl BaseLlm for MockLlm {
-        fn model_id(&self) -> &str {
-            "mock"
-        }
-        async fn generate(&self, _request: LlmRequest) -> Result<LlmResponse, LlmError> {
-            Ok(LlmResponse {
-                content: Content {
-                    role: Some(Role::Model),
-                    parts: vec![Part::Text {
-                        text: self.response.clone(),
-                    }],
-                },
-                finish_reason: Some("STOP".into()),
-                usage: None,
-            })
-        }
-    }
 
     fn make_turns(pairs: &[(&str, &str)]) -> Vec<TranscriptTurn> {
         pairs
@@ -756,9 +716,9 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extractor_produces_json() {
-        let llm = Arc::new(MockLlm {
-            response: r#"{"phase": "ordering", "items": ["pizza"]}"#.to_string(),
-        });
+        let llm = Arc::new(MockLlm::text(
+            r#"{"phase": "ordering", "items": ["pizza"]}"#,
+        ));
 
         let extractor = LlmExtractor::new("OrderState", llm, "Extract order state", 3);
 
@@ -774,9 +734,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extractor_with_schema() {
-        let llm = Arc::new(MockLlm {
-            response: r#"{"sentiment": "positive", "score": 0.9}"#.to_string(),
-        });
+        let llm = Arc::new(MockLlm::text(r#"{"sentiment": "positive", "score": 0.9}"#));
 
         let schema = serde_json::json!({
             "type": "object",
@@ -796,9 +754,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extractor_invalid_json_returns_error() {
-        let llm = Arc::new(MockLlm {
-            response: "not json at all".to_string(),
-        });
+        let llm = Arc::new(MockLlm::text("not json at all"));
 
         let extractor = LlmExtractor::new("Bad", llm, "Extract", 1);
         let turns = make_turns(&[("hi", "hello")]);
@@ -817,28 +773,12 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extractor_handles_markdown_fenced_json() {
-        let llm = Arc::new(MockLlm {
-            response: "```json\n{\"status\": \"ok\"}\n```".to_string(),
-        });
+        let llm = Arc::new(MockLlm::text("```json\n{\"status\": \"ok\"}\n```"));
 
         let extractor = LlmExtractor::new("Fenced", llm, "Extract", 1);
         let turns = make_turns(&[("test", "reply")]);
         let result = extractor.extract(&turns).await.unwrap();
         assert_eq!(result["status"], "ok");
-    }
-
-    #[test]
-    fn strip_code_fences_variants() {
-        assert_eq!(super::strip_code_fences("```json\n{}\n```"), "{}");
-        assert_eq!(super::strip_code_fences("```\n{}\n```"), "{}");
-        assert_eq!(
-            super::strip_code_fences("  ```json\n{\"a\":1}\n```  "),
-            "{\"a\":1}"
-        );
-        assert_eq!(
-            super::strip_code_fences("{\"bare\":true}"),
-            "{\"bare\":true}"
-        );
     }
 
     #[test]
@@ -987,9 +927,7 @@ mod tests {
 
     #[test]
     fn a_restated_value_is_not_promoted_again() {
-        let llm = Arc::new(MockLlm {
-            response: "{}".into(),
-        });
+        let llm = Arc::new(MockLlm::text("{}"));
         let extractor = LlmExtractor::new("booking", llm, "x", 3)
             .with_promotions(vec![FieldPromotion::overwrite("slot")]);
         let state = State::new();
@@ -1020,9 +958,7 @@ mod tests {
 
     #[test]
     fn extractor_name_and_window_size() {
-        let llm = Arc::new(MockLlm {
-            response: "{}".to_string(),
-        });
+        let llm = Arc::new(MockLlm::text("{}"));
         let ext = LlmExtractor::new("TestExtractor", llm, "test", 5);
         assert_eq!(ext.name(), "TestExtractor");
         assert_eq!(ext.window_size(), 5);
@@ -1030,18 +966,14 @@ mod tests {
 
     #[test]
     fn extractor_default_trigger_is_every_turn() {
-        let llm = Arc::new(MockLlm {
-            response: "{}".to_string(),
-        });
+        let llm = Arc::new(MockLlm::text("{}"));
         let ext = LlmExtractor::new("Test", llm, "test", 5);
         assert_eq!(ext.trigger(), ExtractionTrigger::EveryTurn);
     }
 
     #[test]
     fn extractor_with_trigger() {
-        let llm = Arc::new(MockLlm {
-            response: "{}".to_string(),
-        });
+        let llm = Arc::new(MockLlm::text("{}"));
         let ext = LlmExtractor::new("Test", llm, "test", 5)
             .with_trigger(ExtractionTrigger::AfterToolCall);
         assert_eq!(ext.trigger(), ExtractionTrigger::AfterToolCall);

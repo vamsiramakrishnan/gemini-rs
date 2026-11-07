@@ -127,10 +127,12 @@ impl RunResult {
     /// [`AgentError::InvalidOutput`], which names the type and carries the
     /// reply.
     pub fn parse<T: DeserializeOwned>(&self) -> Result<T, AgentError> {
-        serde_json::from_str(strip_code_fence(&self.text)).map_err(|e| AgentError::InvalidOutput {
-            expected: std::any::type_name::<T>(),
-            reason: e.to_string(),
-            text: self.text.clone(),
+        serde_json::from_str(crate::utils::text::strip_code_fence(&self.text)).map_err(|e| {
+            AgentError::InvalidOutput {
+                expected: std::any::type_name::<T>(),
+                reason: e.to_string(),
+                text: self.text.clone(),
+            }
         })
     }
 }
@@ -287,16 +289,6 @@ pub(crate) fn model_turn(text: impl Into<String>) -> Content {
         role: Some(Role::Model),
         parts: vec![Part::Text { text: text.into() }],
     }
-}
-
-/// `text` without a surrounding Markdown code fence (```` ```json … ``` ````).
-fn strip_code_fence(text: &str) -> &str {
-    let trimmed = text.trim();
-    let Some(body) = trimmed.strip_prefix("```") else {
-        return trimmed;
-    };
-    let body = body.split_once('\n').map_or("", |(_, rest)| rest);
-    body.trim_end().strip_suffix("```").unwrap_or(body).trim()
 }
 
 #[cfg(test)]

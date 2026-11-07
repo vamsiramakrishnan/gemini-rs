@@ -151,8 +151,11 @@
 
 #![cfg(feature = "gemini-llm")]
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -1034,7 +1037,10 @@ fn recall_of(hits: &[(usize, f32)], exact: &[usize]) -> f64 {
     found as f64 / RECALL_AT.min(exact.len()) as f64
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "each argument is one input of a single scoring step; a struct would only rename them"
+)]
 fn score(
     outcome: &mut Outcome,
     hits: &[(usize, f32)],

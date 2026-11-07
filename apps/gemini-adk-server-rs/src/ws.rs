@@ -357,7 +357,6 @@ pub enum AppError {
     Session(String),
     /// Other error.
     #[error("{0}")]
-    #[allow(dead_code)]
     Other(String),
 }
 

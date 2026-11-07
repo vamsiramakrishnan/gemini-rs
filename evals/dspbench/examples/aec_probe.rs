@@ -1,6 +1,6 @@
 //! Diagnostic probe: Aec alone on a synthetic echo path, per-second stats.
 #[path = "../src/signal.rs"]
-#[allow(dead_code)]
+#[allow(dead_code, reason = "this example includes the whole module by path and uses a subset of it")]
 mod signal;
 
 use gemini_adk_fluent_rs::voice::dsp::{

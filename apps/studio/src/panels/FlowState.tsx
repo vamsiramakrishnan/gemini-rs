@@ -12,7 +12,7 @@ export function FlowState({ status, declared = false }: { status: FlowStatus; de
       <dl>
         <dt>Status</dt>
         <dd>{status.terminated ? 'Terminated' : status.complete ? 'Complete' : 'In progress'}</dd>
-        {status.overlay_path.length > 0 && <><dt>Digression</dt><dd>{status.overlay_path.join(' → ')}</dd></>}
+        {status.overlay_path.length > 0 && <><dt>Overlay</dt><dd>{status.overlay_path.join(' → ')}</dd></>}
         <dt>Active</dt>
         <dd>{status.active?.join(', ') || '—'}</dd>
         <dt title={declared ? 'Declared to the model through contextUpdate' : 'Calls to other tools are refused'}>

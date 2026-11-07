@@ -416,10 +416,12 @@ mod tests {
         let mode = spec.compile_code_mode(None).unwrap();
         assert!(mode.hides("lookup_payment_history"));
         assert!(!mode.hides("check_availability"));
-        assert!(
-            spec.to_rust()
-                .contains(".only_in_code(\"lookup_payment_history\")")
-        );
+        // A conversation document is carried whole into the generated
+        // program and applied there, so the code section travels inside the
+        // embedded document rather than as a builder call.
+        let code = spec.to_rust();
+        assert!(code.contains("spec.apply(Live::builder()"), "{code}");
+        assert!(code.contains("lookup_payment_history"), "{code}");
     }
 
     #[test]

@@ -7,7 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+> **Breaking against 4.0.0.** `cargo semver-checks` against the published
+> 4.0.0 reports that this unreleased work already needs a major version:
+> new public fields on `SessionSpec` (`models`, `decisions`, `code`),
+> `ExtractSpec` (`model`, `thinking_budget`), `ToolSpec` (`returns`),
+> `SkillSpec` (`code`), `SpecResources` (`models`, `decision_model`,
+> `code_sandbox`), `CompiledSkill` (`code`) and `GeminiLlmParams`
+> (`base_url`); and new variants on the exhaustive enums `SimStep`
+> (`Decide`), `SteeringSpec` / `SteeringMode` (`ContextUpdate`), `Pred`
+> (`Decided`) and `SessionCommand` (`UpdateContext`). The cleanup adds three
+> error variants (`HttpError::InvalidMethod`, `CachesError::Serialize`,
+> `EmbedError::Serialize`). The next release is therefore 5.0.0 unless the
+> types gain `#[non_exhaustive]` first; see `docs/cleanup/decisions.md`.
+
 ### Added
+
+- **Python bindings (`crates/gemini-adk-py`, `import gemini_adk`).** One
+  PyO3 extension module built by maturin (abi3, Python 3.10+): `Agent`,
+  `Chat` and streamed replies, typed answers from a JSON Schema or a
+  Pydantic model, the `@tool` decorator for sync and async Python tools,
+  `LiveSession` with `bytes` audio frames and dict events, `SessionSpec`
+  load/validate/run_tests/to_rust, `Conversation`/`Sim` offline simulation,
+  and `MockLlm` plus a scripted Live server for tests. Synchronous calls
+  release the GIL; the `*_async` forms integrate with asyncio. Python never
+  runs on the fast lane, event backpressure is reported as `lagged` events,
+  and one exception hierarchy maps every `AgentError`. Stubs are checked by
+  stubtest, wheels are built for Linux x86_64/aarch64, macOS arm64 and
+  Windows x86_64 in CI, and `bench/python/RESULTS.md` holds the measured
+  numbers. Nothing is published to PyPI yet. Design:
+  `docs/cleanup/python-binding-design.md`.
+- **Bug-bash test suites.** libFuzzer targets for the Live frame decoder on
+  both wire paths (`crates/gemini-genai-rs/fuzz`, run for a fixed minute in
+  CI from a committed corpus); property tests that a `SessionSpec` survives
+  serialization, validates the same way on both sides and generates Rust
+  that parses and declares the same flow; property tests that a governed
+  flow never admits a gated tool before its guard holds, under interleaved
+  state writes, tool calls and turns; a fast-lane dispatch budget test (one
+  millisecond per callback, asserted) and an end-to-end `criterion`
+  benchmark; a `loom` model of the telemetry lane's atomics (CI job `loom`);
+  session-lifecycle tests through the fluent API for GoAway, resumption and
+  reconnect, barge-in during a tool call and cancellation of in-flight tool
+  calls; G.711 reference-vector tests; DTMF delivery into session state over
+  Twilio, RTP (RFC 4733) and in-band detection; `--help` and non-zero exit
+  tests for every `adk` subcommand; and a Flow Studio round trip of every
+  gallery document through the runtime and back.
+- **`transport::ws::frame_payload`.** The text/binary/close/control frame
+  classification the transport applies, as a function, so the fuzz targets
+  and tests exercise the same code the session loop runs.
 
 - **Code mode: programs over your own tools.** `Live::code_mode(CodeMode)`,
   `SessionSpec.code` and `SkillSpec.code` give the model `run_code`: a short
@@ -82,11 +129,168 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Dependencies.** `minijinja` 3 (instruction templates; its serde support
+  is now an explicit feature), the code-mode interpreter `monty`,
+  `monty-types` and `monty-pool` 1.4 (moved together; they are pinned
+  exactly), and `uuid`, `rtrb`, `realfft` and `rsipstack` patch releases.
+  The OpenTelemetry family moves to 0.33 (`opentelemetry`,
+  `opentelemetry_sdk`, `opentelemetry-otlp` 0.33, `tracing-opentelemetry`
+  0.34, `opentelemetry-gcloud-trace` 0.29).
+- **`otel-gcp` sends metrics to Cloud Monitoring over OTLP** (decision D21).
+  `opentelemetry_gcloud_monitoring_exporter`, which never moved past
+  OpenTelemetry 0.31, is gone; metrics go to Google's Telemetry API
+  (`telemetry.googleapis.com`) with Application Default Credentials. They
+  are now `prometheus.googleapis.com/<name>/<kind>` metrics on the
+  `prometheus_target` resource instead of
+  `custom.googleapis.com/<service>/<name>`, so dashboards and
+  alerts on the old names need updating. The service account needs
+  `roles/telemetry.writer` (instead of `roles/monitoring.metricWriter`), and
+  metrics need a region: `cloud.region` in `OTEL_RESOURCE_ATTRIBUTES`, or the
+  metadata server's on Cloud Run, GCE and GKE; without one, `build_gcp`
+  fails with `GcpExportError::NoLocation` (the runtime and web app then
+  start without export and print why). Cloud Trace export is unchanged.
+- **rustls is the default TLS backend** (`tls-rustls`) on `gemini-genai-rs`,
+  `gemini-adk-rs`, `gemini-adk-fluent-rs` and `gemini-adk`; `tls-native`
+  (the system library) stays an opt-in feature. Default builds no longer
+  compile OpenSSL, `native-tls`, `hyper-tls` or a second HTTP/TLS stack
+  next to the rustls one the HTTP tools already used, and wheels and
+  binaries carry their own TLS. A consumer that relied on the system
+  library enables `tls-native` (D20 in `docs/cleanup/decisions.md`).
+- **Faster builds.** The workspace's dev profile keeps `line-tables-only`
+  debuginfo for workspace code and none for dependencies (test builds were
+  25 GB and link-bound); `default-members` makes a root `cargo check`/`test`
+  build the library crates, with `--workspace` for everything; each crate's
+  integration tests are one binary (`tests/main.rs`) instead of one per
+  file (131 test binaries become 82); the workspace uses one RustCrypto
+  generation (`sha2`/`sha1` 0.11, `hmac` 0.13) and one `toml` (0.9), which
+  removes the duplicate `digest`, `sha2`, `toml_edit` and `winnow` builds.
+  CI cancels a PR's superseded runs and drops the `check` job clippy
+  already covered. Measurements
+  are in `docs/cleanup/build-speed.md`.
+- **One API-key rule for every surface.** `GeminiLlm::from_env`, the Live
+  session, the web app, the runtime and the CLI all read the key through
+  `gemini_genai_rs::protocol::types::api_key_from_env`: `GEMINI_API_KEY`,
+  then `GOOGLE_GENAI_API_KEY`, then `GOOGLE_API_KEY`, and an empty or
+  whitespace value counts as unset. `GeminiLlm::from_env` used to try
+  `GOOGLE_GENAI_API_KEY` first and accept an empty value, so a process
+  with both variables set may now pick the other key; the Vertex switch
+  accepts `"1"` as well as `"true"` on every surface, and `adk doctor` no
+  longer reads the undocumented `GOOGLE_PROJECT_ID` fallback (D18 in
+  `docs/cleanup/decisions.md`).
+- **Timestamps are RFC 3339.** `Session::created_at`/`updated_at`, the
+  server's `SessionData` timestamps, trace `started_at` and eval
+  `timestamp` were `"{unix_seconds}Z"`; they now read
+  `2024-02-29T12:34:56Z`, the form the Vertex session store already used.
+  A client that parsed the old value as an integer sees a different
+  string (D19 in `docs/cleanup/decisions.md`).
+- **The fast-lane budget tests run in the `bench-build` job**, in a release
+  build on their own (`just fast-lane-budget`), not in the ordinary test
+  job where they shared the runner with every other test process.
+- **Library code returns typed errors instead of panicking.** 67
+  `unwrap`/`expect` sites in the published crates now return the crate's
+  error or are restructured so nothing can fail: `HttpError::InvalidMethod`,
+  `CachesError::Serialize` and `EmbedError::Serialize` are new variants; a
+  `FlowBuilder` setter called before `.step()` and a `Conversation` stage
+  setter called before `.stage()` are reported by `build()` / `compile()`
+  instead of panicking; the MCP session manager, the task runtime and the
+  session plan return their errors; regex literals are `LazyLock` statics
+  checked by unit tests; the mutation journal and the audio ring use
+  `parking_lot` locks, which cannot poison. `TranscriptRedactor::long_digits`
+  compares run lengths instead of compiling the threshold into a pattern, so
+  a huge threshold redacts nothing rather than panicking. The 17 sites that
+  would need a public signature change are proposals D4–D10 in
+  `docs/cleanup/decisions.md`.
+- **Every `#[allow(...)]` carries a reason.** 33 were removed by fixing the
+  cause (dead fields and functions deleted, named type aliases instead of
+  `clippy::type_complexity`), 45 keep the attribute with `reason = "..."`.
+
+- **One vocabulary across the SDK, the CLI and Flow Studio.** The Studio
+  now uses the document's own words: "New session spec" and "Open session
+  spec…" (was "New agent", "Open JSON…"), the "Bundles" tab and "Push
+  bundle" button (was "Versions", "Save version"), "Validation" and
+  "Simulate" tabs (was "Problems", "Step through"), "Extract", "Watch" and
+  "MCP" inspector sections, "Overlay" in the flow state (was "Digression"),
+  and a "confirm" chip. `adk deploy` takes `--location` (the SDK's
+  `GOOGLE_CLOUD_LOCATION`); `--region` still works as an alias.
+
+- **`plan.md` folded into `ROADMAP.md`.** The adk-fluent naming-parity plan
+  is now Milestone 11 of the roadmap (its `Agent = AgentBuilder` alias is
+  declined, since `Agent` is the runtime trait); the roadmap header names the
+  current release and MSRV.
+- **README telephony section corrected.** SIP registration and SRTP have
+  shipped since 3.0.0; the sentence saying they were not implemented is
+  replaced by what is and is not supported, and `examples/sip-agent` now
+  registers with a PBX or trunk when `SIP_REGISTRAR`, `SIP_USERNAME` and
+  `SIP_PASSWORD` are set.
+
 - **Breaking: the minimum Rust is 1.99** (was 1.93), and the checked-in
   toolchain pins 1.99.0. Code mode runs programs in Monty, which needs it.
   `SipError::Sip` now boxes the SIP stack's error.
 
+- **One credential and endpoint resolution for every surface.** The
+  Gemini API key is now the first non-empty of `GEMINI_API_KEY`,
+  `GOOGLE_GENAI_API_KEY`, `GOOGLE_API_KEY`, and `GOOGLE_GENAI_USE_VERTEXAI`
+  is `true` (any case) or `1`, whitespace ignored, in `ApiEndpoint::from_env`,
+  `GeminiLlm`, `get_google_llm_variant`, the fluent `connect_from_env`, the
+  demo web app, `adk-runtime`'s extraction model and `adk web` / `adk doctor`
+  (new `gemini_genai_rs::protocol::types::{vertex_requested, api_key_from_env,
+  cloud_project_from_env, cloud_location_from_env, non_empty_env}`). What
+  changes for a user: the demo web app and `adk-runtime` accept
+  `GOOGLE_GENAI_USE_VERTEXAI=1`; the demo web app accepts `GOOGLE_API_KEY`;
+  `GeminiLlm` and the demo web app prefer `GEMINI_API_KEY` over
+  `GOOGLE_GENAI_API_KEY` when both are set to different values; an empty
+  `GOOGLE_API_KEY` or `GOOGLE_CLOUD_LOCATION` is treated as unset; `adk
+  doctor` no longer counts `GOOGLE_PROJECT_ID`, which nothing else read;
+  `adk-runtime` reads `GEMINI_EXTRACTION_LOCATION` like the demo app.
+- **Session and trace timestamps are RFC 3339.** `Session::created_at`
+  / `updated_at`, `adk-runtime`'s and the server's session, trace and eval
+  timestamps were `"{unix_seconds}Z"`; they are now `2024-02-29T12:34:56Z`
+  (`gemini_adk_rs::utils::time`).
+
+### Removed
+
+- **`.cursorrules`, `.clinerules`, `.windsurfrules` and `.cursor/rules`.**
+  Stale copies of older guidance that named crates which do not exist
+  (`rs-genai`, `rs-adk`, `adk-rs-fluent`) and an older Live API. `AGENTS.md`
+  is the one instruction file; `CLAUDE.md` and `GEMINI.md` point to it.
+
 ### Fixed
+
+- **G.711 encoders are bit-exact with ITU-T G.191's `g711.c`**, the STL
+  reference implementation of G.711. The µ-law encoder disagreed with it at
+  127 negative inputs at segment boundaries (it truncated the 16-bit sample
+  toward zero instead of working in the 14-bit domain with one's complement
+  for negatives); A-law was already exact. Checked against a transcription
+  of the ITU source for every `i16` input and every byte, with literal
+  G.711 table pairs and a decode→encode round trip as independent anchors.
+  Note that the Sun `g711.c` formulation (sox, Asterisk) differs from G.191
+  by one code at negative step boundaries; decoders agree on both.
+- **Latency percentiles never count an unpublished sample.** Under two
+  concurrent `record` calls the telemetry lane's recent-sample ring could
+  expose a slot that was claimed but not yet written, so a percentile fell
+  below the minimum; found by the loom model, the ring now publishes each
+  slot on its own.
+- **`adk flow …`, `adk replay`, `adk session …` and `adk eval` name the
+  missing file.** They printed a bare `No such file or directory`; the path
+  is now in the error, as the `spec` and `bundle` commands already did.
+- **`runtime.temperature` survives a save through Flow Studio.** The `f32`
+  serialized as its exact binary value (`0.6` became `0.6000000238418579`);
+  it serializes as its shortest decimal form.
+- **Generated Rust for a conversation document keeps the conversation.**
+  `SessionSpec::to_rust` dropped the `conversation` section (the shape of
+  every Flow Studio gallery example) and emitted a program with no
+  governance; it now embeds the document and applies it, as it already did
+  for skills documents.
+- **`on_tool_cancelled` runs for a barge-in cancellation.** The hook ran only
+  for a server `toolCallCancellation`; an inline tool cancelled by a user
+  interruption emitted the `ToolCancelled` event but skipped the hook.
+- **Generated Rust survives a multi-line description.** A line break in
+  `description` put the rest of the text outside the generated `//!`
+  comment, and the program did not parse.
+- **Generated Rust for a `Guard::custom` is a compile error, not a panic.**
+  `SessionSpec::to_rust` emitted `todo!()` for a custom guard, so the
+  generated program compiled and then panicked at the first evaluation; it
+  now emits `compile_error!` naming the guard, so the reader writes it.
 
 - **A call the phase refuses no longer opens a digression.** The decision
   gate asked about every incoming call before the phase filter, so a call to

@@ -27,7 +27,10 @@
 //! Audio is cached on disk by content hash, because synthesis is a paid call
 //! and the same sentence is spoken on every run.
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared test helpers: each test binary uses a subset"
+)]
 
 use std::path::PathBuf;
 

@@ -140,10 +140,26 @@ pub struct HealthResponse {
 
 // ── Helpers ─────────────────────────────────────────────────────
 
-/// ISO 8601 timestamp from system clock.
+/// The current time as an RFC 3339 UTC timestamp, to the second
+/// (`2024-02-29T12:34:56Z`). This used to return `"{unix_seconds}Z"`, which
+/// was not a date; it is now the shared formatter in `gemini-adk-rs`.
 pub fn now_iso8601() -> String {
-    let dur = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}Z", dur.as_secs())
+    gemini_adk_rs::utils::time::now_rfc3339()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::now_iso8601;
+
+    #[test]
+    fn now_iso8601_is_an_rfc_3339_utc_timestamp() {
+        let now = now_iso8601();
+        let b = now.as_bytes();
+        assert_eq!(now.len(), "2024-02-29T12:34:56Z".len(), "{now}");
+        assert!(
+            b[4] == b'-' && b[7] == b'-' && b[10] == b'T' && b[13] == b':' && b[16] == b':',
+            "{now}"
+        );
+        assert!(now.ends_with('Z'), "{now}");
+    }
 }

@@ -1,4 +1,6 @@
 [package]
+# Integration tests are one binary (tests/main.rs); see that file.
+autotests = false
 name = "gemini-adk-fluent-rs"
 version.workspace = true
 edition.workspace = true
@@ -35,9 +37,10 @@ futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "0.8"
+# MCP and HTTP tool endpoints are validated as URLs before a session starts.
 url = "2"
 # Bundle version ids (`spec::store`).
-sha2 = "0.10"
+sha2 = "0.11"
 parking_lot = "0.12"
 tracing = "0.1"
 # Optional: HTTP tool bindings for spec-driven sessions (`http-tools`).
@@ -47,6 +50,9 @@ reqwest = { version = "0.12", default-features = false, features = [
 ], optional = true }
 # Optional: native microphone/speaker duplex for `voice::Talk` (`voice-io`).
 cpal = { version = "0.18", optional = true }
+# Optional DSP chain (`denoise`, `dsp`): RNNoise-style denoiser, the FFT the
+# echo canceller and STFT stages run on, and the sinc resampler between the
+# device rate and the Live API's 16/24 kHz.
 nnnoiseless = { version = "0.5", default-features = false, optional = true }
 realfft = { version = "3", optional = true }
 rubato = { version = "5.0", optional = true }
@@ -54,16 +60,28 @@ rubato = { version = "5.0", optional = true }
 rsipstack = { version = "0.7", optional = true }
 # SRTP (RFC 3711) for `telephony::srtp` (`sip`): AES-CM-128 + HMAC-SHA1.
 aes = { version = "0.9", optional = true }
-hmac = { version = "0.12", optional = true }
-sha1 = { version = "0.10", optional = true }
+hmac = { version = "0.13", optional = true }
+sha1 = { version = "0.11", optional = true }
 # `std`: SRTP turns a getrandom error into an io::Error.
 getrandom = { version = "0.4", features = ["std"], optional = true }
+# Both only behind `voice-io`: the cancellation token the pump shares with the
+# device streams, and `VoiceIoError`.
 tokio-util = { version = "0.7", optional = true }
 thiserror = { version = "2", optional = true }
 
 [dev-dependencies]
 # The live eval harness calls Jev through AI Gateway.
 gemini-adk-rs = { workspace = true, features = ["ai-gateway"] }
+# Property tests over `SessionSpec` documents (tests/spec_round_trip_props.rs).
+proptest = "1"
+# The spec property tests parse the generated `main.rs` and read its flow
+# back, so a generator change that drops a step or guard fails there.
+syn = { version = "2", features = ["full"] }
+# ... and the generated `Cargo.toml`.
+toml = "0.9"
+# The end-to-end fast-lane benchmark (benches/fast_lane.rs).
+criterion = { version = "0.5", default-features = false }
+base64 = "0.22"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 tokio = { version = "1", features = ["full"] }
 tokio-test = "0.4"
@@ -84,13 +102,13 @@ parking_lot = "0.12"
 # use. Both keep `tls-native`; pick `tls-rustls` with `--no-default-features`
 # and name the pieces instead.
 voice = ["voice-io", "denoise", "dsp", "vad-wavekat"]
-full = ["voice", "sip", "http-tools", "gcs-store", "templates", "gemini-llm", "tls-native", "otel-otlp", "ai-gateway", "code-mode"]
+full = ["voice", "sip", "http-tools", "gcs-store", "templates", "gemini-llm", "tls-rustls", "otel-otlp", "ai-gateway", "code-mode"]
 templates = ["gemini-adk-rs/templates"]
 # One TLS backend and text generation are on by default: `AgentBuilder::build`
 # runs on `GeminiLlm`, which is pure Rust, so a plain `cargo add` answers a
 # question. Swap the TLS backend with `--no-default-features --features
 # tls-rustls,gemini-llm`.
-default = ["tls-native", "gemini-llm", "code-mode"]
+default = ["tls-rustls", "gemini-llm", "code-mode"]
 # Also the HTTP client that fetches Vertex tokens from the metadata server.
 gemini-llm = ["gemini-adk-rs/gemini-llm", "gemini-genai-rs/http"]
 # HTTP tool bindings in `spec` (SessionSpec `tools[].http`).
@@ -126,3 +144,22 @@ otel-gcp = ["gemini-adk-rs/otel-gcp", "gemini-genai-rs/otel-gcp"]
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "fast_lane"
+harness = false
+
+[[test]]
+name = "main"
+path = "tests/main.rs"
+
+# Kept as its own process: it sets environment variables or global state.
+[[test]]
+name = "spec_live_eval"
+path = "tests/spec_live_eval.rs"
+
+# Kept as its own process: it records this process's tracing spans through a
+# thread-local subscriber, and a neighbouring session's spans would be noise.
+[[test]]
+name = "live_session_trace"
+path = "tests/live_session_trace.rs"

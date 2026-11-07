@@ -246,8 +246,7 @@ impl DspChain {
 
     /// Shared live-metrics handle for this chain.
     pub fn metrics(&mut self) -> ChainMetrics {
-        self.ensure_metrics();
-        self.metrics.as_ref().expect("just built").clone()
+        self.ensure_metrics().clone()
     }
 
     /// Total declared group delay across all stages, in samples.
@@ -255,30 +254,27 @@ impl DspChain {
         self.stages.iter().map(|s| s.latency_samples()).sum()
     }
 
-    fn ensure_metrics(&mut self) {
-        if self.metrics.is_none() {
-            self.metrics = Some(ChainMetrics {
-                inner: Arc::new(MetricsInner {
-                    meters: self.stages.iter().map(|_| StageMeter::default()).collect(),
-                    names: self.stages.iter().map(|s| s.name()).collect(),
-                    latencies: self.stages.iter().map(|s| s.latency_samples()).collect(),
-                    exit_clipped: AtomicU64::new(0),
-                    blocks: AtomicU64::new(0),
-                }),
-            });
-        }
+    fn ensure_metrics(&mut self) -> &ChainMetrics {
+        self.metrics.get_or_insert_with(|| ChainMetrics {
+            inner: Arc::new(MetricsInner {
+                meters: self.stages.iter().map(|_| StageMeter::default()).collect(),
+                names: self.stages.iter().map(|s| s.name()).collect(),
+                latencies: self.stages.iter().map(|s| s.latency_samples()).collect(),
+                exit_clipped: AtomicU64::new(0),
+                blocks: AtomicU64::new(0),
+            }),
+        })
     }
 }
 
 impl InputAudioProcessor for DspChain {
     fn process_frame(&mut self, frame: &mut Vec<i16>) {
-        self.ensure_metrics();
+        let metrics = self.ensure_metrics().inner.clone();
         // Entry: one int -> float conversion.
         self.bus.clear();
         self.bus
             .extend(frame.iter().map(|&s| f32::from(s) / 32768.0));
 
-        let metrics = self.metrics.as_ref().expect("ensured").inner.clone();
         // Rate changes (a resampler mid-chain) propagate stage-to-stage
         // WITHIN this frame only; the chain's own input rate is fixed, so
         // the next frame's fresh PCM is labeled correctly again.

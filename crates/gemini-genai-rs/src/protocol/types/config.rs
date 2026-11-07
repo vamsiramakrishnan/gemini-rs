@@ -800,39 +800,77 @@ impl ApiEndpoint {
     /// Returns a descriptive error naming the missing variable so the
     /// failure is actionable.
     pub fn from_env() -> Result<Self, EndpointEnvError> {
-        let use_vertex = std::env::var("GOOGLE_GENAI_USE_VERTEXAI")
-            .map(|v| {
-                let v = v.trim();
-                v.eq_ignore_ascii_case("true") || v == "1"
-            })
-            .unwrap_or(false);
-
-        if use_vertex {
-            let project = non_empty_env("GOOGLE_CLOUD_PROJECT")
+        if vertex_requested() {
+            let project = cloud_project_from_env()
                 .ok_or(EndpointEnvError::Missing("GOOGLE_CLOUD_PROJECT"))?;
-            let location =
-                non_empty_env("GOOGLE_CLOUD_LOCATION").unwrap_or_else(|| "us-central1".to_string());
+            let location = cloud_location_from_env();
             let token = non_empty_env("GOOGLE_ACCESS_TOKEN")
                 .ok_or(EndpointEnvError::Missing("GOOGLE_ACCESS_TOKEN"))?;
             Ok(Self::vertex(project, location, token))
         } else {
-            let api_key = non_empty_env("GEMINI_API_KEY")
-                .or_else(|| non_empty_env("GOOGLE_GENAI_API_KEY"))
-                .or_else(|| non_empty_env("GOOGLE_API_KEY"))
-                .ok_or(EndpointEnvError::Missing(
-                    "GEMINI_API_KEY (or GOOGLE_GENAI_API_KEY / GOOGLE_API_KEY)",
-                ))?;
+            let api_key = api_key_from_env().ok_or(EndpointEnvError::Missing(
+                "GEMINI_API_KEY (or GOOGLE_GENAI_API_KEY / GOOGLE_API_KEY)",
+            ))?;
             Ok(Self::google_ai(api_key))
         }
     }
 }
 
-/// Read an environment variable, treating empty/whitespace as unset.
-fn non_empty_env(key: &str) -> Option<String> {
+/// The environment variables [`api_key_from_env`] reads, first match wins.
+pub const API_KEY_ENV_VARS: [&str; 3] =
+    ["GEMINI_API_KEY", "GOOGLE_GENAI_API_KEY", "GOOGLE_API_KEY"];
+
+/// Read an environment variable, treating empty/whitespace as unset and
+/// trimming the rest.
+pub fn non_empty_env(key: &str) -> Option<String> {
     match std::env::var(key) {
         Ok(v) if !v.trim().is_empty() => Some(v.trim().to_string()),
         _ => None,
     }
+}
+
+/// Whether a `GOOGLE_GENAI_USE_VERTEXAI` value selects Vertex AI: `true`
+/// (any case) or `1`, ignoring surrounding whitespace.
+///
+/// This is the one rule every surface applies; [`vertex_requested`] reads
+/// it from the environment.
+pub fn vertex_flag_enabled(value: &str) -> bool {
+    let value = value.trim();
+    value.eq_ignore_ascii_case("true") || value == "1"
+}
+
+/// Whether `GOOGLE_GENAI_USE_VERTEXAI` selects Vertex AI (`true` or `1`).
+/// Unset means the Gemini API.
+pub fn vertex_requested() -> bool {
+    std::env::var("GOOGLE_GENAI_USE_VERTEXAI").is_ok_and(|v| vertex_flag_enabled(&v))
+}
+
+/// The name of the first of [`API_KEY_ENV_VARS`] that holds a non-empty
+/// value, for messages that say which variable supplied the key. It returns
+/// the variable's name, never its value, so printing it is safe (and the
+/// name says so, for static analysers that treat anything called
+/// `api_key` as a secret).
+pub fn provider_key_variable() -> Option<&'static str> {
+    API_KEY_ENV_VARS
+        .into_iter()
+        .find(|name| non_empty_env(name).is_some())
+}
+
+/// The Google AI API key from the environment: the first non-empty of
+/// `GEMINI_API_KEY`, `GOOGLE_GENAI_API_KEY`, `GOOGLE_API_KEY`.
+pub fn api_key_from_env() -> Option<String> {
+    API_KEY_ENV_VARS.into_iter().find_map(non_empty_env)
+}
+
+/// The Vertex AI project from `GOOGLE_CLOUD_PROJECT`, if set and non-empty.
+pub fn cloud_project_from_env() -> Option<String> {
+    non_empty_env("GOOGLE_CLOUD_PROJECT")
+}
+
+/// The Vertex AI location from `GOOGLE_CLOUD_LOCATION`, `us-central1` when
+/// unset or empty.
+pub fn cloud_location_from_env() -> String {
+    non_empty_env("GOOGLE_CLOUD_LOCATION").unwrap_or_else(|| "us-central1".to_string())
 }
 
 /// Error resolving an [`ApiEndpoint`] from the environment.
@@ -1715,6 +1753,8 @@ mod tests {
             ApiEndpoint::from_env(),
             Ok(ApiEndpoint::GoogleAI { ref api_key }) if api_key == "k-fallback"
         ));
+        assert_eq!(provider_key_variable(), Some("GOOGLE_API_KEY"));
+        assert_eq!(api_key_from_env().as_deref(), Some("k-fallback"));
 
         // No key anywhere → actionable error.
         unsafe { std::env::remove_var("GEMINI_API_KEY") };
@@ -1726,7 +1766,10 @@ mod tests {
 
         // Vertex AI with explicit token + default location.
         unsafe { std::env::set_var("GOOGLE_GENAI_USE_VERTEXAI", "TRUE") };
+        assert!(vertex_requested());
         unsafe { std::env::set_var("GOOGLE_CLOUD_PROJECT", "proj-1") };
+        assert_eq!(cloud_project_from_env().as_deref(), Some("proj-1"));
+        assert_eq!(cloud_location_from_env(), "us-central1");
         unsafe { std::env::set_var("GOOGLE_ACCESS_TOKEN", "tok-abc") };
         match ApiEndpoint::from_env() {
             Ok(ApiEndpoint::VertexAI(cfg)) => {
@@ -1747,6 +1790,18 @@ mod tests {
 
         for v in vars {
             unsafe { std::env::remove_var(v) };
+        }
+    }
+
+    /// The Vertex switch is one rule for every surface: `true` in any case
+    /// or `1`, whitespace ignored; everything else selects the Gemini API.
+    #[test]
+    fn vertex_flag_rule() {
+        for yes in ["true", "TRUE", "True", "1", " true ", " 1\n"] {
+            assert!(vertex_flag_enabled(yes), "{yes:?}");
+        }
+        for no in ["", "0", "false", "yes", "vertex", "TRUEISH", "11"] {
+            assert!(!vertex_flag_enabled(no), "{no:?}");
         }
     }
 

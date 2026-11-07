@@ -1,4 +1,6 @@
 [package]
+# Integration tests are one binary (tests/main.rs); see that file.
+autotests = false
 name = "gemini-adk-rs"
 version.workspace = true
 edition.workspace = true
@@ -32,14 +34,21 @@ schemars = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# Concurrent maps for the tool dispatcher and background-tool tracker: read
+# from the control lane while tasks register and finish.
 dashmap = "6"
 futures-util = "0.3"
 parking_lot = "0.12"
+# Slot recognizers, transcript redaction and model-name parsing (all literal
+# patterns compiled once into statics).
 regex = "1"
-minijinja = { version = "2", optional = true }
+# Optional: instruction templates (`templates` feature).
+minijinja = { version = "3", features = ["serde"], optional = true }
+# Edit distance for the response evaluator and "did you mean" diagnostics.
 strsim = "0.11"
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
+# Optional: counters for the metrics facade (`metrics` feature).
 metrics = { version = "0.24", optional = true }
 # Persistence backends (optional, feature-gated)
 sqlx = { version = "0.8", default-features = false, optional = true }
@@ -50,14 +59,21 @@ base64 = "0.22"
 # Code mode: Monty, a Python interpreter in Rust, runs the model's programs.
 # Keep the interpreter, shared types and pool on the same exact release: new
 # MontyNode variants can break older interpreters even across a minor update.
-monty = { version = "=1.2.0", optional = true }
-monty-types = { version = "=1.2.0", optional = true }
-monty-pool = { version = "=1.2.0", optional = true }
+monty = { version = "=1.4.0", optional = true }
+monty-types = { version = "=1.4.0", optional = true }
+monty-pool = { version = "=1.4.0", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-test = "0.4"
 proptest = "1"
+
+# The telemetry lane's atomics are checked over every interleaving under
+# `RUSTFLAGS="--cfg gemini_adk_loom"` (a cfg of this name, so that no dependency
+# that also reacts to a bare `cfg(loom)` is affected); loom is only compiled
+# for that run.
+[target.'cfg(gemini_adk_loom)'.dev-dependencies]
+loom = "0.7"
 
 [features]
 # One TLS backend is on by default so a plain `cargo add` can dial `wss://`,
@@ -65,7 +81,7 @@ proptest = "1"
 # Pick the other TLS backend with `--no-default-features --features
 # tls-rustls,gemini-llm`; the two are mutually exclusive by construction (each
 # selects its own reqwest and tungstenite backend and nothing else selects one).
-default = ["tls-native", "gemini-llm", "code-mode"]
+default = ["tls-rustls", "gemini-llm", "code-mode"]
 gemini-llm = ["gemini-genai-rs/http", "gemini-genai-rs/generate"]
 # Code mode's in-process sandbox (Monty on a blocking thread).
 code-mode = ["dep:monty", "dep:monty-types"]
@@ -103,3 +119,12 @@ otel-gcp = ["gemini-genai-rs/otel-gcp"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"
+
+# Kept as its own process: it sets environment variables or global state.
+[[test]]
+name = "genai_spans"
+path = "tests/genai_spans.rs"

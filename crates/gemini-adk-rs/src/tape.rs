@@ -57,6 +57,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::llm::{BaseLlm, LlmError, LlmRequest, LlmResponse, ModelCapabilities};
+use crate::utils::text::truncate_chars;
 
 /// The kind of call a [`TapeEntry`] records.
 pub const LLM_CALL: &str = "llm";
@@ -301,7 +302,7 @@ impl<L: BaseLlm> BaseLlm for TapedLlm<L> {
                 Some(Err(message)) => Err(LlmError::Other(message)),
                 None => Err(LlmError::Config(format!(
                     "the replay tape holds no (more) recorded call for this request: {}",
-                    truncate(&input, 200)
+                    truncate_chars(&input, 200)
                 ))),
             },
         }
@@ -365,18 +366,11 @@ where
                 TapeMode::Replay => tape.next(&kind, &input).unwrap_or_else(|| {
                     Err(format!(
                         "the replay tape holds no (more) recorded {kind} call for {}",
-                        truncate(&input, 200)
+                        truncate_chars(&input, 200)
                     ))
                 }),
             }
         })
-    }
-}
-
-fn truncate(s: &str, max: usize) -> &str {
-    match s.char_indices().nth(max) {
-        Some((i, _)) => &s[..i],
-        None => s,
     }
 }
 

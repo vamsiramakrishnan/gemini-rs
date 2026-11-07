@@ -146,12 +146,19 @@ impl Decided {
                 question,
                 expect: Expect::Yes,
             }),
-            Value::Object(map) if map.len() == 1 => {
-                let (question, expect) = map.into_iter().next().expect("one entry");
+            Value::Object(map) => {
+                let mut entries = map.iter();
+                let (Some((question, expect)), None) = (entries.next(), entries.next()) else {
+                    return Err(format!(
+                        "decided takes a question id, or one {{question: expectation}} entry, not {}",
+                        Value::Object(map)
+                    ));
+                };
+                let question = question.clone();
                 let expect = match expect {
                     Value::Bool(true) => Expect::Yes,
                     Value::Bool(false) => Expect::No,
-                    Value::String(o) => Expect::Is(o),
+                    Value::String(o) => Expect::Is(o.clone()),
                     Value::Object(bound) => match (
                         bound.get("at_least").and_then(Value::as_f64),
                         bound.get("at_most").and_then(Value::as_f64),
@@ -198,14 +205,20 @@ impl schemars::JsonSchema for Decided {
     fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
         #[derive(schemars::JsonSchema)]
         #[serde(untagged)]
-        #[allow(dead_code)]
+        #[allow(
+            dead_code,
+            reason = "variants exist only to derive the JSON schema; never constructed"
+        )]
         enum Bound {
             AtLeast { at_least: f64 },
             AtMost { at_most: f64 },
         }
         #[derive(schemars::JsonSchema)]
         #[serde(untagged)]
-        #[allow(dead_code)]
+        #[allow(
+            dead_code,
+            reason = "variants exist only to derive the JSON schema; never constructed"
+        )]
         enum Expectation {
             /// `true` (yes) or `false` (no).
             Boolean(bool),
@@ -218,7 +231,10 @@ impl schemars::JsonSchema for Decided {
         /// `{question: expectation}` entry.
         #[derive(schemars::JsonSchema)]
         #[serde(untagged)]
-        #[allow(dead_code)]
+        #[allow(
+            dead_code,
+            reason = "variants exist only to derive the JSON schema; never constructed"
+        )]
         enum DecidedSchema {
             Question(String),
             Expecting(std::collections::BTreeMap<String, Expectation>),

@@ -14,8 +14,11 @@
 //! Prints p50 / p90 / max latency and the error count for each, and checks
 //! that the answers agree with the obvious reading of the turn.
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

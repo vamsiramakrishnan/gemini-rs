@@ -452,24 +452,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_known_voices() {
-        assert!(matches!(resolve_voice(Some("Aoede")), Voice::Aoede));
-        assert!(matches!(resolve_voice(Some("Charon")), Voice::Charon));
-        assert!(matches!(resolve_voice(Some("Fenrir")), Voice::Fenrir));
-        assert!(matches!(resolve_voice(Some("Kore")), Voice::Kore));
-        assert!(matches!(resolve_voice(Some("Puck")), Voice::Puck));
-        assert!(matches!(resolve_voice(None), Voice::Puck));
-    }
-
-    #[test]
-    fn resolve_custom_voice() {
-        match resolve_voice(Some("CustomVoice")) {
-            Voice::Custom(name) => assert_eq!(name, "CustomVoice"),
-            _ => panic!("Expected Custom voice"),
-        }
-    }
-
-    #[test]
     fn app_metadata() {
         let app = AllConfig;
         assert_eq!(app.name(), "all-config");

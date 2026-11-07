@@ -54,7 +54,7 @@ export function Bundles() {
       const labelsToSet = label.trim() ? [label.trim()] : [];
       const { version } = await api.push(name, spec, message, labelsToSet);
       setBundle({ name, version: version.version });
-      setNotice(`Saved ${name}@${version.version}${labelsToSet.length ? ` and pointed :${labelsToSet[0]} at it` : ''}.`);
+      setNotice(`Pushed ${name}@${version.version}${labelsToSet.length ? ` and pointed :${labelsToSet[0]} at it` : ''}.`);
       setMessage('');
       await refresh();
     } catch (err) {
@@ -103,7 +103,7 @@ export function Bundles() {
           ))}
         </datalist>
         <button type="button" className="primary" onClick={save} disabled={!name}>
-          Save version
+          Push bundle
         </button>
         <span className="hint mono">{store}</span>
       </div>

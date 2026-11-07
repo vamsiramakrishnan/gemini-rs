@@ -74,8 +74,11 @@
 //! `#[ignore]`d because it needs an embedder this suite does not have, not
 //! because the seam is empty.
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use common::corpus::{self, PROBES, payload_statements, says_any};
 use common::paraphrase::{self, Mode, Tier, overlap};
 use common::{ScratchDir, file_backed_engine};

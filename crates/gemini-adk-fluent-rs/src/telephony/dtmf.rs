@@ -99,22 +99,19 @@ impl DtmfDetector {
             }
             power[i] = s1 * s1 + s2 * s2 - coeff * s1 * s2;
         }
+        // `None` for an empty group: no tone to be strongest.
         let strongest = |group: &[f64]| {
-            let (best, &p) = group
-                .iter()
-                .enumerate()
-                .max_by(|a, b| a.1.total_cmp(b.1))
-                .expect("four tones");
+            let (best, &p) = group.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1))?;
             let runner_up = group
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| *i != best)
                 .map(|(_, &q)| q)
                 .fold(0.0, f64::max);
-            (best, p, runner_up)
+            Some((best, p, runner_up))
         };
-        let (row, row_power, row_next) = strongest(&power[..4]);
-        let (col, col_power, col_next) = strongest(&power[4..]);
+        let (row, row_power, row_next) = strongest(&power[..4])?;
+        let (col, col_power, col_next) = strongest(&power[4..])?;
         let dominant = row_power > row_next * EIGHT_DB && col_power > col_next * EIGHT_DB;
         let twist_ok = row_power < col_power * EIGHT_DB && col_power < row_power * EIGHT_DB;
         // A Goertzel power of P for a full-block sine means P * 2 / n of

@@ -617,7 +617,7 @@ impl LlmTextAgent {
 mod tests {
     use super::*;
     use crate::context::AgentEvent;
-    use crate::llm::{LlmError, LlmResponse};
+    use crate::llm::{LlmError, LlmResponse, MockLlm};
     use crate::middleware::Middleware;
     use gemini_genai_rs::prelude::{Content, Part, Role};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -813,30 +813,8 @@ mod tests {
     #[tokio::test]
     async fn llm_provider_switches_model_per_run() {
         // Two mock LLMs with distinguishable responses.
-        struct MockLlmA;
-        #[async_trait]
-        impl BaseLlm for MockLlmA {
-            fn model_id(&self) -> &str {
-                "mock-a"
-            }
-            async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-                Ok(text_response("from-a"))
-            }
-        }
-
-        struct MockLlmB;
-        #[async_trait]
-        impl BaseLlm for MockLlmB {
-            fn model_id(&self) -> &str {
-                "mock-b"
-            }
-            async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-                Ok(text_response("from-b"))
-            }
-        }
-
-        let llm_a = Arc::new(MockLlmA);
-        let llm_b = Arc::new(MockLlmB);
+        let llm_a = Arc::new(MockLlm::text("from-a").with_model_id("mock-a"));
+        let llm_b = Arc::new(MockLlm::text("from-b").with_model_id("mock-b"));
 
         // Agent with provider that switches based on escalate flag.
         let agent = LlmTextAgent::new("switcher", llm_a.clone()).llm_provider(move |state| {

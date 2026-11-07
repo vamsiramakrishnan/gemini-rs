@@ -32,6 +32,7 @@ struct Inner {
 /// | [`MockLlm::text`] | the same text, every call | wiring, prompts, state flow |
 /// | [`MockLlm::script`] | each response in turn, then an error | tool rounds, retries, multi-turn |
 /// | [`MockLlm::from_fn`] | whatever the closure returns | replies that depend on the request |
+/// | [`MockLlm::echo`] | the request's own text | prompt rendering and interpolation |
 ///
 /// Every call's [`LlmRequest`] is recorded, so a test can assert on what the
 /// agent actually sent — instructions, history, tool declarations, sampling —
@@ -100,6 +101,23 @@ impl MockLlm {
         F: Fn(&LlmRequest) -> Result<LlmResponse, LlmError> + Send + Sync + 'static,
     {
         Self::with_replies(Replies::Function(Box::new(reply)))
+    }
+
+    /// Reply with the text of the request: every text part of every content,
+    /// joined in order. For tests that assert on the prompt an agent built.
+    pub fn echo() -> Self {
+        Self::from_fn(|request| {
+            let text: String = request
+                .contents
+                .iter()
+                .flat_map(|content| &content.parts)
+                .filter_map(|part| match part {
+                    gemini_genai_rs::prelude::Part::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            Ok(LlmResponse::from_text(text))
+        })
     }
 
     /// Append a failure to a script, to test how an agent handles a provider
@@ -261,6 +279,18 @@ mod tests {
         });
         let reply = llm.generate(LlmRequest::from_text("x")).await.unwrap();
         assert_eq!(reply.text(), "1 turns");
+    }
+
+    #[tokio::test]
+    async fn echo_replies_with_the_request_text() {
+        let llm = MockLlm::echo();
+        let reply = llm
+            .generate(LlmRequest::from_text("say this"))
+            .await
+            .unwrap();
+        assert_eq!(reply.text(), "say this");
+        let none = llm.generate(LlmRequest::default()).await.unwrap();
+        assert_eq!(none.text(), "");
     }
 
     #[tokio::test]

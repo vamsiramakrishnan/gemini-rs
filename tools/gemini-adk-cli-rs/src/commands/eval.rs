@@ -8,7 +8,10 @@ use std::sync::Arc;
 
 #[derive(Deserialize)]
 struct EvalSetFile {
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "part of the eval-set file format; parsed so a malformed file is rejected, never read"
+    )]
     name: String,
     cases: Vec<EvalCase>,
 }
@@ -20,7 +23,10 @@ struct EvalCase {
     #[serde(default)]
     expected: Vec<String>,
     #[serde(default)]
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "part of the eval-set file format; parsed so a malformed file is rejected, never read"
+    )]
     tags: Vec<String>,
 }
 
@@ -68,12 +74,13 @@ pub async fn run(
     println!("\n  Evaluating: {} ({})\n", m.name, m.model);
 
     // Load evalset
-    let evalset_str = std::fs::read_to_string(evalset_path)?;
+    let evalset_str =
+        std::fs::read_to_string(evalset_path).map_err(|e| format!("{evalset_path}: {e}"))?;
     let evalset: EvalSetFile = serde_json::from_str(&evalset_str)?;
 
     // Load test config
     let config = if let Some(cf) = config_file {
-        let s = std::fs::read_to_string(cf)?;
+        let s = std::fs::read_to_string(cf).map_err(|e| format!("{cf}: {e}"))?;
         serde_json::from_str(&s)?
     } else {
         TestConfig {

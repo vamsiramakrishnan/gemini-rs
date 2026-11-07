@@ -25,8 +25,11 @@
 //! `target/tmp/decision-eval/`. `DECISION_EVAL_ONLY` (comma-separated id
 //! prefixes) runs a subset.
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;

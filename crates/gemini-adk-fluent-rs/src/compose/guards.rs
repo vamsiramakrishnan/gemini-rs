@@ -455,29 +455,9 @@ mod tests {
     // A no-op judge LLM for constructing LLM-backed guards in unit tests
     // (these tests exercise composition/naming, not the judge call itself).
     fn judge_llm() -> Arc<dyn BaseLlm> {
-        use gemini_adk_rs::llm::{LlmError, LlmResponse};
-        use gemini_genai_rs::prelude::{Content, Part, Role};
-
-        struct NoopJudge;
-        #[async_trait]
-        impl BaseLlm for NoopJudge {
-            fn model_id(&self) -> &str {
-                "noop-judge"
-            }
-            async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-                Ok(LlmResponse {
-                    content: Content {
-                        role: Some(Role::Model),
-                        parts: vec![Part::Text {
-                            text: r#"{"violation": false, "reason": "ok"}"#.to_string(),
-                        }],
-                    },
-                    finish_reason: Some("STOP".into()),
-                    usage: None,
-                })
-            }
-        }
-        Arc::new(NoopJudge)
+        Arc::new(gemini_adk_rs::llm::MockLlm::text(
+            r#"{"violation": false, "reason": "ok"}"#,
+        ))
     }
 
     #[test]

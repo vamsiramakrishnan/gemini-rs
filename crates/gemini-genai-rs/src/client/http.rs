@@ -60,6 +60,13 @@ pub enum HttpError {
     #[error("JSON parse error: {0}")]
     Json(#[from] serde_json::Error),
 
+    /// The HTTP method string is not a valid method token.
+    #[error("invalid HTTP method {method:?}")]
+    InvalidMethod {
+        /// The rejected method string.
+        method: String,
+    },
+
     /// All retries exhausted.
     #[error("All {attempts} retries exhausted: {last_error}")]
     RetriesExhausted {
@@ -219,6 +226,13 @@ impl HttpClient {
         auth_headers: Vec<(String, String)>,
         body: Option<&B>,
     ) -> Result<reqwest::Response, HttpError> {
+        // Parse once, before any attempt: an invalid method can never succeed
+        // on retry, and it is not a transport failure.
+        let http_method = reqwest::Method::from_bytes(method.as_bytes()).map_err(|_| {
+            HttpError::InvalidMethod {
+                method: method.to_string(),
+            }
+        })?;
         let mut last_error = String::new();
 
         for attempt in 0..=self.config.max_retries {
@@ -232,7 +246,10 @@ impl HttpClient {
             let _span = telemetry::spans::http_request_span(method, url);
             let start = std::time::Instant::now();
 
-            match self.execute_request(method, url, &auth_headers, body).await {
+            match self
+                .execute_request(&http_method, url, &auth_headers, body)
+                .await
+            {
                 Ok(response) => {
                     let status = response.status();
                     let duration_ms = start.elapsed().as_millis() as f64;
@@ -291,21 +308,12 @@ impl HttpClient {
     /// Execute a single HTTP request (no retry).
     async fn execute_request<B: serde::Serialize>(
         &self,
-        method: &str,
+        method: &reqwest::Method,
         url: &str,
         auth_headers: &[(String, String)],
         body: Option<&B>,
     ) -> Result<reqwest::Response, reqwest::Error> {
-        let mut builder = match method {
-            "POST" => self.inner.post(url),
-            "GET" => self.inner.get(url),
-            "DELETE" => self.inner.delete(url),
-            "PATCH" => self.inner.patch(url),
-            "PUT" => self.inner.put(url),
-            _ => self
-                .inner
-                .request(reqwest::Method::from_bytes(method.as_bytes()).unwrap(), url),
-        };
+        let mut builder = self.inner.request(method.clone(), url);
 
         for (key, value) in auth_headers {
             builder = builder.header(key, value);

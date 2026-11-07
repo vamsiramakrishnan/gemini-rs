@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 
 /// Agent manifest loaded from `agent.toml`.
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 pub struct AgentManifest {
     /// Agent name (used as identifier).
     pub name: String,
@@ -21,6 +20,10 @@ pub struct AgentManifest {
     pub tools: Vec<String>,
     /// Sub-agent references (directory names or paths).
     #[serde(default)]
+    #[allow(
+        dead_code,
+        reason = "part of the documented agent.toml schema; accepted but not wired yet"
+    )]
     pub sub_agents: Vec<String>,
     /// Sampling temperature (0.0–2.0). Controls randomness.
     #[serde(default)]
@@ -36,6 +39,10 @@ pub struct AgentManifest {
     pub voice: Option<String>,
     /// Output modality: "text", "audio", or "text_and_audio" (Live sessions).
     #[serde(default)]
+    #[allow(
+        dead_code,
+        reason = "part of the documented agent.toml schema; accepted but not wired yet"
+    )]
     pub output_modality: Option<String>,
 }
 
@@ -48,7 +55,6 @@ fn default_model() -> String {
 /// Looks for:
 ///   - `<dir>/agent.toml`               (single agent)
 ///   - `<dir>/<subdir>/agent.toml`       (multi-agent project)
-#[allow(dead_code)]
 pub fn discover_agents(dir: &Path) -> Vec<(PathBuf, AgentManifest)> {
     let mut agents = Vec::new();
 

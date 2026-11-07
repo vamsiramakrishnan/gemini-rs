@@ -398,59 +398,8 @@ impl PatternDetector for ConsecutiveFailureDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::MockWriter;
     use std::sync::atomic::{AtomicU32, Ordering};
-
-    /// Dummy SessionWriter for tests — all methods return Ok.
-    struct MockWriter;
-
-    #[async_trait::async_trait]
-    impl SessionWriter for MockWriter {
-        async fn send_audio(
-            &self,
-            _: bytes::Bytes,
-        ) -> Result<(), gemini_genai_rs::session::SessionError> {
-            Ok(())
-        }
-        async fn send_text(&self, _: String) -> Result<(), gemini_genai_rs::session::SessionError> {
-            Ok(())
-        }
-        async fn send_tool_response(
-            &self,
-            _: Vec<gemini_genai_rs::protocol::FunctionResponse>,
-        ) -> Result<(), gemini_genai_rs::session::SessionError> {
-            Ok(())
-        }
-        async fn send_client_content(
-            &self,
-            _: Vec<gemini_genai_rs::protocol::Content>,
-            _: bool,
-        ) -> Result<(), gemini_genai_rs::session::SessionError> {
-            Ok(())
-        }
-        async fn send_video(
-            &self,
-            _: bytes::Bytes,
-        ) -> Result<(), gemini_genai_rs::session::SessionError> {
-            Ok(())
-        }
-        async fn update_instruction(
-            &self,
-            _: String,
-        ) -> Result<(), gemini_genai_rs::session::SessionError> {
-            Ok(())
-        }
-        async fn signal_activity_start(
-            &self,
-        ) -> Result<(), gemini_genai_rs::session::SessionError> {
-            Ok(())
-        }
-        async fn signal_activity_end(&self) -> Result<(), gemini_genai_rs::session::SessionError> {
-            Ok(())
-        }
-        async fn disconnect(&self) -> Result<(), gemini_genai_rs::session::SessionError> {
-            Ok(())
-        }
-    }
 
     fn mock_writer() -> Arc<dyn SessionWriter> {
         Arc::new(MockWriter)

@@ -1,4 +1,6 @@
 [package]
+# Integration tests are one binary (tests/main.rs); see that file.
+autotests = false
 name = "gemini-memory-rs"
 version.workspace = true
 edition.workspace = true
@@ -24,6 +26,7 @@ gemini-adk-rs = { workspace = true, default-features = true }
 gemini-adk-fluent-rs = { workspace = true, default-features = true, optional = true }
 async-trait = "0.1"
 base64 = "0.22"
+# Memory records carry wall-clock timestamps that serialize into the schema.
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 parking_lot = "0.12"
 schemars = { version = "0.8", features = ["chrono"] }
@@ -56,3 +59,7 @@ gemini-llm = ["gemini-adk-rs/gemini-llm"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

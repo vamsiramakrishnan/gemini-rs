@@ -76,8 +76,8 @@ heavier is opt-in.
 | Feature | Enables | Default |
 |---------|---------|---------|
 | `live` | Live WebSocket session types and transport | yes |
-| `tls-native` | TLS via the platform's native library (enable exactly one TLS backend; with neither, a `wss://` dial fails immediately with `NoTlsBackend`) | yes |
-| `tls-rustls` | TLS via rustls with native root certificates | no |
+| `tls-rustls` | TLS via rustls with the platform's root certificates, pure Rust (enable exactly one TLS backend; with neither, a `wss://` dial fails immediately with `NoTlsBackend`) | yes |
+| `tls-native` | TLS via the platform's native library (OpenSSL on Linux, Secure Transport on macOS, SChannel on Windows) | no |
 | `vad` | Energy-based client-side voice activity detection | no |
 | `vad-wavekat` | VAD backed by the `wavekat-vad` model (implies `vad`) | no |
 | `http` | HTTP client (`reqwest`), required by every REST feature | no |

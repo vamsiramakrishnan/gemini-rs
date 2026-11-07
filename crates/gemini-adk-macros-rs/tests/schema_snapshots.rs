@@ -61,7 +61,10 @@ fn tool_snapshot(tool: &dyn ToolFunction) -> Value {
 /// A seat preference.
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "fields exist only so the derive has a schema to snapshot"
+)]
 enum Seating {
     /// Inside the restaurant.
     Indoor,
@@ -71,7 +74,10 @@ enum Seating {
 
 /// Who the booking is for.
 #[derive(Deserialize, JsonSchema)]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "fields exist only so the derive has a schema to snapshot"
+)]
 struct Guest {
     /// Full name.
     name: String,
@@ -118,7 +124,10 @@ async fn ping() -> &'static str {
 
 #[derive(Extract)]
 #[extract(name = "order", window = 2)]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "fields exist only so the derive has a schema to snapshot"
+)]
 struct Order {
     #[recognize(integer_near = ["want", "get"])]
     quantity: Option<i64>,
@@ -133,7 +142,10 @@ struct Order {
 
 #[derive(Frame)]
 #[frame(name = "booking")]
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "fields exist only so the derive has a schema to snapshot"
+)]
 struct Booking {
     #[slot(
         prompt = "For how many people?",

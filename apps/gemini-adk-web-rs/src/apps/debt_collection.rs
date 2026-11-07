@@ -623,7 +623,7 @@ fn promote_tool_response_state(name: &str, response: &Value, state: &State) {
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
             {
-                state.set("identity_verified", true);
+                let _ = state.set("identity_verified", true);
             }
         }
         "lookup_account" => {
@@ -632,31 +632,31 @@ fn promote_tool_response_state(name: &str, response: &Value, state: &State) {
             };
 
             if let Some(value) = obj.get("debtor_name") {
-                state.set("debtor_name", value.clone());
+                let _ = state.set("debtor_name", value.clone());
             }
             if let Some(value) = obj.get("creditor") {
-                state.set("creditor", value.clone());
+                let _ = state.set("creditor", value.clone());
             }
             if let Some(value) = obj.get("balance") {
-                state.set("balance", value.clone());
+                let _ = state.set("balance", value.clone());
             }
             if let Some(value) = obj.get("days_past_due") {
-                state.set("days_past_due", value.clone());
+                let _ = state.set("days_past_due", value.clone());
             }
             if let Some(value) = obj.get("account_id") {
-                state.set("account_id", value.clone());
+                let _ = state.set("account_id", value.clone());
             }
 
             let has_required_facts = obj.contains_key("creditor")
                 && obj.contains_key("balance")
                 && obj.contains_key("days_past_due");
             if has_required_facts {
-                state.set("account_loaded", true);
+                let _ = state.set("account_loaded", true);
             }
         }
         "process_payment" => {
             if response.get("status").and_then(|v| v.as_str()) == Some("processed") {
-                state.set("payment_processed", true);
+                let _ = state.set("payment_processed", true);
             }
         }
         "log_compliance_event" => {
@@ -670,26 +670,26 @@ fn promote_tool_response_state(name: &str, response: &Value, state: &State) {
 
             match event_type {
                 "disclosure_given" | "mini_miranda_acknowledged" => {
-                    state.set("disclosure_given", true);
+                    let _ = state.set("disclosure_given", true);
                 }
                 "identity_verified" => {
-                    state.set("identity_verified", true);
+                    let _ = state.set("identity_verified", true);
                 }
                 "debt_acknowledged" => {
                     if Phase::is_presented(state, "debt_details") {
-                        state.set("debt_acknowledged", true);
+                        let _ = state.set("debt_acknowledged", true);
                     }
                 }
                 "debt_disputed" => {
                     if Phase::is_presented(state, "debt_details") {
-                        state.set("negotiation_intent", "dispute");
+                        let _ = state.set("negotiation_intent", "dispute");
                     }
                 }
                 "cease_desist" => {
-                    state.set("cease_desist_requested", true);
+                    let _ = state.set("cease_desist_requested", true);
                 }
                 "payment_processed" => {
-                    state.set("payment_processed", true);
+                    let _ = state.set("payment_processed", true);
                 }
                 _ => {}
             }
@@ -1090,7 +1090,7 @@ impl DemoApp for DebtCollection {
                                         severity: "critical".into(),
                                         detail: "Debtor requested cease-and-desist — must stop collection".into(),
                                     });
-                                    state.set("cease_desist_active", true);
+                                    let _ = state.set("cease_desist_active", true);
                                 }
                             }
                         })
@@ -1317,7 +1317,7 @@ mod tests {
     #[test]
     fn compliance_debt_dispute_promotes_negotiation_intent() {
         let state = State::new();
-        state.set(Phase::presented_key("debt_details"), true);
+        let _ = state.set(Phase::presented_key("debt_details"), true);
         let result = execute_tool(
             "log_compliance_event",
             &json!({"event_type": "debt_disputed", "details": "Debtor disputes debt"}),

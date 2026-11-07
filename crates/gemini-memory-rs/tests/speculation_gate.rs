@@ -65,8 +65,11 @@
 //! stays in the report as a live measurement of how often the fast path fires,
 //! which is a latency question rather than a correctness one now.
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::collections::HashMap;
 use std::sync::Arc;
 

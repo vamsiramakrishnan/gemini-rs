@@ -19,6 +19,11 @@ on:
   schedule:
     - cron: '43 2 * * 5'
 
+# A new head on a PR cancels the analysis of the previous one.
+concurrency:
+  group: codeql-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})

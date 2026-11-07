@@ -235,6 +235,33 @@ cargo test -p gemini-genai-rs --all-features --lib
 
 Tests live alongside the code they test using `#[cfg(test)] mod tests` blocks. The `crates/gemini-adk-rs/src/test_helpers.rs` module provides shared test utilities.
 
+### Build speed
+
+The workspace is tuned for the edit-compile-test loop:
+
+- `[profile.dev]` (and `test`, which inherits it) keeps `line-tables-only`
+  debuginfo for workspace code and none for dependencies. Panics and
+  backtraces still name file and line in this repository's code. For a
+  debugger session on a dependency, build once with
+  `CARGO_PROFILE_DEV_DEBUG=2`.
+- `default-members` are the six library crates, so `cargo check` and
+  `cargo test` at the root do not build the examples, the servers and the
+  CLI. CI and `just` pass `--workspace`.
+- Each crate's integration tests are one binary: `tests/main.rs` declares
+  one `mod` per file. Add a test file by adding its `mod` line there. A
+  test that mutates process state (environment variables, a global
+  subscriber) gets its own `[[test]]` entry instead, as `spec_live_eval`
+  and `genai_spans` do.
+- One generation of each dependency family (`sha2`/`sha1`/`hmac`, `toml`,
+  rustls) so no crate compiles twice. `cargo tree --workspace -d` lists the
+  remaining duplicates, all from third-party crates.
+- CI cancels a pull request's superseded runs. Each job keeps its own
+  rust-cache target directory; a compilation cache shared across jobs was
+  tried with the Actions-cache backend and hit its write limits, so it
+  waits for a backend without them (see `docs/cleanup/build-speed.md`).
+
+Measurements for each of these are in `docs/cleanup/build-speed.md`.
+
 ## Commit Message Format
 
 Use [Conventional Commits](https://www.conventionalcommits.org/):

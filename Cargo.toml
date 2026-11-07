@@ -27,12 +27,25 @@ members = [
     "tools/gemini-adk-transpiler-rs",
     "tools/gemini-adk-cli-rs",
 ]
+# A plain `cargo check`/`cargo test` at the root builds the library crates,
+# not the 14 examples, the servers and the CLI as well: that is the loop a
+# change to the runtime goes through. CI and `just ci` pass `--workspace`.
+default-members = [
+    "crates/gemini-genai-rs",
+    "crates/gemini-adk-macros-rs",
+    "crates/gemini-adk-rs",
+    "crates/gemini-adk-fluent-rs",
+    "crates/gemini-memory-rs",
+    "crates/gemini-adk",
+]
 exclude = [
     "evals/turnbench/predictor",
     # Needs a newer toolchain than the workspace (see its rust-toolchain.toml).
     "evals/code-mode",
     # A load harness with its own lockfile; it never runs in CI.
     "evals/python-vs-rust",
+    # Its own workspace and lockfile (DSP chain evaluation); never in CI.
+    "evals/dspbench",
     # The Python binding crate links libpython and is built by maturin, not
     # `cargo build --workspace`; keep it out of the workspace graph/CI gates.
     "crates/gemini-adk-py",
@@ -64,6 +77,9 @@ gemini-adk-server-rs = { path = "apps/gemini-adk-server-rs",   version = "4.0.0"
 # Every crate is unsafe-free and says so with `#![forbid(unsafe_code)]` (the
 # audio ring is `rtrb`); this keeps any new `unsafe` visible in review.
 unsafe_code = "warn"
+# `--cfg gemini_adk_loom` swaps the telemetry lane's atomics for loom's model atomics
+# (gemini-adk-rs `live/telemetry.rs`); it is a cfg this workspace sets itself.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(gemini_adk_loom)'] }
 # `unreachable_pub` lives in each library crate's lib.rs rather than here:
 # it is the right lint for a library and pure noise for a binary.
 #
@@ -86,3 +102,15 @@ uninlined_format_args = "warn"
 unnecessary_wraps = "warn"
 unused_async = "warn"
 unused_self = "warn"
+
+# Build profiles. Debuginfo is what made a test build of this workspace 25 GB
+# and most of its link time: `line-tables-only` keeps file:line in panics and
+# backtraces for workspace code and drops the rest; dependencies carry none
+# (a backtrace into tokio or serde is read by name, not by line). `test`
+# inherits `dev`. Release builds are unchanged.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+

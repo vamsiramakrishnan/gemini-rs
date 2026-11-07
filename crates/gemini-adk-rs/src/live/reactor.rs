@@ -4,7 +4,7 @@
 //! reactions, and typed effects that existing mechanisms can migrate onto
 //! incrementally without rewriting the current control plane in one step.
 
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::time::{Duration, Instant};
 
 use gemini_genai_rs::prelude::Content;
@@ -218,7 +218,7 @@ impl LiveReactor {
     /// Run all rules against an event and collect reactions in rule order.
     pub fn react(&self, event: &ReactorEvent) -> Vec<Reaction> {
         let voice = {
-            let mut voice = self.voice.lock().expect("voice reactor state poisoned");
+            let mut voice = self.voice.lock();
             voice.apply_event_at(event, self.clock.now());
             voice.clone()
         };
@@ -231,10 +231,7 @@ impl LiveReactor {
 
     /// Return a snapshot of the current voice runtime state.
     pub fn voice_state(&self) -> VoiceRuntimeState {
-        self.voice
-            .lock()
-            .expect("voice reactor state poisoned")
-            .clone()
+        self.voice.lock().clone()
     }
 }
 

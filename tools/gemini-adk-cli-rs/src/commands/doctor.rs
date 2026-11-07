@@ -1,4 +1,3 @@
-use std::env;
 use std::net::TcpListener;
 use std::process::Command;
 
@@ -25,9 +24,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Auth ─────────────────────────────────────────────────────────
     print!("  Google AI API key ......... ");
-    let has_key = ["GOOGLE_GENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"]
-        .iter()
-        .find(|k| env::var(k).is_ok());
+    // The variable name only: the key itself is never printed.
+    let has_key = gemini_genai_rs::protocol::types::provider_key_variable();
     match has_key {
         Some(key_name) => println!("set ({})", key_name),
         None => println!("not set"),
@@ -35,12 +33,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Vertex AI ────────────────────────────────────────────────────
     print!("  Vertex AI project ......... ");
-    let vertex_project = env::var("GOOGLE_CLOUD_PROJECT")
-        .or_else(|_| env::var("GOOGLE_PROJECT_ID"))
-        .ok();
+    let vertex_project = gemini_genai_rs::protocol::types::cloud_project_from_env();
     match vertex_project.as_deref() {
         Some(project) => {
-            let loc = env::var("GOOGLE_CLOUD_LOCATION").unwrap_or_else(|_| "us-central1".into());
+            let loc = gemini_genai_rs::protocol::types::cloud_location_from_env();
             println!("{} ({})", project, loc);
         }
         None => println!("not configured (optional)"),

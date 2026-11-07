@@ -109,8 +109,11 @@
 
 #![cfg(feature = "gemini-llm")]
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::collections::{BTreeMap, HashMap};
 
 use common::corpus::{self, PROBES};

@@ -26,6 +26,10 @@ registration needed. From Asterisk, a plain `Dial(SIP/gemini@<host>)` works.
 | `GEMINI_API_KEY`    | —                                                      | Google AI key (or the Vertex trio) |
 | `GEMINI_LIVE_MODEL` | `models/gemini-2.5-flash-native-audio-preview-12-2025` | The Live model to dial             |
 | `SIP_BIND_ADDR`     | `0.0.0.0:5060`                                         | UDP address for SIP + RTP          |
+| `SIP_REGISTRAR`     | —                                                      | Register here (e.g. `sip:pbx.example.com`) before taking calls |
+| `SIP_USERNAME`      | —                                                      | Account on the registrar (with `SIP_REGISTRAR`) |
+| `SIP_PASSWORD`      | —                                                      | Digest password (with `SIP_REGISTRAR`) |
+| `SIP_REALM`         | —                                                      | Authentication realm, when the registrar needs it named |
 | `AGENT_INSTRUCTION` | a short receptionist prompt                            | System instruction for the session |
 
 RTP uses ephemeral UDP ports on the same interface; if the agent sits behind

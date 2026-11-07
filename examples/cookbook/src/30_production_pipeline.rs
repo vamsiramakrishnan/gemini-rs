@@ -14,11 +14,8 @@
 //! This example models a loan application processing pipeline.
 
 use gemini_adk_fluent_rs::prelude::*;
-#[allow(unused_imports)]
 use serde_json::json;
 use std::sync::Arc;
-#[allow(unused_imports)]
-use std::time::Duration;
 
 // Mock LLM for demonstration.
 struct MockLlm;

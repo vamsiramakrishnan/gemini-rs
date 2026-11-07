@@ -1,7 +1,12 @@
-//! Utility helpers for model name parsing and platform variant detection.
+//! Utility helpers: model name parsing, platform variant detection, text
+//! and timestamp helpers.
 
 /// Model name parsing helpers.
 pub mod model_name;
+/// Text helpers: code-fence stripping, truncation, `{key}` templating, edit distance.
+pub mod text;
+/// RFC 3339 timestamps without a date-time dependency.
+pub mod time;
 /// Platform variant detection (Gemini API vs Vertex AI).
 pub mod variant;
 

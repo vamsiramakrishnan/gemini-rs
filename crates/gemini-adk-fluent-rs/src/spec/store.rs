@@ -254,7 +254,7 @@ impl<O: BundleObjects> BundleStore for ObjectBundleStore<O> {
             name: name.to_string(),
             version,
             digest,
-            created_at: now_rfc3339(),
+            created_at: gemini_adk_rs::utils::time::now_rfc3339_millis(),
             message: message.map(str::to_string).filter(|m| !m.trim().is_empty()),
         };
         let bytes =
@@ -689,32 +689,6 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// The current time as RFC 3339 in UTC, to the millisecond.
-fn now_rfc3339() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = now.as_secs();
-    let (days, rem) = (secs / 86_400, secs % 86_400);
-    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
-    let z = days as i64 + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
-        rem / 3_600,
-        rem % 3_600 / 60,
-        rem % 60,
-        now.subsec_millis()
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -858,7 +832,7 @@ mod tests {
 
     #[test]
     fn timestamps_are_rfc3339() {
-        let now = now_rfc3339();
+        let now = gemini_adk_rs::utils::time::now_rfc3339_millis();
         assert_eq!(now.len(), 24, "{now}");
         assert!(now.starts_with("20") && now.ends_with('Z'), "{now}");
     }

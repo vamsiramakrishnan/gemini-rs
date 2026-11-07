@@ -97,6 +97,9 @@ pub enum EmbedError {
     #[error("Failed to parse response: {0}")]
     /// Response body failed to parse.
     Parse(#[from] serde_json::Error),
+    #[error("Failed to serialize request: {0}")]
+    /// A request field failed to serialize to JSON.
+    Serialize(#[source] serde_json::Error),
     #[error("Auth error: {0}")]
     /// Authentication/authorization failure.
     Auth(#[from] crate::session::AuthError),
@@ -127,7 +130,7 @@ impl Client {
         });
 
         if let Some(task_type) = config.task_type {
-            body["taskType"] = serde_json::to_value(task_type).unwrap();
+            body["taskType"] = serde_json::to_value(task_type).map_err(EmbedError::Serialize)?;
         }
         if let Some(title) = config.title {
             body["title"] = serde_json::Value::String(title);

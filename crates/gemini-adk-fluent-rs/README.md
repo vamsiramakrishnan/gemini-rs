@@ -63,7 +63,7 @@ Live::builder()
 | Feature | Default | Enables |
 |---|---|---|
 | `gemini-llm` | on | text generation through `GeminiLlm` (pure Rust) |
-| `tls-native` | on | the TLS backend (`tls-rustls` is the alternative) |
+| `tls-rustls` | on | the TLS backend: rustls with the platform's root certificates, pure Rust (`tls-native` uses the system library instead) |
 | `voice-io` | off | the `talk()` microphone/speaker loop — without it there is no `talk()` method on the handle (Linux needs `libasound2-dev`) |
 | `voice` | off | bundle: `voice-io` + `denoise` + `dsp` + `vad-wavekat`, everything a microphone application wants |
 | `full` | off | bundle: `voice` + `sip` + `http-tools` + `templates` + `otel-otlp`, with the default TLS backend |

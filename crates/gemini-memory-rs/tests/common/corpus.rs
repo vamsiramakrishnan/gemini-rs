@@ -35,7 +35,10 @@
 //! distinguishing token is in the probe's `forbid` list, so retrieving the
 //! wrong record fails by name instead of passing as close enough.
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared test helpers: each test binary uses a subset"
+)]
 
 use chrono::{Duration, Utc};
 

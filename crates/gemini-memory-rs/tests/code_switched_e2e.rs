@@ -14,8 +14,11 @@
 
 #![cfg(feature = "gemini-llm")]
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use gemini_memory_rs::core::{SessionId, TurnId};
 use gemini_memory_rs::engine::MemorySession;
 

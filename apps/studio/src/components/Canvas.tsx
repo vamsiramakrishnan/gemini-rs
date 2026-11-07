@@ -85,7 +85,7 @@ const StudioNodeView = memo(function StudioNodeView({ data, selected }: NodeProp
           </span>
         ))}
         {data.commit && (
-          <span className="chip chip-commit" title="confirm before">
+          <span className="chip chip-commit" title="confirm">
             ✓ {data.commit}
           </span>
         )}

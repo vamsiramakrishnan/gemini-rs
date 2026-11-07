@@ -6,9 +6,14 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 
+use crate::BoxFuture;
 use crate::error::ToolError;
 
 use super::ToolFunction;
+
+/// Async handler over deserialized arguments of type `T`.
+type TypedHandler<T> =
+    Box<dyn Fn(T) -> BoxFuture<Result<serde_json::Value, ToolError>> + Send + Sync>;
 
 /// Type-safe function tool with auto-generated JSON Schema.
 ///
@@ -41,15 +46,7 @@ pub struct TypedTool<T: DeserializeOwned + JsonSchema + Send + Sync + 'static> {
     name: String,
     description: String,
     schema: serde_json::Value,
-    #[allow(clippy::type_complexity)]
-    handler: Box<
-        dyn Fn(
-                T,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<serde_json::Value, ToolError>> + Send>,
-            > + Send
-            + Sync,
-    >,
+    handler: TypedHandler<T>,
     _phantom: PhantomData<T>,
 }
 
@@ -103,14 +100,14 @@ mod tests {
 
     /// A nested type is what triggers `definitions` + `$ref`.
     #[derive(Deserialize, JsonSchema)]
-    #[allow(dead_code)]
+    #[allow(dead_code, reason = "fixture types exist only to derive a schema")]
     enum Scope {
         Recent,
         Persistent,
     }
 
     #[derive(Deserialize, JsonSchema)]
-    #[allow(dead_code)]
+    #[allow(dead_code, reason = "fixture types exist only to derive a schema")]
     struct Args {
         /// What to look for.
         query: String,

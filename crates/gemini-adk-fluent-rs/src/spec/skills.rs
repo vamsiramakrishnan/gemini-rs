@@ -694,7 +694,7 @@ impl SkillSpec {
             let mut dispatcher = Some(dispatcher);
             crate::live::connect::apply_policies(&conversation.policies, &state, &mut dispatcher)
                 .map_err(|e| e.to_string())?;
-            Ok(dispatcher.expect("policy application retains dispatcher"))
+            dispatcher.ok_or_else(|| "policy application dropped the tool dispatcher".to_string())
         } else {
             Ok(dispatcher)
         }
@@ -1303,7 +1303,7 @@ impl SessionSpec {
                                 "memory fixture for '{skill}' contains an undeclared slot"
                             ));
                         } else {
-                            *fixture.values.write().expect("fixture memory lock") = json!(values);
+                            *fixture.values.write() = json!(values);
                         }
                     } else {
                         failures.push(format!("'{skill}' has no controlled replay memory adapter"));
@@ -1512,11 +1512,11 @@ async fn drain_services(
 }
 #[derive(Default)]
 struct FixtureMemory {
-    values: std::sync::RwLock<Value>,
+    values: parking_lot::RwLock<Value>,
 }
 impl FixtureMemory {
     fn projection(&self) -> Value {
-        let value = self.values.read().expect("fixture memory lock").clone();
+        let value = self.values.read().clone();
         if value.is_object() { value } else { json!({}) }
     }
 }

@@ -945,30 +945,8 @@ impl std::fmt::Debug for AgentBuilder {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use gemini_adk_rs::llm::{LlmError, LlmRequest, LlmResponse};
+    use gemini_adk_rs::llm::{LlmError, LlmRequest, LlmResponse, MockLlm};
     use gemini_genai_rs::prelude::{Content, Part, Role};
-
-    /// A mock LLM for build() tests.
-    struct MockLlm(String);
-
-    #[async_trait]
-    impl BaseLlm for MockLlm {
-        fn model_id(&self) -> &str {
-            "mock"
-        }
-        async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-            Ok(LlmResponse {
-                content: Content {
-                    role: Some(Role::Model),
-                    parts: vec![Part::Text {
-                        text: self.0.clone(),
-                    }],
-                },
-                finish_reason: Some("STOP".into()),
-                usage: None,
-            })
-        }
-    }
 
     #[test]
     fn builder_creates_with_name() {
@@ -1131,7 +1109,7 @@ mod tests {
 
     #[tokio::test]
     async fn build_produces_executable_agent() {
-        let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm("built agent output".into()));
+        let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm::text("built agent output"));
         let agent = AgentBuilder::new("test")
             .instruction("Be helpful")
             .temperature(0.5)
@@ -1146,7 +1124,7 @@ mod tests {
 
     #[tokio::test]
     async fn build_stores_output_in_state() {
-        let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm("state output".into()));
+        let llm: Arc<dyn BaseLlm> = Arc::new(MockLlm::text("state output"));
         let agent = AgentBuilder::new("test").build(llm).unwrap();
         let state = gemini_adk_rs::State::new();
         agent.run(&state).await.unwrap();
@@ -1155,38 +1133,7 @@ mod tests {
 
     #[tokio::test]
     async fn build_reads_input_from_state() {
-        use gemini_adk_rs::llm::LlmRequest;
-
-        // An LLM that echoes whatever it receives.
-        struct EchoLlm;
-        #[async_trait]
-        impl BaseLlm for EchoLlm {
-            fn model_id(&self) -> &str {
-                "echo"
-            }
-            async fn generate(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
-                let text: String = req
-                    .contents
-                    .iter()
-                    .flat_map(|c| &c.parts)
-                    .filter_map(|p| match p {
-                        Part::Text { text } => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("");
-                Ok(LlmResponse {
-                    content: Content {
-                        role: Some(Role::Model),
-                        parts: vec![Part::Text { text }],
-                    },
-                    finish_reason: Some("STOP".into()),
-                    usage: None,
-                })
-            }
-        }
-
-        let agent = AgentBuilder::new("echo").build(Arc::new(EchoLlm)).unwrap();
+        let agent = AgentBuilder::new("echo").build(MockLlm::echo()).unwrap();
         let state = gemini_adk_rs::State::new();
         let _ = state.set("input", "hello from state");
         let result = agent.run(&state).await.unwrap();

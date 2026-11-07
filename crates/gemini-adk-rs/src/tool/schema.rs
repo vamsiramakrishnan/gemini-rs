@@ -156,7 +156,7 @@ mod tests {
     use serde_json::json;
 
     #[derive(JsonSchema)]
-    #[allow(dead_code)]
+    #[allow(dead_code, reason = "fixture types exist only to derive a schema")]
     enum Seating {
         Indoor,
         Outdoor,
@@ -164,13 +164,13 @@ mod tests {
 
     /// A guest.
     #[derive(JsonSchema)]
-    #[allow(dead_code)]
+    #[allow(dead_code, reason = "fixture types exist only to derive a schema")]
     struct Guest {
         name: String,
     }
 
     #[derive(JsonSchema)]
-    #[allow(dead_code)]
+    #[allow(dead_code, reason = "fixture types exist only to derive a schema")]
     struct Booking {
         /// Where to sit.
         seating: Option<Seating>,

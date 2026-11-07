@@ -2,7 +2,7 @@
 
 use gemini_adk_macros_rs::tool;
 
-#[allow(dead_code)]
+#[allow(dead_code, reason = "the trybuild fixture only has to compile")]
 struct Weather;
 
 impl Weather {

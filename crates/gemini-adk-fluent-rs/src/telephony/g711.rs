@@ -13,26 +13,30 @@
 //! rate and the Live API's 16 kHz-in / 24 kHz-out contract.
 
 /// Encode one linear PCM16 sample as a μ-law byte (ITU-T G.711).
+///
+/// The rule is ITU-T G.191's `ulaw_compress` (the STL reference
+/// implementation of G.711): the 16-bit sample is taken to the 14-bit
+/// domain with an arithmetic shift, a negative sample's magnitude is its
+/// one's complement (so `-1` encodes as negative zero, `0x7F`, and `-4` as
+/// the first negative step), the bias of 33 is added, and the segment and
+/// mantissa are read off the biased value. Bit-exact with G.191 for every
+/// input (`reference_tests`). The Sun `g711.c` formulation used by sox and
+/// Asterisk negates instead of complementing and differs from G.191 by one
+/// code at negative step boundaries; decoders agree on both.
 pub fn linear_to_ulaw(sample: i16) -> u8 {
-    const BIAS: i32 = 0x84; // 132: shifts the segment boundaries per G.711
-    const CLIP: i32 = 32_635;
+    const BIAS: i32 = 33; // the G.711 bias (0x84) in the 14-bit domain
+    const CLIP: i32 = 0x1FFF;
 
-    let sign: u8 = if sample < 0 { 0x80 } else { 0 };
-    let mut magnitude = (sample as i32).abs().min(CLIP) + BIAS;
-
-    // Segment: how far the magnitude's top bit sits above the base segment
-    // (segment 0 spans biased magnitudes up to 0xFF).
-    let mut segment: u8 = 0;
-    let mut probe = magnitude >> 8;
-    while probe > 0 && segment < 7 {
-        segment += 1;
-        probe >>= 1;
-    }
-
-    magnitude >>= segment + 3;
-    let mantissa = (magnitude & 0x0F) as u8;
-    // μ-law transmits the byte inverted (all-ones is silence on the wire).
-    !(sign | (segment << 4) | mantissa)
+    let value = i32::from(sample);
+    let absno = if value < 0 { (!value) >> 2 } else { value >> 2 } + BIAS;
+    let absno = absno.min(CLIP);
+    // Segment: one plus the number of significant bits above the lowest six.
+    let segno = 1 + (32 - (absno >> 6).leading_zeros()) as i32;
+    let high_nibble = 8 - segno;
+    let low_nibble = 0x0F - ((absno >> segno) & 0x0F);
+    let byte = ((high_nibble << 4) | low_nibble) as u8;
+    // The sign bit is set for non-negative samples (all-ones is silence).
+    if value >= 0 { byte | 0x80 } else { byte }
 }
 
 /// Decode one μ-law byte to a linear PCM16 sample (ITU-T G.711).
@@ -51,27 +55,31 @@ pub fn ulaw_to_linear(byte: u8) -> i16 {
 }
 
 /// Encode one linear PCM16 sample as an A-law byte (ITU-T G.711).
+///
+/// G.711 defines the encoder on a 13-bit input; the 16-bit sample is taken
+/// to that domain with an arithmetic shift and a negative sample's
+/// magnitude is `-v - 1`, which equals the one's complement ITU-T G.191's
+/// `alaw_compress` takes. Bit-exact with G.191 for every input
+/// (`reference_tests`).
 pub fn linear_to_alaw(sample: i16) -> u8 {
-    const CLIP: i32 = 32_635;
+    // Upper bound of each segment in the 13-bit domain.
+    const SEG_END: [i32; 8] = [0x1F, 0x3F, 0x7F, 0xFF, 0x1FF, 0x3FF, 0x7FF, 0xFFF];
 
-    let sign: u8 = if sample >= 0 { 0x80 } else { 0 };
-    let magnitude = (sample as i32).abs().min(CLIP);
-
-    let compressed = if magnitude >= 256 {
-        let mut segment: u8 = 1;
-        let mut probe = magnitude >> 9;
-        while probe > 0 && segment < 7 {
-            segment += 1;
-            probe >>= 1;
-        }
-        let mantissa = ((magnitude >> (segment + 3)) & 0x0F) as u8;
-        (segment << 4) | mantissa
+    let value = i32::from(sample) >> 3;
+    // A-law XORs alternate bits on the wire (0x55), and the sign bit is set
+    // for non-negative samples: the two masks fold both into one XOR.
+    let (magnitude, mask) = if value >= 0 {
+        (value, 0xD5u8)
     } else {
-        (magnitude >> 4) as u8
+        (-value - 1, 0x55u8)
     };
-
-    // A-law XORs alternate bits on the wire.
-    (sign | compressed) ^ 0x55
+    let segment = SEG_END.iter().position(|&end| magnitude <= end);
+    let Some(segment) = segment else {
+        return 0x7F ^ mask;
+    };
+    let shift = if segment < 2 { 1 } else { segment };
+    let mantissa = ((magnitude >> shift) & 0x0F) as u8;
+    (((segment as u8) << 4) | mantissa) ^ mask
 }
 
 /// Decode one A-law byte to a linear PCM16 sample (ITU-T G.711).
@@ -257,31 +265,55 @@ mod tests {
         }
     }
 
+    /// μ-law's sign symmetry is G.191's, not naive negation: a negative
+    /// sample's magnitude is its one's complement, so `-x` encodes as the
+    /// mirror of `x - 1`, and the round trip of `-x` is the negation of the
+    /// round trip of `x - 1`.
     #[test]
-    fn ulaw_negative_values_symmetric() {
-        // Negative and positive values should have symmetric round-trip errors
-        for &abs_val in &[100i16, 256, 1000, 8000, 20000] {
-            let pos_rt = ulaw_to_linear(linear_to_ulaw(abs_val));
-            let neg_rt = ulaw_to_linear(linear_to_ulaw(-abs_val));
+    fn ulaw_negative_values_mirror_the_reference() {
+        for x in 1..=i16::MAX {
             assert_eq!(
-                pos_rt as i32 + neg_rt as i32,
-                0,
-                "μ-law should preserve sign symmetry: {pos_rt} + {neg_rt} != 0"
+                linear_to_ulaw(-x) ^ 0x80,
+                linear_to_ulaw(x - 1),
+                "μ-law mirror relation at {x}"
+            );
+            assert_eq!(
+                i32::from(ulaw_to_linear(linear_to_ulaw(-x))),
+                -i32::from(ulaw_to_linear(linear_to_ulaw(x - 1))),
+                "μ-law round-trip mirror at {x}"
             );
         }
     }
 
+    /// A-law's sign symmetry is the reference's, not naive negation: a
+    /// two's-complement input has no negative zero, so `-x` encodes as the
+    /// mirror of `x - 1` (ITU-T G.191 `alaw_compress` takes `~x`, the Sun
+    /// reference `-x - 1`). At an exact segment boundary such as ±256 the
+    /// two reconstructions therefore differ by one step (264 and -248), and
+    /// the decoder is exactly odd: mirrored codes decode to negated values.
     #[test]
-    fn alaw_negative_values_symmetric() {
-        // A-law should also preserve sign symmetry
-        for &abs_val in &[100i16, 256, 1000, 8000, 20000] {
+    fn alaw_negative_values_mirror_the_reference() {
+        for x in 1..=i16::MAX {
+            assert_eq!(
+                linear_to_alaw(-x) ^ 0x80,
+                linear_to_alaw(x - 1),
+                "A-law: -{x} must mirror {}",
+                x - 1
+            );
+        }
+        for byte in 0..=u8::MAX {
+            assert_eq!(
+                i32::from(alaw_to_linear(byte ^ 0x80)),
+                -i32::from(alaw_to_linear(byte)),
+                "A-law decoder must be odd at byte {byte:#04x}"
+            );
+        }
+        // Away from a boundary the round trips are still negatives of each
+        // other, which is what a listener hears.
+        for &abs_val in &[100i16, 1000, 8000, 20000] {
             let pos_rt = alaw_to_linear(linear_to_alaw(abs_val));
             let neg_rt = alaw_to_linear(linear_to_alaw(-abs_val));
-            assert_eq!(
-                pos_rt as i32 + neg_rt as i32,
-                0,
-                "A-law should preserve sign symmetry: {pos_rt} + {neg_rt} != 0"
-            );
+            assert_eq!(i32::from(pos_rt) + i32::from(neg_rt), 0, "{abs_val}");
         }
     }
 
@@ -319,5 +351,193 @@ mod tests {
             large_neg, large_neg2,
             "A-law should clip large negative values to same result"
         );
+    }
+}
+
+/// Comparison against a transcription of ITU-T G.191's `g711.c` (the STL
+/// reference implementation of G.711, version 3.01, fetched from the ITU's
+/// repository): every encoder and decoder is compared for every input, the
+/// decoders' outputs round-trip through the encoders, and a handful of
+/// literal pairs from the G.711 tables anchor both directions so a shared
+/// transcription error cannot pass.
+#[cfg(test)]
+mod reference_tests {
+    use super::*;
+
+    // ---- ITU-T G.191 g711.c, ulaw_compress ---------------------------------
+    // `short` arithmetic in the original; i32 here holds the same values.
+    fn g191_ulaw_compress(linbuf: i16) -> u8 {
+        let linbuf = i32::from(linbuf);
+        let mut absno = if linbuf < 0 {
+            ((!linbuf) >> 2) + 33
+        } else {
+            (linbuf >> 2) + 33
+        };
+        if absno > 0x1FFF {
+            absno = 0x1FFF;
+        }
+        let mut i = absno >> 6;
+        let mut segno = 1;
+        while i != 0 {
+            segno += 1;
+            i >>= 1;
+        }
+        let high_nibble = 0x0008 - segno;
+        let mut low_nibble = (absno >> segno) & 0x000F;
+        low_nibble = 0x000F - low_nibble;
+        let mut logbuf = (high_nibble << 4) | low_nibble;
+        if linbuf >= 0 {
+            logbuf |= 0x0080;
+        }
+        logbuf as u8
+    }
+
+    // ---- ITU-T G.191 g711.c, ulaw_expand ----------------------------------
+    fn g191_ulaw_expand(logbuf: u8) -> i16 {
+        let logbuf = i32::from(logbuf);
+        let sign = if logbuf < 0x0080 { -1 } else { 1 };
+        let mut mantissa = !logbuf;
+        let exponent = (mantissa >> 4) & 0x0007;
+        let segment = exponent + 1;
+        mantissa &= 0x000F;
+        let step = 4 << segment;
+        (sign * ((0x0080 << exponent) + step * mantissa + step / 2 - 4 * 33)) as i16
+    }
+
+    // ---- ITU-T G.191 g711.c, alaw_compress ---------------------------------
+    fn g191_alaw_compress(linbuf: i16) -> u8 {
+        let linbuf = i32::from(linbuf);
+        let mut ix = if linbuf < 0 {
+            (!linbuf) >> 4
+        } else {
+            linbuf >> 4
+        };
+        if ix > 15 {
+            let mut iexp = 1;
+            while ix > 16 + 15 {
+                ix >>= 1;
+                iexp += 1;
+            }
+            ix -= 16;
+            ix += iexp << 4;
+        }
+        if linbuf >= 0 {
+            ix |= 0x0080;
+        }
+        (ix ^ 0x0055) as u8
+    }
+
+    // ---- ITU-T G.191 g711.c, alaw_expand -----------------------------------
+    fn g191_alaw_expand(logbuf: u8) -> i16 {
+        let logbuf = i32::from(logbuf);
+        let mut ix = logbuf ^ 0x0055;
+        ix &= 0x007F;
+        let iexp = ix >> 4;
+        let mut mant = ix & 0x000F;
+        if iexp > 0 {
+            mant += 16;
+        }
+        mant = (mant << 4) + 0x0008;
+        if iexp > 1 {
+            mant <<= iexp - 1;
+        }
+        (if logbuf > 127 { mant } else { -mant }) as i16
+    }
+
+    fn disagreements(name: &str, f: impl Fn(i16) -> u8, g: impl Fn(i16) -> u8) {
+        let bad: Vec<String> = (i16::MIN..=i16::MAX)
+            .filter(|&s| f(s) != g(s))
+            .map(|s| format!("sample {s}: crate {:#04x} G.191 {:#04x}", f(s), g(s)))
+            .collect();
+        assert!(
+            bad.is_empty(),
+            "{name}: {} of 65536 disagree; first 20: {:#?}",
+            bad.len(),
+            &bad[..bad.len().min(20)]
+        );
+    }
+
+    #[test]
+    fn ulaw_encoder_matches_g191_for_every_i16() {
+        disagreements("ulaw", linear_to_ulaw, g191_ulaw_compress);
+    }
+
+    #[test]
+    fn alaw_encoder_matches_g191_for_every_i16() {
+        disagreements("alaw", linear_to_alaw, g191_alaw_compress);
+    }
+
+    #[test]
+    fn decoders_match_g191_for_every_byte() {
+        for b in 0..=u8::MAX {
+            assert_eq!(ulaw_to_linear(b), g191_ulaw_expand(b), "ulaw {b:#04x}");
+            assert_eq!(alaw_to_linear(b), g191_alaw_expand(b), "alaw {b:#04x}");
+        }
+    }
+
+    /// Every code's decoded value encodes back to the same code, except
+    /// μ-law negative zero (`0x7F`), which decodes to 0 and re-encodes as
+    /// positive zero (`0xFF`).
+    #[test]
+    fn decoded_values_round_trip_through_the_encoders() {
+        for b in 0..=u8::MAX {
+            assert_eq!(linear_to_alaw(alaw_to_linear(b)), b, "alaw {b:#04x}");
+            let expected = if b == 0x7F { 0xFF } else { b };
+            assert_eq!(linear_to_ulaw(ulaw_to_linear(b)), expected, "ulaw {b:#04x}");
+        }
+    }
+
+    /// Literal anchors from the G.711 tables (Table 2a/2b): full scale,
+    /// silence and the first steps, in both directions.
+    #[test]
+    fn known_ulaw_pairs() {
+        let decode: [(u8, i16); 6] = [
+            (0xFF, 0),       // positive zero: silence
+            (0x7F, 0),       // negative zero
+            (0x00, -32_124), // most negative
+            (0x80, 32_124),  // most positive
+            (0xFE, 8),       // first positive step
+            (0x7E, -8),      // first negative step
+        ];
+        for (byte, pcm) in decode {
+            assert_eq!(ulaw_to_linear(byte), pcm, "decode {byte:#04x}");
+        }
+        let encode: [(i16, u8); 7] = [
+            (0, 0xFF),
+            (32_767, 0x80),
+            (-32_768, 0x00),
+            (8, 0xFE),
+            (-8, 0x7E),
+            (-1, 0x7F), // one's complement: the smallest negative is negative zero
+            (-4, 0x7F), // ~(-4) >> 2 = 0: still negative zero; -8 is the first step
+        ];
+        for (pcm, byte) in encode {
+            assert_eq!(linear_to_ulaw(pcm), byte, "encode {pcm}");
+        }
+    }
+
+    #[test]
+    fn known_alaw_pairs() {
+        let decode: [(u8, i16); 6] = [
+            (0xD5, 8), // A-law silence byte
+            (0x55, -8),
+            (0xAA, 32_256),  // largest positive
+            (0x2A, -32_256), // largest negative
+            (0xD4, 24),
+            (0x54, -24),
+        ];
+        for (byte, pcm) in decode {
+            assert_eq!(alaw_to_linear(byte), pcm, "decode {byte:#04x}");
+        }
+        let encode: [(i16, u8); 5] = [
+            (0, 0xD5),
+            (32_767, 0xAA),
+            (-32_768, 0x2A),
+            (8, 0xD5),
+            (-8, 0x55),
+        ];
+        for (pcm, byte) in encode {
+            assert_eq!(linear_to_alaw(pcm), byte, "encode {pcm}");
+        }
     }
 }

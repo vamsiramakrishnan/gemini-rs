@@ -26,6 +26,18 @@ use sha1::Sha1;
 
 type HmacSha1 = Hmac<Sha1>;
 
+/// HMAC-SHA1 keyed with the session's authentication key.
+///
+/// HMAC zero-pads a key shorter than the hash's block size, so the key is
+/// handed over already padded to one full block. `Mac::new` takes exactly
+/// a block and has no length to reject, where `new_from_slice` returns a
+/// `Result` that can never be an error for HMAC.
+fn auth_mac(key: &[u8; AUTH_KEY_LEN]) -> HmacSha1 {
+    let mut block = hmac::digest::Key::<HmacSha1>::default();
+    block[..AUTH_KEY_LEN].copy_from_slice(key);
+    <HmacSha1 as hmac::digest::KeyInit>::new(&block)
+}
+
 const MASTER_KEY_LEN: usize = 16;
 const MASTER_SALT_LEN: usize = 14;
 const AUTH_KEY_LEN: usize = 20;
@@ -86,7 +98,9 @@ impl MasterKey {
     pub fn generate() -> std::io::Result<Self> {
         let mut bytes = [0u8; MASTER_KEY_LEN + MASTER_SALT_LEN];
         getrandom::fill(&mut bytes).map_err(std::io::Error::other)?;
-        Ok(Self::from_bytes(&bytes).expect("the length is right"))
+        Self::from_bytes(&bytes).ok_or_else(|| {
+            std::io::Error::other("generated key material is not a master key and salt long")
+        })
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -330,8 +344,7 @@ impl SrtpSession {
             None => (0, u64::from(seq)),
         };
 
-        let mut mac =
-            <HmacSha1 as Mac>::new_from_slice(&self.keys.auth_key).expect("any key length");
+        let mut mac = auth_mac(&self.keys.auth_key);
         mac.update(authenticated);
         mac.update(&roc.to_be_bytes());
         mac.verify_truncated_left(tag)
@@ -389,8 +402,7 @@ impl SrtpSession {
     }
 
     fn tag(&self, authenticated: &[u8], roc: u32) -> [u8; 20] {
-        let mut mac =
-            <HmacSha1 as Mac>::new_from_slice(&self.keys.auth_key).expect("any key length");
+        let mut mac = auth_mac(&self.keys.auth_key);
         mac.update(authenticated);
         mac.update(&roc.to_be_bytes());
         mac.finalize().into_bytes().into()
@@ -456,6 +468,19 @@ mod tests {
     fn rfc_master() -> MasterKey {
         let bytes = hex("E1F97A0D3E018BE0D64FA32C06DE4139 0EC675AD498AFEEBB6960B3AABE6");
         MasterKey::from_bytes(&bytes).unwrap()
+    }
+
+    /// The padded-block construction is HMAC keyed by the bare 20-byte key.
+    #[test]
+    fn auth_mac_matches_hmac_keyed_by_the_bare_key() {
+        let key: [u8; AUTH_KEY_LEN] = hex("CEBE321F6FF7716B6FD4AB49AF256A156D38BAA4")
+            .try_into()
+            .unwrap();
+        let mut padded = auth_mac(&key);
+        padded.update(b"authenticated portion");
+        let mut bare = <HmacSha1 as hmac::digest::KeyInit>::new_from_slice(&key).unwrap();
+        bare.update(b"authenticated portion");
+        assert_eq!(padded.finalize().into_bytes(), bare.finalize().into_bytes());
     }
 
     /// RFC 3711 Appendix B.3.

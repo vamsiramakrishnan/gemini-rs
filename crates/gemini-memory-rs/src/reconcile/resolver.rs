@@ -77,18 +77,13 @@ impl Resolver {
             })
             .collect();
 
-        if competing.is_empty() {
+        let Some(incumbent) = competing.iter().max_by(|a, b| {
+            a.temporal
+                .last_confirmed_at
+                .cmp(&b.temporal.last_confirmed_at)
+        }) else {
             return self.create_or_stage(proposal, now);
-        }
-
-        let incumbent = competing
-            .iter()
-            .max_by(|a, b| {
-                a.temporal
-                    .last_confirmed_at
-                    .cmp(&b.temporal.last_confirmed_at)
-            })
-            .expect("non-empty");
+        };
 
         // 4. An inference may not overrule something the user said outright.
         if !proposal.explicitness.is_explicit() && incumbent.source.is_explicit() {

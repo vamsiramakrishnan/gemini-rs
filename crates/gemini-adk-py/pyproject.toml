@@ -5,20 +5,40 @@ build-backend = "maturin"
 [project]
 name = "gemini-adk"
 version = "4.0.0"
-description = "Python access to the gemini-rs governed-conversation data plane: author, compile, validate, and deterministically simulate voice-agent conversation specs."
+description = "Gemini text agents, tools, Live sessions, session specs and offline simulation, on the gemini-rs Rust runtime."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-keywords = ["voice", "agent", "conversation", "governance", "gemini", "llm"]
+keywords = ["gemini", "voice", "agent", "conversation", "governance", "llm", "live"]
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Typing :: Typed",
     "Intended Audience :: Developers",
 ]
+dependencies = []
+
+[project.optional-dependencies]
+# Typed answers from a Pydantic model's JSON Schema (`Agent.ask_as`).
+pydantic = ["pydantic>=2"]
+# The test suite and type checks (`pytest`, `stubtest`).
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "pytest-timeout>=2", "mypy>=1.14", "typing_extensions>=4.12"]
 
 [tool.maturin]
-# The compiled module is `gemini_adk` (see [lib].name in Cargo.toml); the pure
-# Python wrapper package lives under python/.
+# The compiled module is `gemini_adk._gemini_adk` (see [lib].name in
+# Cargo.toml); the pure Python package under python/ re-exports it and adds
+# the `@tool` decorator and the Pydantic helper.
 python-source = "python"
 module-name = "gemini_adk._gemini_adk"
 features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# A hung bridge or a deadlock shows up as a timeout, not a stuck job.
+timeout = 120
+timeout_method = "thread"
+
+[tool.mypy]
+strict = true

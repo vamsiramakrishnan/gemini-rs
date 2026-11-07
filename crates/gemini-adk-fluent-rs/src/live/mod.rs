@@ -677,7 +677,7 @@ mod tests {
 
     #[test]
     fn builder_with_extraction_compiles() {
-        use gemini_adk_rs::llm::{BaseLlm, LlmError, LlmRequest, LlmResponse};
+        use gemini_adk_rs::llm::MockLlm;
         use schemars::JsonSchema;
 
         #[derive(serde::Deserialize, serde::Serialize, JsonSchema)]
@@ -686,23 +686,11 @@ mod tests {
             items: Vec<String>,
         }
 
-        struct FakeLlm;
-
-        #[async_trait::async_trait]
-        impl BaseLlm for FakeLlm {
-            fn model_id(&self) -> &str {
-                "fake"
-            }
-            async fn generate(&self, _req: LlmRequest) -> Result<LlmResponse, LlmError> {
-                Err(LlmError::RequestFailed("FakeLlm never generates".into()))
-            }
-        }
-
         let _live = Live::builder()
             .model(ModelId::LIVE_2_5_FLASH_NATIVE_AUDIO)
             .instruction("Restaurant order assistant")
             .extract_turns::<OrderState>(
-                Arc::new(FakeLlm),
+                Arc::new(MockLlm::script([])),
                 "Extract order state: items, quantities, phase",
             )
             .on_extracted(|name, value| async move {

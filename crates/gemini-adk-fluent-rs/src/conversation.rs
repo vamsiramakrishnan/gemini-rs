@@ -537,6 +537,8 @@ pub struct Conversation {
     /// When `Some(i)`, stage setters target `spec.overlays[i]` instead of the main
     /// flow (between `.overlay(..)` and `.end_overlay()`).
     current_overlay: Option<usize>,
+    /// Builder misuse found while chaining, reported by [`compile`](Self::compile).
+    issues: Vec<String>,
 }
 
 impl Conversation {
@@ -549,6 +551,7 @@ impl Conversation {
             },
             resolvers: Vec::new(),
             current_overlay: None,
+            issues: Vec::new(),
         }
     }
 
@@ -631,21 +634,27 @@ impl Conversation {
         self
     }
 
-    fn current(&mut self) -> &mut StageSpec {
+    /// Apply `configure` to the stage most recently declared with
+    /// [`stage`](Self::stage). With no stage declared there is nothing to
+    /// configure: the misuse is recorded and [`compile`](Self::compile) reports it.
+    fn configure_stage(&mut self, setter: &str, configure: impl FnOnce(&mut StageSpec)) {
         let stages = match self.current_overlay {
             Some(i) => &mut self.spec.overlays[i].stages,
             None => &mut self.spec.stages,
         };
-        stages
-            .last_mut()
-            .expect("call .stage(..) before configuring a stage")
+        match stages.last_mut() {
+            Some(stage) => configure(stage),
+            None => self.issues.push(format!(
+                "`.{setter}(..)` was called before `.stage(..)`: there is no stage to configure"
+            )),
+        }
     }
 
     /// Set the stage's instruction: guidance projected to the model while the
     /// stage is active. It steers what the model says; it is not verbatim
     /// speech and carries no guarantee of exact wording.
     pub fn instruction(mut self, text: impl Into<String>) -> Self {
-        self.current().say = Some(text.into());
+        self.configure_stage("instruction", |stage| stage.say = Some(text.into()));
         self
     }
 
@@ -657,7 +666,7 @@ impl Conversation {
 
     /// Set the stage's grounding template.
     pub fn ground(mut self, template: impl Into<String>) -> Self {
-        self.current().ground = Some(template.into());
+        self.configure_stage("ground", |stage| stage.ground = Some(template.into()));
         self
     }
 
@@ -667,7 +676,9 @@ impl Conversation {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.current().collect = fields.into_iter().map(Into::into).collect();
+        self.configure_stage("collect", |stage| {
+            stage.collect = fields.into_iter().map(Into::into).collect();
+        });
         self
     }
 
@@ -677,9 +688,10 @@ impl Conversation {
     /// confirmation and repair.
     pub fn collect_frame<F: Frame>(mut self) -> Self {
         let spec = F::frame();
-        let stage = self.current();
-        stage.collect = spec.slot_keys();
-        stage.frame = Some(spec);
+        self.configure_stage("collect_frame", |stage| {
+            stage.collect = spec.slot_keys();
+            stage.frame = Some(spec);
+        });
         self
     }
 
@@ -694,31 +706,37 @@ impl Conversation {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.current().allow = tools.into_iter().map(Into::into).collect();
+        self.configure_stage("allow", |stage| {
+            stage.allow = tools.into_iter().map(Into::into).collect();
+        });
         self
     }
 
     /// Set an explicit completion guard for this stage: the stage counts as
     /// complete when `guard` holds (default: all `collect`ed slots captured).
     pub fn complete_when(mut self, guard: Guard) -> Self {
-        self.current().done = Some(guard);
+        self.configure_stage("complete_when", |stage| stage.done = Some(guard));
         self
     }
 
     /// Commit a confirm-before-act tool in this stage, gated by `when`.
     pub fn commit(mut self, tool: impl Into<String>, when: Guard) -> Self {
-        self.current().commit = Some(CommitSpec {
-            tool: tool.into(),
-            when,
+        self.configure_stage("commit", |stage| {
+            stage.commit = Some(CommitSpec {
+                tool: tool.into(),
+                when,
+            });
         });
         self
     }
 
     /// Add a forward transition to `to` when `when` holds.
     pub fn next(mut self, to: impl Into<String>, when: Guard) -> Self {
-        self.current().next.push(TransitionSpec {
-            to: to.into(),
-            when,
+        self.configure_stage("next", |stage| {
+            stage.next.push(TransitionSpec {
+                to: to.into(),
+                when,
+            });
         });
         self
     }
@@ -745,19 +763,26 @@ impl Conversation {
         Fut: Future<Output = Result<Value, String>> + Send + 'static,
     {
         let name = name.into();
-        let stage = self.current().id.clone();
         let args: Vec<String> = args.into_iter().map(Into::into).collect();
-        if !self.current().collect.contains(&name) {
-            self.current().collect.push(name.clone());
-        }
-        // Record the serializable declaration too, so `into_spec()` carries the
-        // resolver and the spec can later be re-bound from a `ResolverRegistry`.
-        self.current().resolve.push(ResolveSpec {
-            slot: name.clone(),
-            resolver: None,
-            args: args.clone(),
-            ttl_secs: ttl.map(|d| d.as_secs()),
+        let mut stage_id = None;
+        self.configure_stage("resolve_slot", |stage| {
+            stage_id = Some(stage.id.clone());
+            if !stage.collect.contains(&name) {
+                stage.collect.push(name.clone());
+            }
+            // Record the serializable declaration too, so `into_spec()` carries the
+            // resolver and the spec can later be re-bound from a `ResolverRegistry`.
+            stage.resolve.push(ResolveSpec {
+                slot: name.clone(),
+                resolver: None,
+                args: args.clone(),
+                ttl_secs: ttl.map(|d| d.as_secs()),
+            });
         });
+        // No stage to bind the resolver to: the misuse is already recorded.
+        let Some(stage) = stage_id else {
+            return self;
+        };
         let fetch = Arc::new(fetch);
         self.resolvers.push(StageResolver {
             stage,
@@ -774,19 +799,19 @@ impl Conversation {
 
     /// Add an explicit dependency on another stage.
     pub fn after(mut self, dep: impl Into<String>) -> Self {
-        self.current().after.push(dep.into());
+        self.configure_stage("after", |stage| stage.after.push(dep.into()));
         self
     }
 
     /// Mark the current stage terminal.
     pub fn terminal(mut self) -> Self {
-        self.current().terminal = true;
+        self.configure_stage("terminal", |stage| stage.terminal = true);
         self
     }
 
     /// Attach a [`RepairPolicy`] to the current stage.
     pub fn repair(mut self, policy: RepairPolicy) -> Self {
-        self.current().repair = Some(policy);
+        self.configure_stage("repair", |stage| stage.repair = Some(policy));
         self
     }
 
@@ -795,7 +820,7 @@ impl Conversation {
     /// The model holds the floor while it reads, unless the stage sets
     /// [`timing`](Self::timing). Needs output transcription on the session.
     pub fn verbatim(mut self, text: impl Into<String>) -> Self {
-        self.current().verbatim = Some(text.into());
+        self.configure_stage("verbatim", |stage| stage.verbatim = Some(text.into()));
         self
     }
 
@@ -813,7 +838,7 @@ impl Conversation {
     ///     .timing(VoiceTiming::new().reprompt_after(Duration::from_secs(6)));
     /// ```
     pub fn timing(mut self, timing: VoiceTiming) -> Self {
-        self.current().timing = Some(timing);
+        self.configure_stage("timing", |stage| stage.timing = Some(timing));
         self
     }
 
@@ -832,14 +857,27 @@ impl Conversation {
         self
     }
 
-    /// The spec built so far.
+    /// The spec built so far. A setter called before any `.stage(..)` is
+    /// recorded as a misuse that [`compile`](Self::compile) and
+    /// [`try_into_spec`](Self::try_into_spec) report; this view does not.
     pub fn spec(&self) -> &ConversationSpec {
         &self.spec
     }
 
-    /// Consume into the underlying spec.
+    /// Consume into the underlying spec, discarding any recorded builder
+    /// misuse. Use [`try_into_spec`](Self::try_into_spec) to have it
+    /// reported instead.
     pub fn into_spec(self) -> ConversationSpec {
         self.spec
+    }
+
+    /// Consume into the underlying spec, or the builder misuse `compile`
+    /// would report (a setter called before any `.stage(..)`).
+    pub fn try_into_spec(self) -> Result<ConversationSpec, ConversationError> {
+        if !self.issues.is_empty() {
+            return Err(ConversationError::Spec(self.issues.join("; ")));
+        }
+        Ok(self.spec)
     }
 
     /// Compile from a [`ConversationSpec`] (e.g. parsed from JSON/YAML).
@@ -904,7 +942,13 @@ impl Conversation {
     }
 
     /// Lower and validate into a [`CompiledConversation`].
+    ///
+    /// Fails with [`ConversationError::Spec`] if a stage setter (`instruction`,
+    /// `next`, `terminal`, ...) was chained before any `.stage(..)`.
     pub fn compile(self) -> Result<CompiledConversation, ConversationError> {
+        if !self.issues.is_empty() {
+            return Err(ConversationError::Spec(self.issues.join("; ")));
+        }
         compile_spec(self.spec, self.resolvers)
     }
 }
@@ -1511,6 +1555,44 @@ mod tests {
     use super::*;
     use gemini_adk_rs::flow::Enforcement;
     use gemini_adk_rs::state::State;
+
+    #[test]
+    fn stage_setters_before_the_first_stage_fail_at_compile() {
+        let err = Conversation::new("misused")
+            .instruction("hello")
+            .terminal()
+            .stage("only")
+            .compile()
+            .expect_err("setters chained before `.stage(..)` have no stage to configure");
+        let ConversationError::Spec(message) = err else {
+            panic!("expected a Spec error, got {err}");
+        };
+        assert!(message.contains("`.instruction(..)`"), "{message}");
+        assert!(message.contains("`.terminal(..)`"), "{message}");
+    }
+
+    #[test]
+    fn try_into_spec_reports_the_misuse_into_spec_discards() {
+        let misused = || {
+            Conversation::new("misused")
+                .instruction("hello")
+                .stage("only")
+        };
+        let err = misused()
+            .try_into_spec()
+            .expect_err("a setter before `.stage(..)` is reported");
+        assert!(matches!(err, ConversationError::Spec(_)), "{err}");
+        // The lossy form keeps working for callers that chained correctly
+        // and documents that it drops the record otherwise.
+        assert_eq!(misused().into_spec().stages.len(), 1);
+        assert!(
+            Conversation::new("ok")
+                .stage("only")
+                .instruction("hello")
+                .try_into_spec()
+                .is_ok()
+        );
+    }
 
     fn booking() -> CompiledConversation {
         Conversation::new("booking")

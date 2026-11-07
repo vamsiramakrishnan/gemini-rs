@@ -139,6 +139,44 @@ pub enum TungsteniteError {
 /// Whether a TLS backend was compiled in. `wss://` and `https://` need one.
 pub const HAS_TLS_BACKEND: bool = cfg!(any(feature = "tls-native", feature = "tls-rustls"));
 
+/// What one WebSocket message means to the session loop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FramePayload {
+    /// A frame carrying a server message, as bytes for the codec.
+    Data(Vec<u8>),
+    /// The peer closed the connection, with its close code and a reason
+    /// text (code, and the server's text when it gave one) when it sent a
+    /// close frame.
+    Close(Option<(u16, String)>),
+    /// A control frame (ping, pong, raw frame) the session loop ignores.
+    Skip,
+}
+
+/// The bytes a WebSocket message carries for the codec.
+///
+/// Google AI sends JSON in text frames; **Vertex AI sends the same JSON in
+/// binary frames**. Both become the same bytes here, which is what the
+/// session loop and the fuzz targets rely on: one decoder, two wire paths.
+/// A close frame becomes [`FramePayload::Close`] with the server's reason
+/// (code and text), and control frames are [`FramePayload::Skip`].
+pub fn frame_payload(message: Message) -> FramePayload {
+    match message {
+        Message::Text(t) => FramePayload::Data(bytes::Bytes::from(t).into()),
+        Message::Binary(b) => FramePayload::Data(b.into()),
+        Message::Close(frame) => FramePayload::Close(frame.map(|cf| {
+            let reason = if cf.reason.is_empty() {
+                format!("server closed the connection ({})", cf.code)
+            } else {
+                format!("server closed the connection ({}): {}", cf.code, cf.reason)
+            };
+            (u16::from(cf.code), reason)
+        })),
+        // Ping/Pong are handled internally by tungstenite; Frame is a
+        // low-level variant.
+        Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => FramePayload::Skip,
+    }
+}
+
 #[async_trait]
 impl Transport for TungsteniteTransport {
     type Error = TungsteniteError;
@@ -205,27 +243,21 @@ impl Transport for TungsteniteTransport {
             .ok_or(TungsteniteError::NotConnected)?;
         loop {
             match ws_read.next().await {
-                Some(Ok(Message::Text(t))) => return Ok(Some(bytes::Bytes::from(t).into())),
-                // IMPORTANT: Vertex AI sends JSON in Binary frames.
-                Some(Ok(Message::Binary(b))) => return Ok(Some(b.into())),
-                Some(Ok(Message::Close(frame))) => {
-                    if let Some(ref cf) = frame {
-                        tracing::warn!(code = %cf.code, reason = %cf.reason, "WebSocket close frame received");
-                        // Kept, not merely logged: a `warn` is invisible unless
-                        // the application configured a subscriber, and the
-                        // reason is the only account of why the session ended.
-                        self.close_reason = Some(if cf.reason.is_empty() {
-                            format!("server closed the connection ({})", cf.code)
-                        } else {
-                            format!("server closed the connection ({}): {}", cf.code, cf.reason)
-                        });
+                Some(Ok(message)) => match frame_payload(message) {
+                    FramePayload::Data(bytes) => return Ok(Some(bytes)),
+                    FramePayload::Close(close) => {
+                        if let Some((code, reason)) = close {
+                            tracing::warn!(code, %reason, "WebSocket close frame received");
+                            // Kept, not merely logged: a `warn` is invisible
+                            // unless the application configured a subscriber,
+                            // and the reason is the only account of why the
+                            // session ended.
+                            self.close_reason = Some(reason);
+                        }
+                        return Ok(None);
                     }
-                    return Ok(None);
-                }
-                // Ping/Pong are handled internally by tungstenite; skip them.
-                Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
-                // Frame is a low-level variant; skip.
-                Some(Ok(Message::Frame(_))) => continue,
+                    FramePayload::Skip => continue,
+                },
                 Some(Err(e)) => return Err(e.into()),
                 None => return Ok(None),
             }
@@ -368,6 +400,61 @@ impl Transport for MockTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The two wire paths carry the same bytes: Google AI's text frame and
+    /// Vertex AI's binary frame of the same JSON reach the codec identically.
+    #[test]
+    fn text_and_binary_frames_carry_the_same_bytes() {
+        let json = r#"{"setupComplete":{}}"#;
+        let text = frame_payload(Message::Text(json.into()));
+        let binary = frame_payload(Message::Binary(json.as_bytes().to_vec().into()));
+        assert_eq!(text, FramePayload::Data(json.as_bytes().to_vec()));
+        assert_eq!(text, binary);
+        // Bytes that are not UTF-8 can only arrive on the binary path, and
+        // they arrive untouched for the codec to refuse.
+        let raw = vec![0xff, 0xfe, b'{'];
+        assert_eq!(
+            frame_payload(Message::Binary(raw.clone().into())),
+            FramePayload::Data(raw)
+        );
+    }
+
+    #[test]
+    fn close_and_control_frames_never_reach_the_codec() {
+        use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+        use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+        assert_eq!(
+            frame_payload(Message::Close(None)),
+            FramePayload::Close(None)
+        );
+        let close = frame_payload(Message::Close(Some(CloseFrame {
+            code: CloseCode::Policy,
+            reason: "quota exceeded".into(),
+        })));
+        assert_eq!(
+            close,
+            FramePayload::Close(Some((
+                1008,
+                "server closed the connection (1008): quota exceeded".into()
+            )))
+        );
+        let bare = frame_payload(Message::Close(Some(CloseFrame {
+            code: CloseCode::Normal,
+            reason: "".into(),
+        })));
+        assert_eq!(
+            bare,
+            FramePayload::Close(Some((1000, "server closed the connection (1000)".into())))
+        );
+        assert_eq!(
+            frame_payload(Message::Ping(vec![1].into())),
+            FramePayload::Skip
+        );
+        assert_eq!(
+            frame_payload(Message::Pong(vec![1].into())),
+            FramePayload::Skip
+        );
+    }
 
     /// A transport that says nothing about why it closed still compiles and
     /// still reports nothing — the default keeps third-party implementations

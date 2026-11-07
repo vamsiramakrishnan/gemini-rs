@@ -109,7 +109,10 @@ pub struct AgentConfig {
     pub env: HashMap<String, String>,
 }
 
-fn default_agent_type() -> String {
+/// The agent type when a config does not name one: `"llm"`.
+///
+/// Also the serde default for `agent_type` in the server's agent entries.
+pub fn default_agent_type() -> String {
     "llm".to_string()
 }
 

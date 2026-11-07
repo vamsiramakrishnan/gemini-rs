@@ -101,27 +101,9 @@ enum Source {
     },
 }
 
-/// Interpolate `{key}` placeholders in `template` with `State` string values.
+/// Interpolate `{key}` placeholders in `template` with `State` values.
 fn interpolate(template: &str, state: &State) -> String {
-    let mut out = String::with_capacity(template.len());
-    let mut rest = template;
-    while let Some(open) = rest.find('{') {
-        out.push_str(&rest[..open]);
-        let after = &rest[open + 1..];
-        let Some(close) = after.find('}') else {
-            out.push_str(&rest[open..]);
-            return out;
-        };
-        let key = after[..close].trim();
-        match state.get::<serde_json::Value>(key) {
-            Some(serde_json::Value::String(s)) => out.push_str(&s),
-            Some(v) => out.push_str(&v.to_string()),
-            None => {}
-        }
-        rest = &after[close + 1..];
-    }
-    out.push_str(rest);
-    out
+    crate::utils::text::interpolate_with(template, |key| state.get::<serde_json::Value>(key))
 }
 
 /// A named async value source whose inputs come from `State` and whose result
@@ -340,35 +322,19 @@ mod tests {
 
     #[tokio::test]
     async fn resolver_llm_interpolates_prompt_and_stores_text() {
-        use crate::llm::{LlmError, LlmResponse};
-        use gemini_genai_rs::prelude::Content;
+        use crate::llm::MockLlm;
 
-        struct EchoLlm;
-        #[async_trait]
-        impl BaseLlm for EchoLlm {
-            fn model_id(&self) -> &str {
-                "echo"
-            }
-            async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
-                // Echo the (interpolated) prompt back as the completion.
-                let prompt = request.contents[0].parts.iter().find_map(|p| match p {
-                    gemini_genai_rs::prelude::Part::Text { text } => Some(text.clone()),
-                    _ => None,
-                });
-                Ok(LlmResponse {
-                    content: Content::model(prompt.unwrap_or_default()),
-                    finish_reason: None,
-                    usage: None,
-                })
-            }
-        }
-
+        // Echo the (interpolated) prompt back as the completion.
         let state = State::new();
         let _ = state.set("topic", "billing");
-        let out = Resolver::llm("summary", Arc::new(EchoLlm), "Summarize the {topic} issue")
-            .resolve(&state)
-            .await
-            .unwrap();
+        let out = Resolver::llm(
+            "summary",
+            Arc::new(MockLlm::echo()),
+            "Summarize the {topic} issue",
+        )
+        .resolve(&state)
+        .await
+        .unwrap();
         assert_eq!(out, json!("Summarize the billing issue"));
         assert_eq!(
             state.get::<String>("summary:result").as_deref(),

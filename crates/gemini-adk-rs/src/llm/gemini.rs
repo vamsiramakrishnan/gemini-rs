@@ -18,6 +18,7 @@ use crate::llm::{
     TokenProvider,
 };
 use crate::utils::variant::{GoogleLlmVariant, get_google_llm_variant};
+use gemini_genai_rs::protocol::types::{api_key_from_env, cloud_project_from_env, non_empty_env};
 
 /// Parameters for constructing a [`GeminiLlm`].
 #[derive(Default)]
@@ -98,9 +99,9 @@ fn llm_error(error: gemini_genai_rs::generate::GenerateError) -> LlmError {
 
 static SUPPORTED_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     vec![
-        Regex::new(r"^gemini-.*$").unwrap(),
-        Regex::new(r"^projects/.*/endpoints/.*$").unwrap(),
-        Regex::new(r"^projects/.*/models/gemini.*$").unwrap(),
+        Regex::new(r"^gemini-.*$").expect("gemini model pattern is a valid regex"),
+        Regex::new(r"^projects/.*/endpoints/.*$").expect("endpoint pattern is a valid regex"),
+        Regex::new(r"^projects/.*/models/gemini.*$").expect("tuned-model pattern is a valid regex"),
     ]
 });
 
@@ -148,21 +149,18 @@ impl GeminiLlm {
 
         // Resolve API key from params or env
         if params.api_key.is_none() && variant == GoogleLlmVariant::GeminiApi {
-            // Same acceptance chain as the Live connect path, so one exported
-            // variable works for both halves of the stack.
-            params.api_key = std::env::var("GOOGLE_GENAI_API_KEY")
-                .or_else(|_| std::env::var("GEMINI_API_KEY"))
-                .or_else(|_| std::env::var("GOOGLE_API_KEY"))
-                .ok();
+            // The Live connect path's own chain, so one exported variable works
+            // for both halves of the stack.
+            params.api_key = api_key_from_env();
         }
 
         // Resolve project/location from env for Vertex AI
         if variant == GoogleLlmVariant::VertexAi {
             if params.project.is_none() {
-                params.project = std::env::var("GOOGLE_CLOUD_PROJECT").ok();
+                params.project = cloud_project_from_env();
             }
             if params.location.is_none() {
-                params.location = std::env::var("GOOGLE_CLOUD_LOCATION").ok();
+                params.location = non_empty_env("GOOGLE_CLOUD_LOCATION");
             }
         }
 
@@ -475,6 +473,12 @@ impl BaseLlm for GeminiLlm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supported_model_patterns_compile() {
+        // Forces the `LazyLock`: a bad literal fails here, not at runtime.
+        assert_eq!(SUPPORTED_PATTERNS.len(), 3);
+    }
 
     /// Every setting an agent can make must reach the wire body; a field that
     /// is accepted and dropped is the bug this guards against.
