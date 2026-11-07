@@ -12,9 +12,10 @@ cleanup prompt; the classified inventory is `inventory.md`.
 across `block_on`), eight majors and the minors are fixed on the branch;
 the rest are recorded (D16–D19) or listed as deferred in the design doc.
 Phase 5 is complete except the PyPI/import name (Vamsi). The Phase 4
-gate (`cargo hack check --workspace --feature-powerset --depth 2`) passed
-for gemini-genai-rs in full; the rerun of the remaining crates is still
-in progress locally and CI's eight `hack` partitions run the same matrix.
+gate (`cargo hack check --workspace --feature-powerset --depth 2 --locked`)
+passed locally: 274 gemini-genai-rs checks, then all 684 checks of the
+other crates (log `scratchpad/logs/hack2.log`, exit 0); CI's eight `hack`
+partitions run the same matrix.
 Remaining: the CHANGELOG release notes are current; CI on the pushed head;
 CodeQL alert details (not readable from this session).
 
@@ -25,7 +26,7 @@ CodeQL alert details (not readable from this session).
 | `cargo fmt --all --check` | pass |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | pass |
 | `cargo test --workspace --all-features --locked` | pass: 3 743 passed, 0 failed, 50 ignored (131 binaries) |
-| `cargo hack check --workspace --feature-powerset --depth 2 --locked` | 954 checks; the local run must be repeated once Phase 3's dev-dependencies settle the lockfile (the first run failed on a lockfile change those caused) |
+| `cargo hack check --workspace --feature-powerset --depth 2 --locked` | pass on the final tree: 274 (gemini-genai-rs) + 684 (all other crates) checks, exit 0 |
 | `cargo deny check` | pass (duplicate-version warnings only) |
 | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked` | pass |
 
@@ -81,7 +82,7 @@ outcome 2 (keep, documented unstable), nothing is published to PyPI, and no
 | D8: seven unused dependencies removed; heavy ones justified | `db2c13b` | machete clean | |
 | D3: helpers deduplicated (14 groups), one env/credential rule, RFC 3339 timestamps; proposals D11–D15 | `2a73874` | clippy all-features pass; all-features suite 3 841 pass | |
 | semver-checks vs 4.0.0: main already needs a major (D16) | `6c6d8f3` (CHANGELOG), D16 | documented | Vamsi's call |
-| Phase 4 gate: hack powerset rerun | genai-rs 274/274 clean; rest rerunning after a disk-full stop | local + CI `hack` | |
+| Phase 4 gate: hack powerset | 274 + 684 checks, exit 0 | local; CI `hack` | Phase 4 done |
 | Phase 5: binding crate on pyo3 0.29 (runtime, errors, tools, agent, live, spec), Python package, stubs, pytest suite | `f7a82c8` | 69 pytest pass; stubtest, mypy strict, clippy, rustdoc clean | wheels in CI |
 | Phase 5: CI `python` (pytest, mypy, stubtest) and `python-wheels` (4 platforms) | `5e3b1a7` | CI | |
 | Phase 5: `bench/python/` harness and RESULTS.md | `38459b1` | run locally, release build | |
@@ -89,7 +90,8 @@ outcome 2 (keep, documented unstable), nothing is published to PyPI, and no
 | CodeQL: request-derived app name escaped in a log | `3df47e0` | server check | |
 | Phase 6: Rust-side review fixes (G.191 µ-law, budget tests to bench job, close code, redaction, replay, try_into_spec, D16/D18/D19) | `777962b`, `48d562a`, `d8f301a` | touched suites pass | |
 | Phase 6: Python-side review fixes (Sim lock, loop guard, drop/atexit, events after close, errors, schema derivation) | `ad1b039`, `74ee608` | 80 pytest pass; stubtest, mypy, clippy clean; bench rerun | |
-| Phase 6: review record | (this commit) | docs | |
+| Phase 6: review record | `eac4618` | docs | |
+| CodeQL: key-variable helper renamed; nightly unreachable-code fix for the fuzz job | `57f85ab`, `14fa5cb` | nightly + stable check | CI on head |
 
 ## Fast-lane diffs needing Fable/Opus review
 
