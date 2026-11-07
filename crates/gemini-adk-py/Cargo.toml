@@ -14,7 +14,9 @@ name = "_gemini_adk"
 crate-type = ["cdylib"]
 
 [dependencies]
-gemini-adk-fluent-rs = { path = "../gemini-adk-fluent-rs" }
+# rustls, not the system TLS: a wheel must not depend on an OpenSSL the
+# target machine (or the manylinux build container) may not have.
+gemini-adk-fluent-rs = { path = "../gemini-adk-fluent-rs", default-features = false, features = ["tls-rustls", "gemini-llm", "code-mode"] }
 gemini-adk-rs = { path = "../gemini-adk-rs", default-features = false }
 gemini-genai-rs = { path = "../gemini-genai-rs", default-features = false }
 # The extension module. abi3-py310: one wheel per platform for Python 3.10+.
