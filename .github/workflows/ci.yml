@@ -16,11 +16,22 @@ on:
 permissions:
   contents: read
 
+# A push to a PR branch supersedes the previous head's run: cancel it instead
+# of queueing 30 more jobs behind it. Pushes to main keep every run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   # Node 20 is removed from runners 2026-09; fail loud now, not on the flag day.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # Every Rust job below installs sccache (mozilla-actions/sccache-action) and
+  # compiles through it: identical crate compilations are shared across jobs
+  # through the Actions cache, where rust-cache's per-job target directories
+  # are not. RUSTC_WRAPPER is set per job, after the install step.
+  SCCACHE_GHA_ENABLED: "true"
 
 # Every cargo invocation below passes `--locked`. Without it cargo is free to
 # re-resolve and rewrite Cargo.lock in the runner, so CI green means "some
@@ -32,27 +43,17 @@ env:
 # not something to fix silently on a runner.
 
 jobs:
-  check:
-    name: Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.99.0"
-          components: clippy, rustfmt
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace --all-targets --locked
-
   test:
     name: Test
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
       # `voice-io` (cpal) needs system audio headers to compile.
@@ -72,6 +73,7 @@ jobs:
     name: Test (all features)
     runs-on: ubuntu-latest
     env:
+      RUSTC_WRAPPER: sccache
       # Debug info doubles the size of the all-features test binaries and
       # nothing here reads it.
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -81,6 +83,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
@@ -95,11 +98,14 @@ jobs:
   doctests:
     name: Doctests and feature tests
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
       # `voice-io` (cpal) needs system audio headers to compile.
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
@@ -117,12 +123,15 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
           components: clippy
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       # `--all-features`: without it every feature-gated module (sip, voice-io,
@@ -133,12 +142,15 @@ jobs:
   fmt:
     name: Format
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
           components: rustfmt
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - run: cargo fmt --all -- --check
 
   # Feature-boundary checks: a feature-heavy SDK must build at both extremes, not
@@ -146,11 +158,14 @@ jobs:
   features:
     name: Feature extremes
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
       # `voice-io` (cpal) needs system audio headers to compile.
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
@@ -175,6 +190,8 @@ jobs:
   hack:
     name: Feature powerset ${{ matrix.partition }}/8 (cargo-hack)
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
     strategy:
       fail-fast: false
       matrix:
@@ -184,6 +201,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
       # `voice-io` (cpal) needs system audio headers to compile.
@@ -199,11 +217,14 @@ jobs:
   doc:
     name: Rustdoc
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --no-deps --all-features --locked
@@ -243,12 +264,14 @@ jobs:
     name: Loom (telemetry-lane atomics)
     runs-on: ubuntu-latest
     env:
+      RUSTC_WRAPPER: sccache
       RUSTFLAGS: "-D warnings --cfg gemini_adk_loom"
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p gemini-adk-rs --lib --release loom_ --locked
 
@@ -260,11 +283,14 @@ jobs:
   bench-build:
     name: Benchmarks compile
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --workspace --no-run --locked
       - run: cargo test -p gemini-adk-rs --lib --release --locked fast_lane_budget -- --ignored --test-threads=1
@@ -298,6 +324,7 @@ jobs:
     name: Monty worker integration
     runs-on: ubuntu-latest
     env:
+      RUSTC_WRAPPER: sccache
       # The worker also builds Monty's type checker. Debug symbols are not
       # needed for these assertions and can exhaust a hosted runner's disk.
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -308,6 +335,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -328,11 +356,14 @@ jobs:
   conversation-ci:
     name: Conversation CI
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo run -p gemini-adk-cli-rs --locked -- flow ci conversations
@@ -343,12 +374,15 @@ jobs:
   generated-projects:
     name: Generated projects
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
           components: rustfmt, clippy
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -391,11 +425,14 @@ jobs:
   python:
     name: Python binding
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -463,7 +500,7 @@ jobs:
   ci-ok:
     name: CI
     if: ${{ !cancelled() }}
-    needs: [check, test, test-all-features, doctests, clippy, fmt, features, hack, doc, deny, fuzz, loom, bench-build, monty-worker, conversation-ci, generated-projects, studio, python, python-wheels]
+    needs: [test, test-all-features, doctests, clippy, fmt, features, hack, doc, deny, fuzz, loom, bench-build, monty-worker, conversation-ci, generated-projects, studio, python, python-wheels]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed
