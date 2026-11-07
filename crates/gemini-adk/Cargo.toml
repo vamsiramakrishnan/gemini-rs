@@ -23,7 +23,7 @@ serde_json = "1"
 
 # Every feature is the fluent crate's feature of the same name, plus `memory`.
 [features]
-default = ["tls-native", "gemini-llm", "code-mode"]
+default = ["tls-rustls", "gemini-llm", "code-mode"]
 # The Gemini text model client (`GeminiLlm`).
 gemini-llm = ["gemini-adk-fluent-rs/gemini-llm"]
 # TLS backend: exactly one.

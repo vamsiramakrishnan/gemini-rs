@@ -263,6 +263,7 @@ mod tests {
     /// by the bare key, for every length around the block size.
     #[test]
     fn keyed_hmac_matches_new_from_slice_for_every_key_length() {
+        use hmac::KeyInit as _;
         use sha2::Digest as _;
         for len in [0usize, 1, 19, 20, 32, 63, 64, 65, 128, 200] {
             // Key bytes derived at run time from the length, so the test

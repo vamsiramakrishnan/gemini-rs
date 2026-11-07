@@ -11,8 +11,11 @@
 
 #![cfg(feature = "gemini-llm")]
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::time::Instant;
 
 use common::{ScratchDir, have_api_key, model_backed_engine, skip};

@@ -19,7 +19,7 @@ Agent runtime for Gemini Live — tools, streaming, agent transfer, middleware. 
 | Feature | Default | Enables |
 |---|---|---|
 | `gemini-llm` | on | `GeminiLlm` text generation over REST (pure Rust) |
-| `tls-native` | on | the TLS backend (`tls-rustls` is the alternative) |
+| `tls-rustls` | on | the TLS backend: rustls with the platform's root certificates, pure Rust (`tls-native` uses the system library instead) |
 | `templates`, `metrics`, `mcp-http`, `vertex-ai-*`, `database-sessions`, `otel*` | off | opt-in integrations |
 
 ## Quick Start

@@ -47,8 +47,11 @@
 //! `#[ignore]`d because it costs money, takes minutes, and needs a network.
 //! Reports land in `target/tmp/`.
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Instant;

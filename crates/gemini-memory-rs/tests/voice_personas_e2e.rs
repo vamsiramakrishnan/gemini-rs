@@ -46,8 +46,11 @@
 
 #![cfg(feature = "gemini-llm")]
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::sync::Arc;
 use std::time::Instant;
 

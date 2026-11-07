@@ -22,8 +22,11 @@
 //! in for the model, so the numbers are the engine's own cost rather than an
 //! API's.
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::time::{Duration, Instant};
 
 use common::corpus::{self, PROBES, payload_statements, says, says_any};

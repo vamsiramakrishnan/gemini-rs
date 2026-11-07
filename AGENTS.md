@@ -53,6 +53,13 @@ cargo test --workspace --lib --locked
 cargo fmt --check
 ```
 
+A plain `cargo check`/`cargo test` at the root builds the six library crates
+(`default-members`); `--workspace` adds the examples, servers and CLI, as CI
+does. Integration tests are one binary per crate (`tests/main.rs`, one module
+per former file); a new test file is a new `mod` line there, not a new
+binary. The dev profile keeps line tables for workspace code only; set
+`CARGO_PROFILE_DEV_DEBUG=2` for a one-off full-debuginfo build.
+
 These model-free checks need no provider credentials. `just hooks` makes
 `git push` run formatting and clippy first (`.githooks/pre-push`). For the
 full pre-push matrix, use `just ci` as described in CONTRIBUTING. Use the affected crate's

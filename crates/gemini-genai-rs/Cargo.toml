@@ -1,4 +1,6 @@
 [package]
+# Integration tests are one binary (tests/main.rs); see that file.
+autotests = false
 name = "gemini-genai-rs"
 version.workspace = true
 edition.workspace = true
@@ -22,7 +24,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Slim by default: the live WebSocket protocol plus a TLS backend. Everything
 # heavy (ML VAD model, tracing subscriber, REST surfaces) is opt-in — for an
 # SDK, default compile weight is API surface.
-default = ["live", "tls-native"]
+default = ["live", "tls-rustls"]
 live = []
 vad = []
 vad-wavekat = ["vad", "dep:wavekat-vad"]
@@ -149,3 +151,7 @@ harness = false
 
 [lints]
 workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

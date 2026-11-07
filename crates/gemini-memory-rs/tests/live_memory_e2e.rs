@@ -31,8 +31,11 @@
 // `Live` builder these drive; `gemini-llm` alone does not compile.
 #![cfg(all(feature = "gemini-llm", feature = "fluent"))]
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 

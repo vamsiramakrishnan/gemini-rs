@@ -735,10 +735,15 @@ mod tests {
         );
     }
 
+    /// A scripted server with no frames: connecting to it proves the flow
+    /// check passed, with no network involved (the earlier form dialled the
+    /// real endpoint with a junk key and depended on how fast it refused).
+    fn offline_transport() -> gemini_genai_rs::transport::ReplayTransport {
+        crate::testing::ScriptedServer::new().into_transport().0
+    }
+
     #[tokio::test]
     async fn a_flow_matching_the_registered_tools_passes_validation() {
-        // Reaches the network and fails there — which is the proof that the
-        // flow check passed rather than short-circuiting.
         let flow = Flow::new()
             .step("book")
             .allow(["book_table"])
@@ -746,18 +751,13 @@ mod tests {
             .build()
             .expect("valid");
 
-        let err = Live::builder()
+        let handle = Live::builder()
             .tools(book_tool())
             .govern(flow)
-            .connect_google_ai("not-a-real-key")
+            .connect_with_transport(offline_transport())
             .await
-            .err()
-            .expect("the key is junk, so this still fails — just not on the flow");
-
-        assert!(
-            !err.to_string().contains("governing flow"),
-            "a flow whose tools all exist must clear validation: {err}"
-        );
+            .expect("a flow whose tools all exist must clear validation");
+        handle.disconnect().await.ok();
     }
 
     #[tokio::test]
@@ -771,18 +771,13 @@ mod tests {
             .build()
             .expect("valid");
 
-        let err = Live::builder()
+        let handle = Live::builder()
             .tools(book_tool())
             .govern(flow)
-            .connect_google_ai("not-a-real-key")
+            .connect_with_transport(offline_transport())
             .await
-            .err()
-            .expect("junk key");
-
-        assert!(
-            !err.to_string().contains("governing flow"),
-            "an ambient tool that exists must not be reported missing: {err}"
-        );
+            .expect("an ambient tool that exists must not be reported missing");
+        handle.disconnect().await.ok();
     }
 
     #[tokio::test]
@@ -799,18 +794,13 @@ mod tests {
             .compile()
             .expect("compiles without a tool registry");
 
-        let err = Live::builder()
+        let handle = Live::builder()
             .tools(book_tool())
             .govern_compiled(compiled)
-            .connect_google_ai("not-a-real-key")
+            .connect_with_transport(offline_transport())
             .await
-            .err()
-            .expect("junk key");
-
-        assert!(
-            !err.to_string().contains("governing flow"),
-            "a pre-compiled flow must not be re-validated at connect: {err}"
-        );
+            .expect("a pre-compiled flow must not be re-validated at connect");
+        handle.disconnect().await.ok();
     }
 
     #[test]

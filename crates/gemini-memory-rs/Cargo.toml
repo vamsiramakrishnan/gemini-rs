@@ -1,4 +1,6 @@
 [package]
+# Integration tests are one binary (tests/main.rs); see that file.
+autotests = false
 name = "gemini-memory-rs"
 version.workspace = true
 edition.workspace = true
@@ -57,3 +59,7 @@ gemini-llm = ["gemini-adk-rs/gemini-llm"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

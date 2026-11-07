@@ -151,8 +151,11 @@
 
 #![cfg(feature = "gemini-llm")]
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 

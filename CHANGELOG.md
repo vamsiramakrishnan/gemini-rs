@@ -129,6 +129,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **rustls is the default TLS backend** (`tls-rustls`) on `gemini-genai-rs`,
+  `gemini-adk-rs`, `gemini-adk-fluent-rs` and `gemini-adk`; `tls-native`
+  (the system library) stays an opt-in feature. Default builds no longer
+  compile OpenSSL, `native-tls`, `hyper-tls` or a second HTTP/TLS stack
+  next to the rustls one the HTTP tools already used, and wheels and
+  binaries carry their own TLS. A consumer that relied on the system
+  library enables `tls-native` (D20 in `docs/cleanup/decisions.md`).
+- **Faster builds.** The workspace's dev profile keeps `line-tables-only`
+  debuginfo for workspace code and none for dependencies (test builds were
+  25 GB and link-bound); `default-members` makes a root `cargo check`/`test`
+  build the library crates, with `--workspace` for everything; each crate's
+  integration tests are one binary (`tests/main.rs`) instead of one per
+  file (131 test binaries become 82); the workspace uses one RustCrypto
+  generation (`sha2`/`sha1` 0.11, `hmac` 0.13) and one `toml` (0.9), which
+  removes the duplicate `digest`, `sha2`, `toml_edit` and `winnow` builds.
+  CI cancels a PR's superseded runs, shares compilation across jobs with
+  sccache, and drops the `check` job clippy already covered. Measurements
+  are in `docs/cleanup/build-speed.md`.
 - **One API-key rule for every surface.** `GeminiLlm::from_env`, the Live
   session, the web app, the runtime and the CLI all read the key through
   `gemini_genai_rs::protocol::types::api_key_from_env`: `GEMINI_API_KEY`,

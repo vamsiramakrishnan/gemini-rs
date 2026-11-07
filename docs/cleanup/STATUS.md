@@ -91,6 +91,7 @@ outcome 2 (keep, documented unstable), nothing is published to PyPI, and no
 | Phase 6: Rust-side review fixes (G.191 µ-law, budget tests to bench job, close code, redaction, replay, try_into_spec, D16/D18/D19) | `777962b`, `48d562a`, `d8f301a` | touched suites pass | |
 | Phase 6: Python-side review fixes (Sim lock, loop guard, drop/atexit, events after close, errors, schema derivation) | `ad1b039`, `74ee608` | 80 pytest pass; stubtest, mypy, clippy clean; bench rerun | |
 | Phase 6: review record | `eac4618` | docs | |
+| Build speed: run cancellation + sccache in CI; dev profile without dependency debuginfo; rustls default (D20); one RustCrypto/toml generation; default-members; one test binary per crate; three connect tests made offline | (this commit) | `cargo test --workspace`: 3 521 pass, 0 fail, 50 ignored; clippy all targets/features clean; measurements in `build-speed.md` | |
 | CodeQL: key-variable helper renamed; nightly unreachable-code fix for the fuzz job | `57f85ab`, `14fa5cb` | nightly + stable check | CI on head |
 
 ## Fast-lane diffs needing Fable/Opus review

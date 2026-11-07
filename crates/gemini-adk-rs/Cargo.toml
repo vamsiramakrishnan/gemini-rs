@@ -1,4 +1,6 @@
 [package]
+# Integration tests are one binary (tests/main.rs); see that file.
+autotests = false
 name = "gemini-adk-rs"
 version.workspace = true
 edition.workspace = true
@@ -79,7 +81,7 @@ loom = "0.7"
 # Pick the other TLS backend with `--no-default-features --features
 # tls-rustls,gemini-llm`; the two are mutually exclusive by construction (each
 # selects its own reqwest and tungstenite backend and nothing else selects one).
-default = ["tls-native", "gemini-llm", "code-mode"]
+default = ["tls-rustls", "gemini-llm", "code-mode"]
 gemini-llm = ["gemini-genai-rs/http", "gemini-genai-rs/generate"]
 # Code mode's in-process sandbox (Monty on a blocking thread).
 code-mode = ["dep:monty", "dep:monty-types"]
@@ -117,3 +119,12 @@ otel-gcp = ["gemini-genai-rs/otel-gcp"]
 
 [lints]
 workspace = true
+
+[[test]]
+name = "main"
+path = "tests/main.rs"
+
+# Kept as its own process: it sets environment variables or global state.
+[[test]]
+name = "genai_spans"
+path = "tests/genai_spans.rs"

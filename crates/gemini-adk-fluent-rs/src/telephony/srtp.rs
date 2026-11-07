@@ -35,7 +35,7 @@ type HmacSha1 = Hmac<Sha1>;
 fn auth_mac(key: &[u8; AUTH_KEY_LEN]) -> HmacSha1 {
     let mut block = hmac::digest::Key::<HmacSha1>::default();
     block[..AUTH_KEY_LEN].copy_from_slice(key);
-    <HmacSha1 as Mac>::new(&block)
+    <HmacSha1 as hmac::digest::KeyInit>::new(&block)
 }
 
 const MASTER_KEY_LEN: usize = 16;
@@ -478,7 +478,7 @@ mod tests {
             .unwrap();
         let mut padded = auth_mac(&key);
         padded.update(b"authenticated portion");
-        let mut bare = <HmacSha1 as Mac>::new_from_slice(&key).unwrap();
+        let mut bare = <HmacSha1 as hmac::digest::KeyInit>::new_from_slice(&key).unwrap();
         bare.update(b"authenticated portion");
         assert_eq!(padded.finalize().into_bytes(), bare.finalize().into_bytes());
     }

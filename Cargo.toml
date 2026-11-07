@@ -27,6 +27,17 @@ members = [
     "tools/gemini-adk-transpiler-rs",
     "tools/gemini-adk-cli-rs",
 ]
+# A plain `cargo check`/`cargo test` at the root builds the library crates,
+# not the 14 examples, the servers and the CLI as well: that is the loop a
+# change to the runtime goes through. CI and `just ci` pass `--workspace`.
+default-members = [
+    "crates/gemini-genai-rs",
+    "crates/gemini-adk-macros-rs",
+    "crates/gemini-adk-rs",
+    "crates/gemini-adk-fluent-rs",
+    "crates/gemini-memory-rs",
+    "crates/gemini-adk",
+]
 exclude = [
     "evals/turnbench/predictor",
     # Needs a newer toolchain than the workspace (see its rust-toolchain.toml).
@@ -91,3 +102,15 @@ uninlined_format_args = "warn"
 unnecessary_wraps = "warn"
 unused_async = "warn"
 unused_self = "warn"
+
+# Build profiles. Debuginfo is what made a test build of this workspace 25 GB
+# and most of its link time: `line-tables-only` keeps file:line in panics and
+# backtraces for workspace code and drops the rest; dependencies carry none
+# (a backtrace into tokio or serde is read by name, not by line). `test`
+# inherits `dev`. Release builds are unchanged.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+

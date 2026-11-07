@@ -186,8 +186,8 @@ half-wired.
 
 Mechanical guardrails so Milestones 1–2 can't regress and the crate stays honest.
 
-- ✅ **Feature diet.** L0 defaults are now `["live", "tls-native"]` — ML VAD and
-  the tracing subscriber are opt-in, TLS is selectable (`tls-native`/`tls-rustls`,
+- ✅ **Feature diet.** L0 defaults are now `["live", "tls-rustls"]` — ML VAD and
+  the tracing subscriber are opt-in, TLS is selectable (`tls-rustls`/`tls-native`,
   `reqwest` follows), `reqwest` is optional behind the REST features, all
   published crates use targeted tokio features instead of `tokio/full`, and the
   tracing facade (unconditional, tiny) is split from the subscriber machinery

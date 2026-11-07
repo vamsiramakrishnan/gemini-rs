@@ -15,8 +15,11 @@
 //! GEMINI_API_KEY=… cargo test -p gemini-adk-fluent-rs --test skills_code_live -- --ignored --nocapture
 //! ```
 
-mod common;
-
+#[allow(
+    unused_imports,
+    reason = "shared helpers; not every module uses them under every feature set"
+)]
+use super::common;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
