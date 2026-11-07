@@ -1,7 +1,8 @@
 name: Release
 
 # Triggered by pushing a vX.Y.Z tag (created by `just release`).
-# Flow: validate → publish (L0→L1→L2→server→cli) → GitHub Release
+# Flow: validate → publish (L0→L1→L2→server→cli) → GitHub Release, and
+#       validate → Python wheels + sdist → PyPI (`gemini-adk`)
 on:
   push:
     tags:
@@ -251,3 +252,92 @@ jobs:
           draft: false
           prerelease: ${{ contains(steps.ver.outputs.version, '-') }}
           make_latest: ${{ !contains(steps.ver.outputs.version, '-') }}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 4 — Python: abi3 wheels (one per platform, Python 3.10+) and an sdist,
+# uploaded to PyPI as `gemini-adk` with trusted publishing (OIDC; no token is
+# stored). PyPI must list this repository, `release.yml` and the `pypi`
+# environment as a trusted publisher for the project.
+# ─────────────────────────────────────────────────────────────────────────────
+  python-wheels:
+    name: Python wheel (${{ matrix.name }})
+    needs: validate
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64
+          - name: linux-aarch64
+            os: ubuntu-latest
+            target: aarch64
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64
+          - name: macos-x86_64
+            os: macos-latest
+            target: x86_64
+          - name: windows-x86_64
+            os: windows-latest
+            target: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: crates/gemini-adk-py
+          target: ${{ matrix.target }}
+          args: --release --locked --out dist
+          manylinux: ${{ startsWith(matrix.name, 'linux') && '2_28' || 'auto' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-wheel-${{ matrix.name }}
+          path: crates/gemini-adk-py/dist/*.whl
+          if-no-files-found: error
+
+  # The sdist carries the workspace crates the binding depends on, so a
+  # platform without a wheel builds from source (needs Rust 1.99 or newer).
+  python-sdist:
+    name: Python sdist
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: crates/gemini-adk-py
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-sdist
+          path: crates/gemini-adk-py/dist/*.tar.gz
+          if-no-files-found: error
+
+  pypi:
+    name: Publish to PyPI
+    needs: [python-wheels, python-sdist]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/gemini-adk/
+    permissions:
+      contents: read
+      id-token: write   # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pypi-*
+          path: dist
+          merge-multiple: true
+      - name: List distributions
+        run: ls -la dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          # A rerun after a partial upload skips what is already there.
+          skip-existing: true

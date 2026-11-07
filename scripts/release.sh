@@ -421,7 +421,9 @@ Bump workspace version ${CURRENT} → ${VERSION}.
 Publish: ${PUBLISH_CRATES[*]}"
   ok "Committed: chore(release): ${TAG}"
 
-  git tag -a "$TAG" -m "Release ${TAG}
+  # `--cleanup=verbatim`: the default strips every line starting with `#`,
+  # which is every Markdown heading in the notes the GitHub Release shows.
+  git tag -a --cleanup=verbatim "$TAG" -m "Release ${TAG}
 
 ${RELEASE_BODY}"
   ok "Tagged $TAG (annotated)"

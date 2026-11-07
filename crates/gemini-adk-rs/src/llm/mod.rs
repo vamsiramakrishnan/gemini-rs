@@ -181,6 +181,7 @@ impl LlmResponse {
                     name: name.into(),
                     args,
                     id: None,
+                    thought_signature: None,
                 },
             })
             .collect();
@@ -554,6 +555,7 @@ mod tests {
                         name: "get_weather".into(),
                         args: serde_json::json!({"city": "London"}),
                         id: None,
+                        thought_signature: None,
                     },
                 }],
             },

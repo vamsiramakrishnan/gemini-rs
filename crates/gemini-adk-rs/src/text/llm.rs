@@ -648,17 +648,17 @@ mod tests {
             let mut requests = self.requests.lock().unwrap();
             requests.push(req);
             if requests.len() == 1 {
+                // Decoded from the wire, signed as a thinking model signs it.
+                let content: Content = serde_json::from_value(serde_json::json!({
+                    "role": "model",
+                    "parts": [{
+                        "functionCall": {"name": "snap", "args": {}},
+                        "thoughtSignature": "c2lnLTE="
+                    }]
+                }))
+                .expect("a signed function-call turn decodes");
                 Ok(LlmResponse {
-                    content: Content {
-                        role: Some(Role::Model),
-                        parts: vec![Part::FunctionCall {
-                            function_call: gemini_genai_rs::prelude::FunctionCall {
-                                name: "snap".into(),
-                                args: serde_json::json!({}),
-                                id: None,
-                            },
-                        }],
-                    },
+                    content,
                     finish_reason: None,
                     usage: None,
                 })
@@ -709,6 +709,43 @@ mod tests {
         assert!(
             fr_clean,
             "media key should be stripped from the response JSON"
+        );
+    }
+
+    /// Thinking models reject a history whose function-call part lost its
+    /// `thoughtSignature` (HTTP 400). The model turn goes back as received.
+    #[tokio::test]
+    async fn the_next_request_returns_the_function_call_signature() {
+        use crate::tool::{SimpleTool, ToolDispatcher};
+        let llm = Arc::new(CapturingLlm {
+            requests: std::sync::Mutex::new(Vec::new()),
+        });
+        let mut dispatcher = ToolDispatcher::new();
+        dispatcher.register(SimpleTool::new(
+            "snap",
+            "Take a snapshot",
+            None,
+            |_args| async { Ok(serde_json::json!({"took": true})) },
+        ));
+        let agent = LlmTextAgent::new("signed", llm.clone()).tools(Arc::new(dispatcher));
+        let state = State::new();
+        let _ = state.set("input", "snap it");
+        assert_eq!(agent.run(&state).await.unwrap(), "described");
+
+        let requests = llm.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        let wire = serde_json::to_value(&requests[1].contents).unwrap();
+        let signed = wire
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|turn| turn["parts"].as_array().cloned().unwrap_or_default())
+            .find(|part| part.get("functionCall").is_some())
+            .expect("the model's function-call turn is in the history");
+        assert_eq!(signed["thoughtSignature"], "c2lnLTE=", "{wire}");
+        assert!(
+            signed["functionCall"].get("thoughtSignature").is_none(),
+            "{wire}"
         );
     }
 

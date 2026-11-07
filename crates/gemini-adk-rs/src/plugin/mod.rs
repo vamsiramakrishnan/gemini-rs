@@ -432,6 +432,7 @@ mod tests {
             name: "t".into(),
             args: serde_json::json!({}),
             id: None,
+            thought_signature: None,
         };
         assert!(pm.run_on_tool_error(&call, "err", &ctx).await.is_continue());
     }
@@ -496,6 +497,7 @@ mod tests {
             name: "dangerous_tool".into(),
             args: serde_json::json!({}),
             id: None,
+            thought_signature: None,
         };
 
         let result = pm.run_before_tool(&call, &ctx).await;

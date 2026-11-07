@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "gemini-adk"
-version = "4.0.0"
+version = "5.0.0"
 description = "Gemini text agents, tools, Live sessions, session specs and offline simulation, on the gemini-rs Rust runtime."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,6 +18,11 @@ classifiers = [
     "Intended Audience :: Developers",
 ]
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/vamsiramakrishnan/gemini-rs"
+Documentation = "https://github.com/vamsiramakrishnan/gemini-rs/tree/main/crates/gemini-adk-py"
+Changelog = "https://github.com/vamsiramakrishnan/gemini-rs/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Typed answers from a Pydantic model's JSON Schema (`Agent.ask_as`).

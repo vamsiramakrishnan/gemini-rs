@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-fluent-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -626,7 +626,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-macros-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -636,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-py"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -654,7 +654,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-genai-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "base64",

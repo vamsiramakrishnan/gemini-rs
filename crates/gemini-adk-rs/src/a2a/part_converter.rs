@@ -148,6 +148,7 @@ pub fn to_genai_part(a2a_part: &A2aPart) -> Option<Part> {
                         name: data.get("name")?.as_str()?.to_string(),
                         args: data.get("args").cloned().unwrap_or(serde_json::json!({})),
                         id: data.get("id").and_then(|v| v.as_str()).map(String::from),
+                        thought_signature: None,
                     },
                 }),
                 Some(DATA_TYPE_FUNCTION_RESPONSE) => Some(Part::FunctionResponse {
@@ -229,6 +230,7 @@ mod tests {
                 name: "get_weather".to_string(),
                 args: serde_json::json!({"city": "London"}),
                 id: Some("call-1".to_string()),
+                thought_signature: None,
             },
         };
         let a2a = to_a2a_part(&part, &[]).unwrap();
@@ -252,6 +254,7 @@ mod tests {
                 name: "slow_op".to_string(),
                 args: serde_json::json!({}),
                 id: Some("lr-1".to_string()),
+                thought_signature: None,
             },
         };
         let long_running = vec!["lr-1".to_string()];
@@ -509,6 +512,7 @@ mod tests {
                 name: "my_tool".to_string(),
                 args: serde_json::json!({"x": 10}),
                 id: Some("id-1".to_string()),
+                thought_signature: None,
             },
         };
         let a2a = to_a2a_part(&original, &[]).unwrap();
