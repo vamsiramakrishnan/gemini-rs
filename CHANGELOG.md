@@ -264,7 +264,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `generateContent` rejects a history that sends the call back without it
   (HTTP 400, "Function call is missing a thought_signature in functionCall
   parts"), so every tool round trip on, for example,
-  `gemini-flash-lite-latest` failed on its second model call, from Rust and
+  `gemini-3.5-flash-lite` failed on its second model call, from Rust and
   from Python alike. `Part` now keeps the signature it receives on a
   function-call part and writes it back beside `functionCall`; the new
   public field `FunctionCall::thought_signature` holds it (decision D22).

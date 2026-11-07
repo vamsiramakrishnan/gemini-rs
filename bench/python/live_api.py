@@ -40,7 +40,7 @@ from typing import Any, Callable
 
 import gemini_adk as g
 
-MODEL = "gemini-flash-lite-latest"
+MODEL = "gemini-3.5-flash-lite"
 INSTRUCTION = "You are a concise assistant."
 TOOL_INSTRUCTION = "You are a concise assistant. Use tools when they help."
 PROMPT_SHORT = "Reply with exactly the word: OK"
