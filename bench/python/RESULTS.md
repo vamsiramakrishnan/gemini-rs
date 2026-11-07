@@ -6,20 +6,20 @@ model. Request latency to Gemini is not measured; it is network-bound and
 the binding does not change it. The README quotes only numbers from this
 file.
 
-Revision `b20be80`; Linux x86_64 (4 vCPU cloud container); Python 3.13.18;
+Revision `ad1b039`; Linux x86_64 (4 vCPU cloud container); Python 3.13.18;
 gemini_adk 4.0.0; google-genai 2.34.0; google-adk 2.13.0.
 
 | Workload | Implementation | p50 (ms) | p99 (ms) | n |
 |---|---|---:|---:|---:|
-| Live audio frame, wire JSON to Python bytes (per frame) | gemini_adk scripted session | 0.0276 | 0.0324 | 20 |
-| Live audio frame, wire JSON to Python bytes (per frame) | google-genai `LiveServerMessage` | 0.0167 | 0.0176 | 20 |
-| Live audio frame, wire JSON to Python bytes (per frame) | `json.loads` + `b64decode` (floor) | 0.0041 | 0.0042 | 20 |
-| Tool round trip: model call, Python tool, model call | gemini_adk + `MockLlm` | 0.0649 | 0.0998 | 2000 |
-| Tool round trip: model call, Python tool, model call | google-adk + scripted `BaseLlm` | 3.7509 | 4.3323 | 300 |
-| `SessionSpec.validate()` | gemini_adk | 0.0016 | 0.0020 | 2000 |
-| `Conversation` compile | gemini_adk | 0.0122 | 0.0333 | 2000 |
-| Scenario, 9 steps, offline | gemini_adk | 0.0163 | 0.0388 | 2000 |
-| `Sim.step` (one state write) | gemini_adk | 0.0084 | 0.0229 | 5000 |
+| Live audio frame, wire JSON to Python bytes (per frame) | gemini_adk scripted session | 0.0260 | 0.0345 | 20 |
+| Live audio frame, wire JSON to Python bytes (per frame) | google-genai `LiveServerMessage` | 0.0170 | 0.0174 | 20 |
+| Live audio frame, wire JSON to Python bytes (per frame) | `json.loads` + `b64decode` (floor) | 0.0041 | 0.0077 | 20 |
+| Tool round trip: model call, Python tool, model call | gemini_adk + `MockLlm` | 0.0714 | 0.1038 | 2000 |
+| Tool round trip: model call, Python tool, model call | google-adk + scripted `BaseLlm` | 3.6420 | 5.6785 | 300 |
+| `SessionSpec.validate()` (gallery restaurant document) | gemini_adk | 0.1354 | 0.1729 | 2000 |
+| `Conversation` compile | gemini_adk | 0.0120 | 0.0306 | 2000 |
+| Scenario, 9 steps, offline | gemini_adk | 0.0170 | 0.0397 | 2000 |
+| `Sim.step` (one state write) | gemini_adk | 0.0091 | 0.0243 | 5000 |
 
 What each row measures, so the comparison is read correctly:
 
@@ -40,7 +40,12 @@ What each row measures, so the comparison is read correctly:
   served in that framework; for gemini_adk it includes building the
   `Agent`. Both include the Python tool call itself.
 - **Spec, compile, scenario, sim.** gemini_adk only; neither comparison
-  package has an offline governed simulation to compare with.
+  package has an offline governed simulation to compare with. The
+  validation row loads the Studio gallery's restaurant document
+  (`apps/gemini-adk-web-rs/static/examples/flows/restaurant.json`, a
+  skills document with tools, extraction and embedded tests); the compile,
+  scenario and sim rows use the three-stage booking conversation in the
+  script.
 
 Reproduce: `pip install google-genai google-adk`, build the extension in
 release mode, run the script from the repository root.
