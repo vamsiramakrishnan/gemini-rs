@@ -6,18 +6,15 @@ cleanup prompt; the classified inventory is `inventory.md`.
 
 ## Current phase
 
-**Phase 6 — final review.** Three independent reviews of the full diff
-(Rust core; fluent/apps/tools; Python binding, CI, bench, docs) are in
-`review.md` with every finding's disposition: one blocker (a Sim lock
-across `block_on`), eight majors and the minors are fixed on the branch;
-the rest are recorded (D16–D19) or listed as deferred in the design doc.
-Phase 5 is complete except the PyPI/import name (Vamsi). The Phase 4
-gate (`cargo hack check --workspace --feature-powerset --depth 2 --locked`)
-passed locally: 274 gemini-genai-rs checks, then all 684 checks of the
-other crates (log `scratchpad/logs/hack2.log`, exit 0); CI's eight `hack`
-partitions run the same matrix.
-Remaining: the CHANGELOG release notes are current; CI on the pushed head;
-CodeQL alert details (not readable from this session).
+**Done; awaiting Vamsi's decisions.** All six phases are complete and CI
+is green on head `d37e549` (run 564: every job, including the eight
+feature-powerset partitions, fuzz, loom, the release-mode fast-lane budget,
+the Python binding on Python 3.12 and the four abi3 wheels). The PR is
+marked ready for review. CodeQL reports only the pre-existing alert
+explained on the PR. Open for Vamsi: D1 (GoAway), D3/D4–D16 (API shape
+and 5.0.0), D18–D20 (behaviour changes made: key precedence, RFC 3339
+timestamps, rustls default), the PyPI/import name, and the sccache
+follow-up in `build-speed.md`.
 
 ## Gate results on the starting commit (local, debuginfo off, provider keys unset)
 
@@ -92,7 +89,9 @@ outcome 2 (keep, documented unstable), nothing is published to PyPI, and no
 | Phase 6: Python-side review fixes (Sim lock, loop guard, drop/atexit, events after close, errors, schema derivation) | `ad1b039`, `74ee608` | 80 pytest pass; stubtest, mypy, clippy clean; bench rerun | |
 | Phase 6: review record | `eac4618` | docs | |
 | Build speed: run cancellation + sccache in CI; dev profile without dependency debuginfo; rustls default (D20); one RustCrypto/toml generation; default-members; one test binary per crate; three connect tests made offline | `49feea7`, `c54405d` | `cargo test --workspace`: 3 521 pass, 0 fail, 50 ignored; clippy all targets/features clean; measurements in `build-speed.md` | |
-| CodeQL: key-variable helper renamed; nightly unreachable-code fix for the fuzz job | `57f85ab`, `14fa5cb` | nightly + stable check | CI on head |
+| CodeQL: key-variable helper renamed; nightly unreachable-code fix for the fuzz job | `57f85ab`, `14fa5cb` | nightly + stable check | |
+| rustls for the Python wheels; literal HMAC test key derived at run time (CodeQL critical) | `b5aae45`, `f6d22f6` | wheels build on 4 platforms (run 564) | |
+| Build speed: exit-path quiescing for the binding, sccache removed, workflow file fix, report | `c54405d`, `7b59f0e`, `d37e549` | CI run 564 green | |
 
 ## Fast-lane diffs needing Fable/Opus review
 
