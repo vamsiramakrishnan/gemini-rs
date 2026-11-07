@@ -191,9 +191,9 @@ impl Transport for ReplayTransport {
             if self.inbound.is_empty() {
                 let _ = self.drained_tx.send(true);
                 // Stay connected-but-idle; the session loop's `select!` drops this
-                // future when a command (e.g. Disconnect) arrives.
-                let never: std::convert::Infallible = std::future::pending().await;
-                match never {}
+                // future when a command (e.g. Disconnect) arrives. The pending
+                // future is this call's own return value, so no code follows it.
+                return std::future::pending().await;
             }
 
             if self.delivered >= self.ungated_prefix {
