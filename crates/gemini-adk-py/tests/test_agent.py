@@ -447,8 +447,14 @@ async def main():
 asyncio.run(main())
 print("done")
 """
-    proc = subprocess.run([sys.executable, "-I", "-c", program], capture_output=True, text=True, timeout=60)
-    assert proc.returncode == 0, proc.stderr
+    # -X faulthandler: a crash during finalisation prints where it happened.
+    proc = subprocess.run(
+        [sys.executable, "-I", "-X", "faulthandler", "-c", program],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"exit {proc.returncode}\n{proc.stderr}"
     assert proc.stdout.strip() == "done"
     assert "panicked" not in proc.stderr, proc.stderr
 

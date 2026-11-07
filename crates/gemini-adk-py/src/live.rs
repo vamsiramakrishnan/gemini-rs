@@ -98,6 +98,10 @@ pub struct PyLiveSession {
 /// again.
 static OPEN_SESSIONS: Mutex<Vec<Weak<LiveHandle>>> = Mutex::new(Vec::new());
 
+/// Set by `_shutdown`: from then on nothing schedules new runtime work from a
+/// Python-side drop, because the interpreter is on its way out.
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+
 fn register_open(handle: &Arc<LiveHandle>) {
     if let Ok(mut open) = OPEN_SESSIONS.lock() {
         open.retain(|w| w.strong_count() > 0);
@@ -109,6 +113,7 @@ fn register_open(handle: &Arc<LiveHandle>) {
 /// initialiser, and callable from tests.
 #[pyfunction]
 pub fn _shutdown(py: Python<'_>) -> PyResult<()> {
+    SHUTTING_DOWN.store(true, Ordering::SeqCst);
     let handles: Vec<Arc<LiveHandle>> = OPEN_SESSIONS
         .lock()
         .map(|open| open.iter().filter_map(Weak::upgrade).collect())
@@ -124,6 +129,11 @@ pub fn _shutdown(py: Python<'_>) -> PyResult<()> {
                     tokio::time::timeout(std::time::Duration::from_secs(2), handle.disconnect())
                         .await;
             }
+            // The disconnects woke bridge tasks and any awaitable still
+            // parked on them; give those a moment to run to completion while
+            // the interpreter is whole, so none of them reaches Python once
+            // finalisation starts.
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         })
     });
     Ok(())
@@ -133,7 +143,9 @@ impl Drop for PyLiveSession {
     /// A session that goes out of scope disconnects on the runtime; the
     /// drop itself never blocks the GIL thread.
     fn drop(&mut self) {
-        if self.closed.swap(true, Ordering::SeqCst) {
+        if self.closed.swap(true, Ordering::SeqCst) || SHUTTING_DOWN.load(Ordering::SeqCst) {
+            // Already closed, or the interpreter is exiting and `_shutdown`
+            // has closed every session: nothing new goes to the runtime.
             return;
         }
         let handle = self.handle.clone();

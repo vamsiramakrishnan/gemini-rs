@@ -144,8 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file (131 test binaries become 82); the workspace uses one RustCrypto
   generation (`sha2`/`sha1` 0.11, `hmac` 0.13) and one `toml` (0.9), which
   removes the duplicate `digest`, `sha2`, `toml_edit` and `winnow` builds.
-  CI cancels a PR's superseded runs, shares compilation across jobs with
-  sccache, and drops the `check` job clippy already covered. Measurements
+  CI cancels a PR's superseded runs and drops the `check` job clippy
+  already covered. Measurements
   are in `docs/cleanup/build-speed.md`.
 - **One API-key rule for every surface.** `GeminiLlm::from_env`, the Live
   session, the web app, the runtime and the CLI all read the key through

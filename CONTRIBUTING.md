@@ -255,9 +255,10 @@ The workspace is tuned for the edit-compile-test loop:
 - One generation of each dependency family (`sha2`/`sha1`/`hmac`, `toml`,
   rustls) so no crate compiles twice. `cargo tree --workspace -d` lists the
   remaining duplicates, all from third-party crates.
-- CI cancels a pull request's superseded runs and compiles through sccache
-  (`mozilla-actions/sccache-action`), so identical crate compilations are
-  shared between jobs.
+- CI cancels a pull request's superseded runs. Each job keeps its own
+  rust-cache target directory; a compilation cache shared across jobs was
+  tried with the Actions-cache backend and hit its write limits, so it
+  waits for a backend without them (see `docs/cleanup/build-speed.md`).
 
 Measurements for each of these are in `docs/cleanup/build-speed.md`.
 
