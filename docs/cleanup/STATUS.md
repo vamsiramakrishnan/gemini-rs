@@ -14,7 +14,9 @@ marked ready for review. CodeQL reports only the pre-existing alert
 explained on the PR. Open for Vamsi: D1 (GoAway), D3/D4–D16 (API shape
 and 5.0.0), D18–D20 (behaviour changes made: key precedence, RFC 3339
 timestamps, rustls default), the PyPI/import name, and the sccache
-follow-up in `build-speed.md`.
+follow-up in `build-speed.md`. D21 (OpenTelemetry 0.33, `otel-gcp` metrics
+over OTLP) was Vamsi's choice and is done, but needs one run against a real
+Google Cloud project, which this environment cannot do.
 
 ## Gate results on the starting commit (local, debuginfo off, provider keys unset)
 
@@ -92,6 +94,7 @@ outcome 2 (keep, documented unstable), nothing is published to PyPI, and no
 | CodeQL: key-variable helper renamed; nightly unreachable-code fix for the fuzz job | `57f85ab`, `14fa5cb` | nightly + stable check | |
 | rustls for the Python wheels; literal HMAC test key derived at run time (CodeQL critical) | `b5aae45`, `f6d22f6` | wheels build on 4 platforms (run 564) | |
 | Build speed: exit-path quiescing for the binding, sccache removed, workflow file fix, report | `c54405d`, `7b59f0e`, `d37e549` | CI run 564 green | |
+| OpenTelemetry 0.33; `otel-gcp` metrics over OTLP to the Telemetry API (D21), superseding Dependabot #120, #123, #129 | this commit | genai + adk-rs tests (all features) pass; clippy all targets/features, deny, genai powerset clean | real-project check |
 
 ## Fast-lane diffs needing Fable/Opus review
 

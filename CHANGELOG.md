@@ -133,8 +133,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is now an explicit feature), the code-mode interpreter `monty`,
   `monty-types` and `monty-pool` 1.4 (moved together; they are pinned
   exactly), and `uuid`, `rtrb`, `realfft` and `rsipstack` patch releases.
-  The OpenTelemetry family stays on 0.31: the Google Cloud monitoring
-  exporter has no release for 0.33 yet.
+  The OpenTelemetry family moves to 0.33 (`opentelemetry`,
+  `opentelemetry_sdk`, `opentelemetry-otlp` 0.33, `tracing-opentelemetry`
+  0.34, `opentelemetry-gcloud-trace` 0.29).
+- **`otel-gcp` sends metrics to Cloud Monitoring over OTLP** (decision D21).
+  `opentelemetry_gcloud_monitoring_exporter`, which never moved past
+  OpenTelemetry 0.31, is gone; metrics go to Google's Telemetry API
+  (`telemetry.googleapis.com`) with Application Default Credentials. They
+  are now `prometheus.googleapis.com/<name>/<kind>` metrics on the
+  `prometheus_target` resource instead of
+  `custom.googleapis.com/<service>/<name>`, so dashboards and
+  alerts on the old names need updating. The service account needs
+  `roles/telemetry.writer` (instead of `roles/monitoring.metricWriter`), and
+  metrics need a region: `cloud.region` in `OTEL_RESOURCE_ATTRIBUTES`, or the
+  metadata server's on Cloud Run, GCE and GKE; without one, `build_gcp`
+  fails with `GcpExportError::NoLocation` (the runtime and web app then
+  start without export and print why). Cloud Trace export is unchanged.
 - **rustls is the default TLS backend** (`tls-rustls`) on `gemini-genai-rs`,
   `gemini-adk-rs`, `gemini-adk-fluent-rs` and `gemini-adk`; `tls-native`
   (the system library) stays an opt-in feature. Default builds no longer

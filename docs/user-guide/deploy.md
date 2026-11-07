@@ -190,7 +190,8 @@ firewall.
   `OTEL_EXPORTER_OTLP_ENDPOINT` to send them to an OTLP collector, or
   `ADK_TELEMETRY=gcp` to send them to Cloud Trace and Cloud Monitoring (the
   service account then needs `roles/cloudtrace.agent` and
-  `roles/monitoring.metricWriter`). Each session is one trace, keyed by
+  `roles/telemetry.writer`; metrics go over OTLP and are stored in the
+  service's region). Each session is one trace, keyed by
   `gen_ai.conversation.id`. See [Observability](./observability.md).
 
 On `SIGTERM` (or Ctrl-C) the runtime drains. `/readyz` fails, new sessions
