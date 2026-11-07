@@ -11,6 +11,7 @@
 - [The Layer Contract (L0 · L1 · L2)](./user-guide/layers.md)
 - [Migration Guide: L0 → L1 → L2](./user-guide/migration.md)
 - [Best Practices & Common Mistakes](./user-guide/best-practices.md)
+- [Python Bindings](./python.md)
 
 # Voice & Live Sessions
 

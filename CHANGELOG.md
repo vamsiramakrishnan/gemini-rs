@@ -23,6 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Python bindings (`crates/gemini-adk-py`, `import gemini_adk`).** One
+  PyO3 extension module built by maturin (abi3, Python 3.10+): `Agent`,
+  `Chat` and streamed replies, typed answers from a JSON Schema or a
+  Pydantic model, the `@tool` decorator for sync and async Python tools,
+  `LiveSession` with `bytes` audio frames and dict events, `SessionSpec`
+  load/validate/run_tests/to_rust, `Conversation`/`Sim` offline simulation,
+  and `MockLlm` plus a scripted Live server for tests. Synchronous calls
+  release the GIL; the `*_async` forms integrate with asyncio. Python never
+  runs on the fast lane, event backpressure is reported as `lagged` events,
+  and one exception hierarchy maps every `AgentError`. Stubs are checked by
+  stubtest, wheels are built for Linux x86_64/aarch64, macOS arm64 and
+  Windows x86_64 in CI, and `bench/python/RESULTS.md` holds the measured
+  numbers. Nothing is published to PyPI yet. Design:
+  `docs/cleanup/python-binding-design.md`.
 - **Bug-bash test suites.** libFuzzer targets for the Live frame decoder on
   both wire paths (`crates/gemini-genai-rs/fuzz`, run for a fixed minute in
   CI from a committed corpus); property tests that a `SessionSpec` survives

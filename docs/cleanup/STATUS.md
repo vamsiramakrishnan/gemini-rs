@@ -6,11 +6,16 @@ cleanup prompt; the classified inventory is `inventory.md`.
 
 ## Current phase
 
-**Phase 4 — tech debt.** Phase 3 is committed (seven bugs, each with a
-regression test, in `bugs.md`). Remaining Phase 4 items: D1/D2 commit,
-D6 (`missing_docs` on the facade and macro crates), D8 (seven unused
-dependencies found by cargo-machete, heavy-dependency justifications),
-D3 dedupe (not started), D4 error unification (awaiting the D3 decision).
+**Phase 5 — Python bindings.** Phase 4 is committed (D0–D8 done or
+proposed in `decisions.md`; D3/D4–D16 await Vamsi). The Phase 4 gate
+(`cargo hack check --workspace --feature-powerset --depth 2 --locked`,
+954 checks) passed for gemini-genai-rs in full (274 checks) before the
+disk filled; the rerun for the remaining crates is in progress locally
+and the CI `hack` job runs the same matrix in eight partitions. Phase 5:
+the binding crate is rewritten on pyo3 0.29 + maturin (one cdylib,
+`import gemini_adk`), with the pytest suite (69 tests, offline), stubs
+checked by stubtest, mypy strict on the package, CI test and wheel jobs,
+and `bench/python/RESULTS.md`. Open: the PyPI/import name (Vamsi).
 
 ## Gate results on the starting commit (local, debuginfo off, provider keys unset)
 
@@ -75,7 +80,11 @@ outcome 2 (keep, documented unstable), nothing is published to PyPI, and no
 | D8: seven unused dependencies removed; heavy ones justified | `db2c13b` | machete clean | |
 | D3: helpers deduplicated (14 groups), one env/credential rule, RFC 3339 timestamps; proposals D11–D15 | `2a73874` | clippy all-features pass; all-features suite 3 841 pass | |
 | semver-checks vs 4.0.0: main already needs a major (D16) | `6c6d8f3` (CHANGELOG), D16 | documented | Vamsi's call |
-| Phase 4 gate: hack powerset rerun | pending | | then Phase 5 |
+| Phase 4 gate: hack powerset rerun | genai-rs 274/274 clean; rest rerunning after a disk-full stop | local + CI `hack` | |
+| Phase 5: binding crate on pyo3 0.29 (runtime, errors, tools, agent, live, spec), Python package, stubs, pytest suite | `f7a82c8` | 69 pytest pass; stubtest, mypy strict, clippy, rustdoc clean | wheels in CI |
+| Phase 5: CI `python` (pytest, mypy, stubtest) and `python-wheels` (4 platforms) | `5e3b1a7` | CI | |
+| Phase 5: `bench/python/` harness and RESULTS.md | `38459b1` | run locally, release build | |
+| Phase 5: docs page, CHANGELOG, D17 | (this commit, `docs:` after `38459b1`) | docs build pass | Phase 6 |
 
 ## Fast-lane diffs needing Fable/Opus review
 
