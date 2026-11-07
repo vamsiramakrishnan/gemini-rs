@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-11-07
+
 
 > **Breaking against 4.0.0.** `cargo semver-checks` against the published
 > 4.0.0 reports that this unreleased work already needs a major version:
@@ -320,6 +322,197 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SessionConfig::supports_code_execution()` reports support.
   `LiveModelProfile` gains `code_execution` and `GEMINI_2_5_NATIVE_AUDIO`.
   Text agents are unaffected.
+
+
+### Features
+
+- feat(telemetry)!: OpenTelemetry 0.33; otel-gcp sends metrics over OTLP
+- feat(gemini-adk-py): one pyo3 extension module for agents, tools, Live and specs
+- feat(studio,cli): one vocabulary across the SDK, the CLI and Flow Studio
+- feat(examples): register the SIP example with a PBX, and say what telephony supports
+- feat(skills): gemini-voice-workflow skill for coding agents
+- feat(cli): adk spec graph
+- feat(spec): authoring interface for coding harnesses
+- feat(adk): SteeringMode::ContextUpdate declares only the current phase's and step's tools
+- feat(genai): replace tools and instruction mid-session with contextUpdate
+### Bug Fixes
+
+- fix(cli): deploy --help shows SECRET_NAME for the secret-entry flags
+- fix(cli): keep secret-like identifiers out of the printed deploy plan
+- fix(gemini-adk-py): read type hints through functools.partial in @tool
+- fix(gemini-adk-py): quiesce the runtime at interpreter exit; ci: drop sccache
+- fix(genai): idle replay wait returns the pending future instead of matching a never value
+- fix(genai, cli): name the key-variable helper for what it returns
+- fix(gemini-adk-py): review fixes for the binding's runtime, sessions and errors
+- fix(telephony): make the µ-law encoder bit-exact with ITU-T G.191
+- fix(server): escape the request-derived app name in the not-found log
+- fix(gemini-adk-rs): publish latency ring slots one by one, with a loom model of the telemetry lane
+- fix(studio): cast the imported example documents through unknown in the round-trip test
+- fix(gemini-adk-rs): run on_tool_cancelled for a barge-in cancellation, and test the session lifecycle
+- fix(gemini-adk-fluent-rs): generated Rust keeps conversation documents, survives multi-line descriptions, and never panics on a custom guard
+- fix(gemini-adk-fluent-rs): serialize the spec temperature by its shortest decimal, and round-trip every Studio document
+- fix(gemini-adk-fluent-rs): make the G.711 encoders bit-exact with the ITU-T reference
+- fix(cli): name the file in every read error, and test every subcommand's --help and exit code
+- fix: migrate SIP endpoint to rsipstack 0.7 (#126)
+- fix(dsp): preserve streaming sinc resampling on rubato 5
+- fix(studio): synchronize CLI bundle on production builds
+- fix(ci): reconcile repairs with merged dependency updates
+- fix(code-mode): upgrade the complete Monty family and Tokio
+- fix(ci): restore Rust builds and audit patched locked dependency graphs
+- fix(studio): refresh committed build from locked dependencies
+- Fix main's red CI and three review findings from #100
+- Fix a panic on an unfinished stub; let a tool be reached only in code
+- Fix live voice-spec failures found by a live eval harness
+- fix(spec): hand off through a digression that admits only the transfer
+- fix(py): regenerate the binding's lockfile for #93's dependencies
+- fix(py): regenerate the binding's lockfile for #93's dependencies
+- fix(py): regenerate the binding's lockfile for #93's dependencies
+- fix(genai): deliver usage that arrives without content
+- fix(deps): build again after the aes 0.9 and opentelemetry 0.33 bumps
+- fix(genai): re-send replaced context after a resume; empty update is a no-op everywhere
+### Performance
+
+- perf(genai): cut the receive path's per-frame cost
+- perf(adk): record telemetry on the router so audio frames stop waking a task
+- perf(adk): size the LiveEvent buffer at 512 and make it configurable
+### Refactors
+
+- refactor: one copy of each shared helper, in the lowest crate that needs it
+- refactor: return typed errors from library code instead of unwrap/expect
+- refactor: give every #[allow(...)] a reason, or fix what it hid
+- refactor(cli): name the deploy config's secret fields for what they hold
+- refactor(gemini-genai-rs): classify WebSocket frames in one function the fuzz targets can reach
+### Documentation
+
+- docs(cleanup): STATUS: all phases done, CI green on d37e549, open decisions listed
+- docs(cleanup): build-speed report with same-machine before/after measurements
+- docs(cleanup): Phase 4 gate passed (feature powerset, 958 checks); STATUS
+- docs(cleanup): Phase 6 review record with every finding's disposition; STATUS
+- docs: Python bindings page, CHANGELOG entry, decision D17, STATUS for Phase 5
+- docs(cleanup): STATUS after the deduplication commit
+- docs: say that the unreleased work already needs a major version
+- docs(cleanup): STATUS for the Phase 4 commits so far
+- docs(cleanup): record the allow and unwrap work in the CHANGELOG and STATUS
+- docs(cleanup): propose the shared vocabulary and the error-type unification
+- docs: list every example binary in the index, and record the agreed Python binding shape
+- docs: make AGENTS.md the one instruction file
+- docs(cleanup): record the seven bug-bash findings and the Phase 3 status
+- docs: say what the evals and the transpiler are, and exclude dspbench explicitly
+- docs(cleanup): Python binding design
+- docs: fold plan.md into ROADMAP.md and correct the roadmap header
+- docs(cleanup): add the cleanup inventory, sweeps and status files
+- docs(skills): a correction reopens stages after a terminal one
+- docs(skills): correct two runtime details in the voice workflow references
+- docs: give the conversation examples' guard keys a writer
+- docs(plans): agent interface section for the Gemini Voice CLI
+- docs(plans): the Gemini Voice CLI experience
+### Style
+
+- style(cli): collapse the nested ifs in the help-walker (clippy)
+### Other
+
+- Merge pull request #131: cleanup, bug bash, tech debt, Python bindings, OpenTelemetry 0.33
+- bench(python): results for the reviewed binding on a real gallery document
+- review: fixes from the Rust-side review of the cleanup diff
+- studio: finish the D2 rename in the Bundles panel (Push bundle)
+- bench(python): in-process harness against google-genai and google-adk, with results
+- Merge pull request #127 from vamsiramakrishnan/ci/partition-feature-isolation
+- Run doctests and feature tests beside the suite
+- Partition cargo-hack, split the test job, add a pre-push hook
+- Merge pull request #125 from vamsiramakrishnan/fix/rubato-5-streaming
+- Merge pull request #119 from vamsiramakrishnan/fix/monty-family-compatible
+- Merge pull request #118 from vamsiramakrishnan/fix/rust-dependency-baseline
+- Merge durable Studio and CLI asset synchronization
+- Merge independent documentation build concurrency repair
+- Merge pull request #116 from vamsiramakrishnan/dependabot/cargo/crates/gemini-adk-py/tokio-1.54.1
+- Merge pull request #115 from vamsiramakrishnan/dependabot/npm_and_yarn/apps/docs/npm_and_yarn-95960185cb
+- Merge pull request #114 from vamsiramakrishnan/dependabot/cargo/minor-and-patch-2e3f3ddef2
+- Merge pull request #117 from vamsiramakrishnan/fix/studio-generated-assets
+- Merge pull request #113 from vamsiramakrishnan/dependabot/npm_and_yarn/apps/docs/npm_and_yarn-1774780cb0
+- Merge pull request #112 from vamsiramakrishnan/dependabot/cargo/minor-and-patch-c44b998e09
+- Merge pull request #111 from vamsiramakrishnan/dependabot/cargo/crates/gemini-adk-py/tokio-1.53.3
+- Merge pull request #110 from vamsiramakrishnan/dependabot/cargo/crates/gemini-adk-py/serde_json-1.0.154
+- Merge pull request #109 from vamsiramakrishnan/dependabot/cargo/getrandom-0.4.3
+- Merge pull request #108 from vamsiramakrishnan/dependabot/cargo/tokio-tungstenite-0.30.0
+- Merge pull request #107 from vamsiramakrishnan/dependabot/cargo/tower-http-0.6.11
+- Merge pull request #105 from vamsiramakrishnan/dependabot/cargo/opentelemetry-a75401a840
+- Merge pull request #103 from vamsiramakrishnan/feat/jev-decisions
+- Add the 200-line Python runs with every failed call's mic data
+- Don't poll a finished reader in the stand-in; add the uvloop 150-line run
+- Record the trattoria results: Rust, Python and Python on uvloop
+- Keep failed calls' mic data, wait for the stand-in to settle, summarize failed runs
+- Read mic clocks in either base64 alphabet; add the trattoria summarizer
+- Add a trattoria call benchmark: the same agent in Rust and Python
+- Merge pull request #102 from vamsiramakrishnan/feat/jev-decisions
+- Keep the Python vs Rust wire benchmark and its results
+- Let the REST client and GeminiLlm send requests to another host
+- Merge pull request #101 from vamsiramakrishnan/feat/jev-decisions
+- Refresh the Studio schema snapshot
+- Allow Unicode-DFS-2016 for Monty's unicode_names2
+- Fix main's red CI and three review findings from #100
+- Report code mode measured through the SDK
+- Satisfy clippy in the skills code probe
+- Refuse a program's oversized printout whole; probe code mode in a skill
+- Changelog: only_in_code and the stub guard
+- Fix a panic on an unfinished stub; let a tool be reached only in code
+- Merge pull request #100 from vamsiramakrishnan/feat/jev-decisions
+- Speak the caller in the code-mode eval's SDK arms
+- Keep a model's copied stubs from shadowing the real functions
+- Report misspelled fields in a spec's code section
+- Document code mode; gate program tests on the code-mode feature
+- Code mode inside skills
+- Code mode in specs, the fluent API, codegen and the CLI
+- Run the model's programs over governed tool calls
+- Format the 1.99 lint fixes
+- Raise the minimum Rust to 1.99
+- Measure code mode against function calls on Gemini 3.8 Live
+- Leave code execution off Live setups that refuse it
+- Write down how context steering works, and how a decision model drives it
+- Declare only the foreground skill's tools, through contextUpdate
+- Offer the tools one decision away, and decide them at the gate
+- Stop reading a pharmacist callback as a transfer request
+- Record the live A/B with extraction pinned to gemini-3.5-flash-lite
+- Quote the caller's latest turn when extraction has known values
+- Run extraction on gemini-3.5-flash-lite at thinking budget 64
+- Name the extraction model in the spec, and pin a fast one
+- Record the live A/B on decided guards
+- Ask only what governs a call at the tool gate
+- Make decisions part of the governed flow: a decided guard over the rolling conversation
+- Evaluate Jev against labelled decisions without a Live session
+- Match spoken references in the live eval; record the corrected voice A/B
+- Keep the live eval caller's microphone open between lines
+- Merge pull request #99 from vamsiramakrishnan/test/live-spec-eval
+- Record the live A/B; decision extractors write only promoted keys
+- Merge branch 'test/live-spec-eval' into feat/jev-decisions
+- Refresh every extractor that may write a guard key; keep digits' punctuation
+- Add decision models: Jev on Vercel AI Gateway, natively in Rust
+- Fix live voice-spec failures found by a live eval harness
+- Merge pull request #98 from vamsiramakrishnan/feat/voice-workflow-skill
+- Merge pull request #97 from vamsiramakrishnan/fix/example-writers
+- Merge pull request #96 from vamsiramakrishnan/feat/agent-interface
+- Merge pull request #95 from vamsiramakrishnan/fix/py-lockfile
+- Merge pull request #94 from vamsiramakrishnan/docs/gemini-voice-cli
+- Merge pull request #93 from vamsiramakrishnan/perf/receive-path
+- Merge pull request #92 from vamsiramakrishnan/fix/srtp-aes-0.9
+- Merge branch 'fix/srtp-aes-0.9' into perf/receive-path
+- Merge main: keep OpenTelemetry on the 0.31 family
+- Merge pull request #83 from vamsiramakrishnan/dependabot/cargo/opentelemetry_sdk-0.32.1
+- Merge pull request #79 from vamsiramakrishnan/dependabot/cargo/opentelemetry-gcloud-trace-0.27.0
+- Merge pull request #91 from vamsiramakrishnan/dependabot/npm_and_yarn/apps/docs/npm_and_yarn-4dd59db750
+- Merge pull request #85 from vamsiramakrishnan/dependabot/cargo/minor-and-patch-1726334f97
+- Merge pull request #77 from vamsiramakrishnan/dependabot/cargo/aes-0.9.3
+- Merge pull request #75 from vamsiramakrishnan/dependabot/github_actions/actions/setup-python-7
+- Merge pull request #74 from vamsiramakrishnan/dependabot/cargo/opentelemetry-a75401a840
+- Merge pull request #90 from vamsiramakrishnan/dependabot/cargo/hickory-resolver-0.26.3
+- Merge pull request #84 from vamsiramakrishnan/dependabot/cargo/crates/gemini-adk-py/pyo3-0.29.3
+- Merge pull request #82 from vamsiramakrishnan/dependabot/npm_and_yarn/apps/docs/npm_and_yarn-e422db4233
+- Merge pull request #73 from vamsiramakrishnan/dependabot/github_actions/actions/setup-go-7
+- Merge pull request #78 from vamsiramakrishnan/dependabot/cargo/opentelemetry_gcloud_monitoring_exporter-0.23.0
+- Merge pull request #89 from vamsiramakrishnan/perf/telemetry-off-audio-path
+- Merge pull request #88 from vamsiramakrishnan/perf/live-event-capacity
+- Merge pull request #87 from vamsiramakrishnan/feat/context-update-steering
+- Merge pull request #86 from vamsiramakrishnan/feat/context-update
+- Merge pull request #81 from vamsiramakrishnan/release/v4.0.0
 
 ## [4.0.0] - 2026-10-02
 

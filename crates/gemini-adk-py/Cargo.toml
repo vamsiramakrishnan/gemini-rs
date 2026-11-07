@@ -1,6 +1,6 @@
 [package]
 name = "gemini-adk-py"
-version = "4.0.0"
+version = "5.0.0"
 edition = "2021"
 license = "MIT"
 description = "Python bindings for gemini-rs: text agents, tools, Live sessions, session specs and offline simulation over the Rust runtime"
