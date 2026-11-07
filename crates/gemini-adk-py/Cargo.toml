@@ -3,7 +3,7 @@ name = "gemini-adk-py"
 version = "4.0.0"
 edition = "2021"
 license = "MIT"
-description = "Python bindings for the gemini-rs governed-conversation data plane"
+description = "Python bindings for gemini-rs: text agents, tools, Live sessions, session specs and offline simulation over the Rust runtime"
 publish = false
 
 # Workspace-excluded (see root Cargo.toml [workspace].exclude): this crate links
@@ -13,9 +13,26 @@ publish = false
 name = "_gemini_adk"
 crate-type = ["cdylib"]
 
+[features]
+default = []
+# Local microphone/speaker devices (`LiveSession.talk()`); pulls the system
+# audio stack, so it is the `gemini-adk[voice]` extra, off by default.
+voice = ["gemini-adk-fluent-rs/voice-io"]
+
 [dependencies]
 gemini-adk-fluent-rs = { path = "../gemini-adk-fluent-rs" }
+gemini-adk-rs = { path = "../gemini-adk-rs", default-features = false }
+gemini-genai-rs = { path = "../gemini-genai-rs", default-features = false }
+# The extension module. abi3-py310: one wheel per platform for Python 3.10+.
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py310"] }
+# `await`-able entry points and the asyncio side of Python async tools; it
+# owns the one Tokio runtime the module uses.
+pyo3-async-runtimes = { version = "0.29", features = ["tokio-runtime"] }
+# JSON values <-> Python dicts/lists without a string round trip.
+pythonize = "0.29"
+serde = "1"
 serde_json = "1"
-tokio = { version = "1", features = ["rt"] }
-once_cell = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
+futures-util = "0.3"
+async-trait = "0.1"
+bytes = "1"
