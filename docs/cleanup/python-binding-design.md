@@ -238,8 +238,8 @@ good JSON])` and asserts two requests.
 - `python/gemini_adk/_gemini_adk.pyi` is hand-written from the Rust
   signatures; `py.typed` marks the package; CI runs
   `python -m mypy.stubtest gemini_adk._gemini_adk` against the built module.
-- PyPI name and import name are unconfirmed (today `gemini-adk` /
-  `gemini_adk`); nothing is published until Vamsi confirms them.
+- PyPI name `gemini-adk`, import name `gemini_adk`: confirmed by Vamsi
+  (2026-11-07); published from 5.0.0 by the release workflow.
 
 ## 8. Benchmarks
 

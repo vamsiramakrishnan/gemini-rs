@@ -8,13 +8,15 @@ install.
 ```bash
 pip install gemini-adk              # Python >= 3.10, one abi3 wheel per platform
 pip install "gemini-adk[pydantic]"  # typed answers as Pydantic models
+```
+
+Wheels are published for Linux (x86_64 and aarch64, glibc 2.28+), macOS
+(Apple silicon and Intel) and Windows (x86_64). Elsewhere pip builds from
+the source distribution, which needs Rust 1.99 or newer.
 
 Audio devices are not part of the binding: Python sends and receives PCM
 frames as `bytes` and plays or captures them with the audio library of its
 choice.
-```
-
-Nothing is published yet: the PyPI name is unconfirmed (see "Status").
 
 ## Use
 
@@ -133,5 +135,6 @@ is not benchmarked: it is network-bound and the binding does not change it.
 
 ## Status
 
-Experimental. The PyPI distribution name and import name (`gemini-adk` /
-`gemini_adk`) are not final and nothing is published until they are.
+Experimental: the Python API may change between minor releases. Published
+to PyPI as `gemini-adk` (import `gemini_adk`) from 5.0.0, with every release
+tag (`.github/workflows/release.yml`).

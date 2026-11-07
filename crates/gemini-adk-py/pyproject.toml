@@ -19,6 +19,11 @@ classifiers = [
 ]
 dependencies = []
 
+[project.urls]
+Repository = "https://github.com/vamsiramakrishnan/gemini-rs"
+Documentation = "https://github.com/vamsiramakrishnan/gemini-rs/tree/main/crates/gemini-adk-py"
+Changelog = "https://github.com/vamsiramakrishnan/gemini-rs/blob/main/CHANGELOG.md"
+
 [project.optional-dependencies]
 # Typed answers from a Pydantic model's JSON Schema (`Agent.ask_as`).
 pydantic = ["pydantic>=2"]

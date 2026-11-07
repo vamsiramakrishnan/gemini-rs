@@ -35,9 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release the GIL; the `*_async` forms integrate with asyncio. Python never
   runs on the fast lane, event backpressure is reported as `lagged` events,
   and one exception hierarchy maps every `AgentError`. Stubs are checked by
-  stubtest, wheels are built for Linux x86_64/aarch64, macOS arm64 and
-  Windows x86_64 in CI, and `bench/python/RESULTS.md` holds the measured
-  numbers. Nothing is published to PyPI yet. Design:
+  stubtest, and `bench/python/RESULTS.md` holds the measured numbers.
+  Published to PyPI as `gemini-adk` (`pip install gemini-adk`): abi3 wheels
+  for Linux x86_64/aarch64, macOS arm64/x86_64 and Windows x86_64, and an
+  sdist for other platforms (needs Rust 1.99+). Design:
   `docs/cleanup/python-binding-design.md`.
 - **Bug-bash test suites.** libFuzzer targets for the Live frame decoder on
   both wire paths (`crates/gemini-genai-rs/fuzz`, run for a fixed minute in
