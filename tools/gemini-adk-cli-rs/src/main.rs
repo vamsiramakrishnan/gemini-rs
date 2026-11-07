@@ -189,10 +189,14 @@ enum Command {
         #[arg(long, default_value = ".")]
         source: String,
         /// Name of the Secret Manager secret holding ADK_RUNTIME_TOKENS.
-        #[arg(long = "tokens-secret", default_value = "adk-runtime-tokens")]
+        #[arg(
+            long = "tokens-secret",
+            value_name = "SECRET_NAME",
+            default_value = "adk-runtime-tokens"
+        )]
         runtime_vault_entry: String,
         /// Name of the Secret Manager secret holding TWILIO_AUTH_TOKEN (enables phone calls).
-        #[arg(long = "twilio-secret")]
+        #[arg(long = "twilio-secret", value_name = "SECRET_NAME")]
         phone_vault_entry: Option<String>,
         /// Service account to run as; default adk-runtime@PROJECT.iam.gserviceaccount.com.
         #[arg(long)]
