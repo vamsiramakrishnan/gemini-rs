@@ -263,8 +263,17 @@ mod tests {
     /// by the bare key, for every length around the block size.
     #[test]
     fn keyed_hmac_matches_new_from_slice_for_every_key_length() {
+        use sha2::Digest as _;
         for len in [0usize, 1, 19, 20, 32, 63, 64, 65, 128, 200] {
-            let key = vec![0xA5u8; len];
+            // Key bytes derived at run time from the length, so the test
+            // exercises arbitrary key material without a literal key in the
+            // source (which static analysis would read as a real secret).
+            let key: Vec<u8> = sha2::Sha256::digest(len.to_le_bytes())
+                .iter()
+                .cycle()
+                .take(len)
+                .copied()
+                .collect();
             let mut padded = keyed_hmac!(sha2::Sha256, &key);
             padded.update(b"message");
             let mut bare = Hmac::<sha2::Sha256>::new_from_slice(&key).unwrap();
