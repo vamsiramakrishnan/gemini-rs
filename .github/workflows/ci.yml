@@ -399,14 +399,59 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates/gemini-adk-py
-      - name: Build and smoke-test
+      # The suite runs offline: a scripted model and a scripted Live server.
+      # No provider key is set, so a test that reached the network would
+      # fail instead of passing by accident.
+      - name: Build, test, type-check
         working-directory: crates/gemini-adk-py
         run: |
           python -m venv .venv
           . .venv/bin/activate
-          pip install "maturin>=1.7,<2.0"
+          pip install "maturin>=1.7,<2.0" pydantic pytest pytest-asyncio pytest-timeout mypy typing_extensions
           maturin develop --locked
-          python tests/smoke.py
+          pytest -q
+          python -m mypy python/gemini_adk --strict
+          python -m mypy.stubtest gemini_adk._gemini_adk --ignore-disjoint-bases
+
+  # One abi3 wheel per platform, built but not published: publishing waits
+  # on the final distribution name (crates/gemini-adk-py/README.md).
+  python-wheels:
+    name: Python wheel (${{ matrix.name }})
+    needs: [python]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64
+          - name: linux-aarch64
+            os: ubuntu-latest
+            target: aarch64
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64
+          - name: windows-x86_64
+            os: windows-latest
+            target: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: crates/gemini-adk-py
+          target: ${{ matrix.target }}
+          args: --release --locked --out dist
+          manylinux: ${{ startsWith(matrix.name, 'linux') && '2_28' || 'auto' }}
+          sccache: "true"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.name }}
+          path: crates/gemini-adk-py/dist/*.whl
+          if-no-files-found: error
 
   # Green only when every job above is. The one check a branch rule names:
   # with a matrix, a job's name changes when its size does, and a job that
@@ -415,7 +460,7 @@ jobs:
   ci-ok:
     name: CI
     if: ${{ !cancelled() }}
-    needs: [check, test, test-all-features, doctests, clippy, fmt, features, hack, doc, deny, fuzz, loom, bench-build, monty-worker, conversation-ci, generated-projects, studio, python]
+    needs: [check, test, test-all-features, doctests, clippy, fmt, features, hack, doc, deny, fuzz, loom, bench-build, monty-worker, conversation-ci, generated-projects, studio, python, python-wheels]
     runs-on: ubuntu-latest
     steps:
       - name: Every job passed
