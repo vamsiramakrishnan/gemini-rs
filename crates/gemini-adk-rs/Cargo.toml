@@ -43,7 +43,7 @@ parking_lot = "0.12"
 # patterns compiled once into statics).
 regex = "1"
 # Optional: instruction templates (`templates` feature).
-minijinja = { version = "2", optional = true }
+minijinja = { version = "3", features = ["serde"], optional = true }
 # Edit distance for the response evaluator and "did you mean" diagnostics.
 strsim = "0.11"
 uuid = { version = "1", features = ["v4"] }
@@ -59,9 +59,9 @@ base64 = "0.22"
 # Code mode: Monty, a Python interpreter in Rust, runs the model's programs.
 # Keep the interpreter, shared types and pool on the same exact release: new
 # MontyNode variants can break older interpreters even across a minor update.
-monty = { version = "=1.2.0", optional = true }
-monty-types = { version = "=1.2.0", optional = true }
-monty-pool = { version = "=1.2.0", optional = true }
+monty = { version = "=1.4.0", optional = true }
+monty-types = { version = "=1.4.0", optional = true }
+monty-pool = { version = "=1.4.0", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

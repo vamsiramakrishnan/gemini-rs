@@ -113,7 +113,7 @@ impl TemplateInstruction {
             }
         }
         top.insert("state".into(), serde_json::Value::Object(all));
-        minijinja::Value::from_serialize(serde_json::Value::Object(top))
+        minijinja::Value::from(minijinja::value::Serde(serde_json::Value::Object(top)))
     }
 }
 

@@ -129,6 +129,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Dependencies.** `minijinja` 3 (instruction templates; its serde support
+  is now an explicit feature), the code-mode interpreter `monty`,
+  `monty-types` and `monty-pool` 1.4 (moved together; they are pinned
+  exactly), and `uuid`, `rtrb`, `realfft` and `rsipstack` patch releases.
+  The OpenTelemetry family stays on 0.31: the Google Cloud monitoring
+  exporter has no release for 0.33 yet.
 - **rustls is the default TLS backend** (`tls-rustls`) on `gemini-genai-rs`,
   `gemini-adk-rs`, `gemini-adk-fluent-rs` and `gemini-adk`; `tls-native`
   (the system library) stays an opt-in feature. Default builds no longer
