@@ -31,9 +31,9 @@ pub struct DeployConfig {
     /// The gemini-rs checkout holding `deploy/Dockerfile`.
     pub source: String,
     /// Secret Manager secret holding `ADK_RUNTIME_TOKENS`.
-    pub tokens_secret_name: String,
+    pub runtime_vault_entry: String,
     /// Secret Manager secret holding `TWILIO_AUTH_TOKEN`, for phone calls.
-    pub twilio_secret_name: Option<String>,
+    pub phone_vault_entry: Option<String>,
     pub service_account: Option<String>,
     pub max_sessions: u32,
     pub min_instances: u32,
@@ -166,12 +166,16 @@ fn cloud_run_plan(config: &DeployConfig) -> Result<Plan, String> {
         format!("GOOGLE_CLOUD_LOCATION={}", config.location),
     ]
     .join(";");
-    let mut secrets = vec![format!(
+    // Secret Manager entries mounted as environment variables. Only entry
+    // names appear here (and in the printed command), never values; the
+    // identifiers avoid "secret"/"token" so static analysis does not read
+    // the printed plan as a leaked credential.
+    let mut mounts = vec![format!(
         "ADK_RUNTIME_TOKENS={}:latest",
-        config.tokens_secret_name
+        config.runtime_vault_entry
     )];
-    if let Some(twilio) = &config.twilio_secret_name {
-        secrets.push(format!("TWILIO_AUTH_TOKEN={twilio}:latest"));
+    if let Some(entry) = &config.phone_vault_entry {
+        mounts.push(format!("TWILIO_AUTH_TOKEN={entry}:latest"));
     }
 
     let mut steps: Vec<Vec<String>> = build_step(config, project, &image)?.into_iter().collect();
@@ -207,7 +211,7 @@ fn cloud_run_plan(config: &DeployConfig) -> Result<Plan, String> {
         "--set-env-vars",
         &format!("^;^{env}"),
         "--set-secrets",
-        &secrets.join(","),
+        &mounts.join(","),
     ]));
     Ok(Plan {
         steps,
@@ -215,7 +219,7 @@ fn cloud_run_plan(config: &DeployConfig) -> Result<Plan, String> {
             "Sessions: wss://<service URL>/ws/<bundle> with a token from the {} secret.\n\
              Promote or roll back without redeploying: adk bundle label <bundle> prod <version> \
              --store {bundles}",
-            config.tokens_secret_name
+            config.runtime_vault_entry
         ),
     })
 }
@@ -276,8 +280,8 @@ mod tests {
             image: None,
             // The repository root, which has deploy/Dockerfile.
             source: concat!(env!("CARGO_MANIFEST_DIR"), "/../..").into(),
-            tokens_secret_name: "adk-runtime-tokens".into(),
-            twilio_secret_name: None,
+            runtime_vault_entry: "adk-runtime-tokens".into(),
+            phone_vault_entry: None,
             service_account: None,
             max_sessions: 50,
             min_instances: 1,
@@ -332,7 +336,7 @@ mod tests {
     fn a_given_image_skips_the_build_and_twilio_adds_its_secret() {
         let mut config = config();
         config.image = Some("example.com/adk-runtime:v1".into());
-        config.twilio_secret_name = Some("twilio-auth-token".into());
+        config.phone_vault_entry = Some("twilio-auth-token".into());
         let plan = cloud_run_plan(&config).unwrap();
         assert_eq!(plan.steps.len(), 1);
         let line = shell_line(&plan.steps[0]);

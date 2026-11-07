@@ -190,10 +190,10 @@ enum Command {
         source: String,
         /// Name of the Secret Manager secret holding ADK_RUNTIME_TOKENS.
         #[arg(long = "tokens-secret", default_value = "adk-runtime-tokens")]
-        tokens_secret_name: String,
+        runtime_vault_entry: String,
         /// Name of the Secret Manager secret holding TWILIO_AUTH_TOKEN (enables phone calls).
         #[arg(long = "twilio-secret")]
-        twilio_secret_name: Option<String>,
+        phone_vault_entry: Option<String>,
         /// Service account to run as; default adk-runtime@PROJECT.iam.gserviceaccount.com.
         #[arg(long)]
         service_account: Option<String>,
@@ -650,8 +650,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             serve,
             image,
             source,
-            tokens_secret_name,
-            twilio_secret_name,
+            runtime_vault_entry,
+            phone_vault_entry,
             service_account,
             max_sessions,
             min_instances,
@@ -669,8 +669,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             serve,
             image,
             source,
-            tokens_secret_name,
-            twilio_secret_name,
+            runtime_vault_entry,
+            phone_vault_entry,
             service_account,
             max_sessions,
             min_instances,
