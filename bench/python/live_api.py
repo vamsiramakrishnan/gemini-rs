@@ -127,7 +127,11 @@ class Python:
             first_audio_ms = None
             audio_bytes = chunks = 0
             turn_ms = None
-            for event in events:
+            # Every wait is bounded by what is left of the 60 s deadline, as on
+            # the native side: a session that stays open but goes quiet raises
+            # gemini_adk.TimeoutError (and is retried) instead of hanging.
+            deadline = sent + 60
+            while (event := events.next_timeout(max(deadline - time.perf_counter(), 0))) is not None:
                 kind = event["kind"]
                 if kind == "audio":
                     if first_audio_ms is None:
@@ -139,8 +143,6 @@ class Python:
                     break
                 elif kind == "disconnected":
                     raise RuntimeError(f"disconnected: {event.get('reason')}")
-                if time.perf_counter() - sent > 60:
-                    raise RuntimeError("no turn_complete within 60 s")
             if turn_ms is None:
                 raise RuntimeError("event stream ended before turn_complete")
         finally:
