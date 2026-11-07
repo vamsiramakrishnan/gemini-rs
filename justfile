@@ -189,7 +189,7 @@ watch-check:
 # compiling without it noticing.
 #
 # Compile every test file, including those behind non-default features
-test-all-features:
+check-all-features:
     cargo check --workspace --all-features --all-targets --locked
 
 # `--no-default-features` is the end that catches a type which only exists
@@ -245,7 +245,7 @@ generated-projects:
 # slower than `just check` because CI is slower than `just check`.
 #
 # Every job GitHub Actions runs, in one command
-ci: fmt-check lint doc-check test test-all test-all-features features feature-isolation loom deny conversations
+ci: fmt-check lint doc-check test test-all check-all-features features feature-isolation loom deny conversations
     @echo ""
     @echo "✓ Every job GitHub Actions runs has passed locally."
 

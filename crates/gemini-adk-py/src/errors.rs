@@ -110,11 +110,20 @@ pub fn to_py_err(err: AgentError) -> PyErr {
     match err {
         AgentError::Config(_) => ConfigError::new_err(message),
         AgentError::SessionClosed => SessionClosedError::new_err(message),
-        AgentError::Session(_) => SessionError::new_err(message),
+        AgentError::Session(inner) => with_attrs(
+            SessionError::new_err(message),
+            &[("kind", variant_name(&format!("{inner:?}")))],
+        ),
         AgentError::Tool(tool) => tool_error(tool),
-        AgentError::Llm(_) => LlmError::new_err(message),
+        AgentError::Llm(inner) => with_attrs(
+            LlmError::new_err(message),
+            &[("kind", variant_name(&format!("{inner:?}")))],
+        ),
         AgentError::State(_) => StateError::new_err(message),
-        AgentError::InvalidOutput { .. } => InvalidOutputError::new_err(message),
+        AgentError::InvalidOutput { reason, text, .. } => with_attrs(
+            InvalidOutputError::new_err(message),
+            &[("reason", reason), ("raw", text)],
+        ),
         AgentError::UnknownAgent(_)
         | AgentError::TransferRequested(_)
         | AgentError::TransferFailed(_) => TransferError::new_err(message),
@@ -124,6 +133,27 @@ pub fn to_py_err(err: AgentError) -> PyErr {
         }),
         _ => GeminiAdkError::new_err(message),
     }
+}
+
+/// The variant name of a `Debug` rendering (`Api { .. }` -> `Api`,
+/// `Auth("x")` -> `Auth`, `NotConnected` -> `NotConnected`).
+fn variant_name(debug: &str) -> String {
+    debug
+        .split(['(', '{', ' '])
+        .next()
+        .unwrap_or(debug)
+        .to_string()
+}
+
+/// `err` with string attributes set on its value (`e.kind`, `e.raw`, ...).
+fn with_attrs(err: PyErr, attrs: &[(&str, String)]) -> PyErr {
+    Python::attach(|py| {
+        let value = err.value(py);
+        for (name, text) in attrs {
+            let _ = value.setattr(*name, text.as_str());
+        }
+    });
+    err
 }
 
 /// The Python exception for a `ToolError`.

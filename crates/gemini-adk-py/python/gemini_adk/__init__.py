@@ -57,8 +57,10 @@ from ._gemini_adk import (
     TransferError,
     __version__,
     connect,
+    connect_async,
     conversation_schema,
     scripted,
+    scripted_async,
     validate_conversation,
 )
 
@@ -90,9 +92,11 @@ __all__ = [
     "__version__",
     "ask_as",
     "connect",
+    "connect_async",
     "conversation_schema",
     "schema_for",
     "scripted",
+    "scripted_async",
     "tool",
     "validate_conversation",
 ]
@@ -109,6 +113,29 @@ _SCALARS: dict[Any, dict[str, Any]] = {
 }
 
 
+def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """A Pydantic schema with its ``$defs`` inlined: the function-declaration
+    schema the API accepts has no ``$ref``."""
+    defs = schema.get("$defs", {})
+
+    def walk(node: Any, seen: tuple[str, ...]) -> Any:
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                name = ref[len("#/$defs/") :]
+                if name in seen:
+                    raise TypeError(f"recursive model {name!r} cannot be a tool parameter")
+                target = walk(defs[name], seen + (name,))
+                rest = {k: v for k, v in node.items() if k != "$ref"}
+                return {**target, **rest}
+            return {k: walk(v, seen) for k, v in node.items() if k != "$defs"}
+        if isinstance(node, list):
+            return [walk(v, seen) for v in node]
+        return node
+
+    return typing.cast(dict[str, Any], walk(schema, ()))
+
+
 def _schema_of(annotation: Any) -> dict[str, Any]:
     """The JSON Schema for one type hint. Unknown types become ``{}``."""
     if annotation is inspect.Parameter.empty:
@@ -123,15 +150,30 @@ def _schema_of(annotation: Any) -> dict[str, Any]:
         if annotation in (list, tuple, set, frozenset):
             return {"type": "array"}
         if hasattr(annotation, "model_json_schema"):
-            return typing.cast(dict[str, Any], annotation.model_json_schema())
+            return _inline_refs(typing.cast(dict[str, Any], annotation.model_json_schema()))
         return {}
-    if origin in (list, set, frozenset, tuple):
+    if origin in (list, set, frozenset):
         items = _schema_of(args[0]) if args else {}
         return {"type": "array", "items": items}
+    if origin is tuple:
+        # `tuple[X, ...]` is a homogeneous array; a fixed-shape tuple has no
+        # function-declaration equivalent, so it is an untyped array.
+        if len(args) == 2 and args[1] is Ellipsis:
+            return {"type": "array", "items": _schema_of(args[0])}
+        return {"type": "array"}
     if origin is dict:
         return {"type": "object"}
     if origin is typing.Literal:
-        return {"enum": list(args)}
+        values = list(args)
+        kinds = {type(v) for v in values}
+        schema: dict[str, Any] = {"enum": values}
+        if kinds == {str}:
+            schema["type"] = "string"
+        elif kinds == {int}:
+            schema["type"] = "integer"
+        elif kinds == {bool}:
+            schema["type"] = "boolean"
+        return schema
     if origin is typing.Union or origin is types.UnionType:
         members = [_schema_of(a) for a in args]
         return members[0] if len(members) == 1 else {"anyOf": members}
@@ -140,6 +182,8 @@ def _schema_of(annotation: Any) -> dict[str, Any]:
         for extra in args[1:]:
             if isinstance(extra, str):
                 schema["description"] = extra
+            elif isinstance(getattr(extra, "description", None), str):
+                schema["description"] = extra.description  # pydantic.Field(...)
         return schema
     return {}
 
@@ -170,9 +214,14 @@ def schema_for(func: Callable[..., Any]) -> dict[str, Any]:
     docs = _param_docs(inspect.getdoc(func) or "")
     properties: dict[str, Any] = {}
     required: list[str] = []
-    for name, param in inspect.signature(func).parameters.items():
+    for index, (name, param) in enumerate(inspect.signature(func).parameters.items()):
         if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
             continue
+        if index == 0 and name in ("self", "cls") and param.annotation is inspect.Parameter.empty:
+            raise TypeError(
+                "a tool is a plain function or a bound method: decorate the function, or pass "
+                "`instance.method` to Tool(...), not an unbound method with `self`"
+            )
         schema = _schema_of(hints.get(name, param.annotation))
         if name in docs and "description" not in schema:
             schema["description"] = docs[name]
@@ -196,18 +245,26 @@ def tool(func: Any = None, /, *, name: str | None = None, description: str | Non
 
     The tool's name is the function's, its description the first paragraph
     of the docstring, and its parameters the JSON Schema of the signature
-    (``schema_for``). ``async def`` functions run on the asyncio loop that
-    is running when the tool is created; create them inside the coroutine
-    that runs the agent. The returned ``Tool`` is still callable directly.
+    (``schema_for``). The function receives the model's arguments as
+    keywords and returns a JSON-compatible value (``dict``, ``list``,
+    ``str``, numbers, ``bool`` or ``None``; encode ``bytes`` yourself).
+    ``async def`` functions run on the asyncio loop that is running when the
+    tool is created; create them inside the coroutine that runs the agent.
+    A ``functools.partial`` or a ``lambda`` needs an explicit ``name=``.
+    The returned ``Tool`` is still callable directly.
     """
 
     def wrap(f: Callable[..., Any]) -> Tool:
+        own_name = getattr(f, "__name__", None)
+        tool_name = name or own_name
+        if not tool_name or tool_name == "<lambda>":
+            raise TypeError("this callable has no usable __name__; pass tool(name=...)")
         doc = inspect.getdoc(f) or ""
         summary = doc.split("\n\n", 1)[0].strip() if doc else ""
         return Tool(
             f,
-            name=name or f.__name__,
-            description=description or summary or f.__name__,
+            name=tool_name,
+            description=description or summary or tool_name,
             parameters=schema_for(f),
         )
 

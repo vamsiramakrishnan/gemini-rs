@@ -65,7 +65,24 @@ where
              (a tool callback); use the async form (`await`) there",
         ));
     }
+    // Blocking the thread that runs an asyncio loop stalls every coroutine
+    // on it, including an async tool this very call would need: the same
+    // rule `asyncio.run` applies, raised instead of hung.
+    if asyncio_loop_running(py) {
+        return Err(PyRuntimeError::new_err(
+            "called a blocking gemini_adk entry point from a running asyncio \
+             loop; await the *_async form there",
+        ));
+    }
     Ok(py.detach(|| rt.block_on(fut)))
+}
+
+/// Whether this thread is inside a running asyncio event loop.
+fn asyncio_loop_running(py: Python<'_>) -> bool {
+    py.import("asyncio")
+        .and_then(|m| m.call_method0("_get_running_loop"))
+        .map(|l| !l.is_none())
+        .unwrap_or(false)
 }
 
 /// Hand `fut` to asyncio as an awaitable. The future runs on the runtime;

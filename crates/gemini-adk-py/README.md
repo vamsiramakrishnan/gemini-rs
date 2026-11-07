@@ -8,6 +8,10 @@ install.
 ```bash
 pip install gemini-adk              # Python >= 3.10, one abi3 wheel per platform
 pip install "gemini-adk[pydantic]"  # typed answers as Pydantic models
+
+Audio devices are not part of the binding: Python sends and receives PCM
+frames as `bytes` and plays or captures them with the audio library of its
+choice.
 ```
 
 Nothing is published yet: the PyPI name is unconfirmed (see "Status").
@@ -93,8 +97,11 @@ sim = convo.sim(); sim.step("turn")   # {"active", "denied", "complete", "explai
   asyncio loop that was running when the tool was created, so create async
   tools inside the coroutine that runs the agent. A barge-in cancels an
   in-flight async tool's task.
-- A blocking entry point called from inside a tool raises `RuntimeError`
-  instead of deadlocking; use the `*_async` form there.
+- A blocking entry point called from inside a tool, or from a coroutine on
+  a running asyncio loop (which would stall every async tool on that loop),
+  raises `RuntimeError` instead of deadlocking; use the `*_async` form
+  there. A session that goes out of scope disconnects on the runtime, and
+  every open session is closed at interpreter exit.
 - `os.fork()` after the runtime started is refused in the child with a
   clear error; use `multiprocessing` with the `spawn` start method.
 - One exception hierarchy under `GeminiAdkError`; `TimeoutError` is also a
@@ -115,8 +122,7 @@ pytest
 python -m mypy.stubtest gemini_adk._gemini_adk --ignore-disjoint-bases
 ```
 
-The crate is excluded from the Cargo workspace (it links libpython). The
-`voice` extra builds with the `voice-io` feature for local audio devices.
+The crate is excluded from the Cargo workspace (it links libpython).
 
 ## Benchmarks
 

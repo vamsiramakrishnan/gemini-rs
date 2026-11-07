@@ -278,26 +278,73 @@ async fn ask(
         )
         .await
         .map_err(to_py_err)?;
-    let reason = match serde_json::from_str::<Value>(first.text.trim()) {
+    let reason = match parse_against(first.text.trim(), &schema) {
         Ok(value) => return Ok(Outcome::Json(value)),
-        Err(e) => e.to_string(),
+        Err(reason) => reason,
     };
     let repair = RunRequest::new(format!(
         "That reply could not be read as the requested JSON ({reason}). \
          Reply again with only JSON that matches the schema."
     ))
     .history(first.messages)
-    .response_schema(schema);
+    .response_schema(schema.clone());
     let second = agent.run_with(repair, &state).await.map_err(to_py_err)?;
-    serde_json::from_str::<Value>(second.text.trim())
+    parse_against(second.text.trim(), &schema)
         .map(Outcome::Json)
-        .map_err(|e| {
+        .map_err(|reason| {
             to_py_err(AgentError::InvalidOutput {
                 expected: "JSON matching the schema",
-                reason: e.to_string(),
+                reason,
                 text: second.text,
             })
         })
+}
+
+/// Parse `text` as JSON and check it against the schema's top level: its
+/// `type` (a name or a list of names) and, for an object, its `required`
+/// keys. Deeper validation is the caller's (Pydantic, for `ask_as`).
+fn parse_against(text: &str, schema: &Value) -> Result<Value, String> {
+    let value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let json_type = match &value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(n) => {
+            if n.is_i64() || n.is_u64() {
+                "integer"
+            } else {
+                "number"
+            }
+        }
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    };
+    let allowed: Vec<&str> = match schema.get("type") {
+        Some(Value::String(t)) => vec![t.as_str()],
+        Some(Value::Array(ts)) => ts.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    if !allowed.is_empty()
+        && !allowed
+            .iter()
+            .any(|t| *t == json_type || (*t == "number" && json_type == "integer"))
+    {
+        return Err(format!(
+            "the reply is a JSON {json_type}, the schema wants {}",
+            allowed.join(" or ")
+        ));
+    }
+    if let (Value::Object(map), Some(Value::Array(required))) = (&value, schema.get("required")) {
+        let missing: Vec<&str> = required
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|k| !map.contains_key(*k))
+            .collect();
+        if !missing.is_empty() {
+            return Err(format!("missing required keys: {}", missing.join(", ")));
+        }
+    }
+    Ok(value)
 }
 
 /// A conversation: every `send` carries the turns before it.

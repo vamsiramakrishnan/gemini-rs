@@ -200,7 +200,7 @@ impl PyConversation {
     fn sim(&self, mode: &str) -> PyResult<PySim> {
         let enforcement = parse_mode(mode)?;
         Ok(PySim {
-            inner: std::sync::Mutex::new(Sim::new(&self.inner, enforcement)),
+            inner: std::sync::Arc::new(tokio::sync::Mutex::new(Sim::new(&self.inner, enforcement))),
         })
     }
 }
@@ -208,7 +208,10 @@ impl PyConversation {
 /// A step-by-step simulator.
 #[pyclass(name = "Sim", module = "gemini_adk", frozen)]
 pub struct PySim {
-    inner: std::sync::Mutex<Sim>,
+    /// An async mutex, locked inside the runtime future: a std lock held
+    /// across `block_on` (which releases the GIL) would deadlock against a
+    /// second thread that holds the GIL and waits for the lock.
+    inner: std::sync::Arc<tokio::sync::Mutex<Sim>>,
 }
 
 fn snapshot(sim: &Sim) -> Value {
@@ -228,22 +231,19 @@ impl PySim {
     fn step<'py>(&self, py: Python<'py>, step: Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
         let step: SimStep = serde_json::from_value(to_json(&step)?)
             .map_err(|e| spec_error(py, format!("invalid SimStep: {e}"), json!([e.to_string()])))?;
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("simulator lock poisoned"))?;
-        let sim: &mut Sim = &mut guard;
-        let outcome = block_on(py, sim.apply(&step))?;
-        outcome.map_err(|message| spec_error(py, message.clone(), json!([message])))?;
-        to_py(py, &snapshot(sim))
+        let sim = self.inner.clone();
+        let outcome = block_on(py, async move {
+            let mut sim = sim.lock().await;
+            sim.apply(&step).await.map(|()| snapshot(&sim))
+        })?;
+        let snap = outcome.map_err(|message| spec_error(py, message.clone(), json!([message])))?;
+        to_py(py, &snap)
     }
 
     /// `{"active", "denied", "complete", "explain"}`.
     fn snapshot<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let guard = self
-            .inner
-            .lock()
-            .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("simulator lock poisoned"))?;
-        to_py(py, &snapshot(&guard))
+        let sim = self.inner.clone();
+        let snap = block_on(py, async move { snapshot(&*sim.lock().await) })?;
+        to_py(py, &snap)
     }
 }

@@ -53,9 +53,20 @@ impl PyTool {
             ));
         }
         let inspect = py.import("inspect")?;
+        // A plain `async def`, or a callable object whose `__call__` is one.
         let is_async = inspect
             .call_method1("iscoroutinefunction", (&callable,))?
-            .is_truthy()?;
+            .is_truthy()?
+            || callable
+                .getattr("__call__")
+                .ok()
+                .map(|c| {
+                    inspect
+                        .call_method1("iscoroutinefunction", (c,))
+                        .and_then(|r| r.is_truthy())
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
         let event_loop = if is_async { running_loop(py) } else { None };
         let parameters = parameters
             .filter(|p| !p.is_none())
@@ -150,8 +161,22 @@ fn call_sync(inner: &ToolInner, args: &Value) -> Result<Value, ToolError> {
             .bind(py)
             .call(PyTuple::empty(py), Some(&kwargs))
             .map_err(|e| python_failure(py, &e))?;
+        if is_awaitable(py, &result) {
+            return Err(ToolError::ExecutionFailed(format!(
+                "tool {:?} returned an awaitable from a synchronous call; declare it `async def` \
+                 (or give it an `async def __call__`) so the runtime awaits it",
+                inner.name
+            )));
+        }
         to_json(&result).map_err(|e| ToolError::ExecutionFailed(format!("result is not JSON: {e}")))
     })
+}
+
+fn is_awaitable(py: Python<'_>, value: &Bound<'_, PyAny>) -> bool {
+    py.import("inspect")
+        .and_then(|m| m.call_method1("isawaitable", (value,)))
+        .and_then(|r| r.is_truthy())
+        .unwrap_or(false)
 }
 
 fn kwargs_from<'py>(py: Python<'py>, args: &Value) -> Result<Bound<'py, PyDict>, ToolError> {
@@ -235,14 +260,26 @@ impl ToolFunction for RuntimeTool {
             asyncio
                 .call_method1("run_coroutine_threadsafe", (coro, event_loop.bind(py)))
                 .map(Bound::unbind)
-                .map_err(|e| python_failure(py, &e))
+                .map_err(|e| {
+                    let failure = python_failure(py, &e);
+                    match failure {
+                        ToolError::ExecutionFailed(text) if text.contains("Event loop is closed") => {
+                            ToolError::ExecutionFailed(format!(
+                                "{text}\nasync tool {:?} belongs to an asyncio loop that has closed; \
+                                 create the tool inside the coroutine that runs the agent",
+                                inner.name
+                            ))
+                        }
+                        other => other,
+                    }
+                })
         })?;
         // Wait for the concurrent.futures.Future on the blocking pool (its
         // `result()` releases the GIL while it waits), racing a barge-in.
         // The runtime drops a cancelled inline tool's future at its current
         // await point (see `tool_handler.rs`), so the guard, not the select
         // arm, is what cancels the asyncio task in that case.
-        let guard = CancelOnDrop {
+        let mut guard = CancelOnDrop {
             future: future.clone_ref_any(),
             armed: true,
         };
@@ -266,7 +303,11 @@ impl ToolFunction for RuntimeTool {
                 Err(ToolError::Cancelled)
             }
         };
-        // Cancelled or failed: make sure the asyncio task does not run on.
+        // A finished future needs no cancel (and no GIL round trip on the
+        // control lane); a cancelled or failed one must not run on.
+        if outcome.is_ok() {
+            guard.armed = false;
+        }
         drop(guard);
         outcome
     }

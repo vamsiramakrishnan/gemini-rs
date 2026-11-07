@@ -22,8 +22,6 @@ dependencies = []
 [project.optional-dependencies]
 # Typed answers from a Pydantic model's JSON Schema (`Agent.ask_as`).
 pydantic = ["pydantic>=2"]
-# Local audio devices; builds the extension with the system audio stack.
-voice = []
 # The test suite and type checks (`pytest`, `stubtest`).
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "pytest-timeout>=2", "mypy>=1.14", "typing_extensions>=4.12"]
 

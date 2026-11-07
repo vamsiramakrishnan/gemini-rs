@@ -3,6 +3,9 @@
 Status: design, written before any binding code beyond the existing JSON
 data-plane surface. Phase 5 implements it. Every invariant below has a test
 named beside it; the tests are written with the code that must hold them.
+§10 records what shipped under a different name and what is deferred, so
+this document and the suite in `crates/gemini-adk-py/tests` can be read
+together without guessing.
 
 ## 0. Shape, as agreed with Vamsi (2026-11-06)
 
@@ -258,3 +261,52 @@ does not change it. README numbers come only from that file.
 4. `LiveSession` + `ScriptedLive`, the slow-consumer tests.
 5. Stubs, stubtest, wheel matrix.
 6. Benchmark harness and `RESULTS.md`.
+
+## 10. What shipped (review of the implementation against §1–§9)
+
+Implemented as designed, with the test that holds it:
+
+| Design item | Test |
+|---|---|
+| §1 L1 Python never on the fast lane | `test_live.py::test_fast_lane_never_sees_python` |
+| §1 slow consumer, `lagged` accounting, two consumers | `test_slow_consumer_does_not_stall_fast_lane`, `test_lagged_event_counts_every_drop_in_order`, `test_two_consumers_lag_independently` |
+| §1 L2 sync tool off the calling thread, inside the runtime | `test_agent.py::test_sync_tool_runs_on_blocking_pool_not_the_calling_thread` |
+| §1 L3 sync entry points release the GIL | `test_sync_entry_points_release_gil`, `test_spec.py::test_sim_step_releases_gil_over_a_long_scenario` |
+| §2 fork refused; `block_on` inside a worker refused; one runtime | `test_fork_after_init_is_refused`, `test_block_on_inside_worker_is_an_error`, `test_exactly_one_runtime` |
+| §2 interpreter exit with open sessions | `_shutdown` registered with `atexit`; `test_atexit_closes_sessions` (subprocess, no panic on stderr) |
+| §2 (added) a blocking entry point on a running asyncio loop is refused, not hung | `test_blocking_entry_point_from_a_running_loop_is_an_error` |
+| §3 stream ends after `disconnected`; `events()` after the end ends at once | `test_events_after_close_end_the_iterator`, `test_async_iteration_ends_after_close` |
+| §4 cancelled `ask` does not hang; barge-in cancels an async tool; server cancellation surfaced; dropped session disconnects; `async with` | `test_cancelled_ask_does_not_hang`, `test_async_tool_is_cancelled_on_barge_in`, `test_server_tool_cancellation_is_surfaced`, `test_dropped_session_disconnects`, `test_async_with_closes_the_session` |
+| §5 every variant maps; `.kind` on `SessionError`/`LlmError`; `.reason`/`.raw` on `InvalidOutputError`; `SpecError.diagnostics` | `test_errors.py::test_every_variant_maps`, `test_agent.py::test_error_attributes_from_the_design`, `test_spec_error_carries_diagnostics` |
+| §6 typed answers retry once; the top-level `type` and `required` keys are checked | `test_typed_answer_retries_once`, `test_typed_answer_gives_up_after_one_retry`, `test_typed_answer_checks_the_top_level_type` |
+| §7 stubs, `py.typed`, wheels | stubtest and mypy in the CI `python` job; `python-wheels` matrix |
+
+Differences from the text above, and what is deferred:
+
+- `LiveEvents.next_timeout` raises `gemini_adk.TimeoutError` on a timeout
+  and returns `None` only when the stream has ended, so the two cannot be
+  confused.
+- The `Sim` is guarded by an async mutex locked inside the runtime future,
+  never a std lock held across `block_on` (that deadlocked two threads
+  sharing a `Sim`; `test_sim_is_safe_to_share_between_threads`).
+- A Python tool that raises reaches the model as `"{Type}: {message}"` plus
+  the traceback; attaching the original exception as `__cause__`
+  (`tool_exception_is_chained`) is deferred: the error crosses the control
+  lane as a string and is re-raised, if at all, in a later turn.
+- Deferred tests: `bridge_builds_events_off_lane` (the bridge holds no
+  Python object by construction; the thread-id probe covers the fast lane
+  only), `cancelled_ask_drops_rust_future` (replaced by the weaker
+  `test_cancelled_ask_does_not_hang`; `MockLlm` has no drop hook),
+  `sync_tool_result_after_barge_in_is_discarded` (the runtime's own
+  `session_lifecycle` tests cover the discard), `async_entry_points_release_gil`
+  (`MockLlm` has no delayed reply to measure against).
+- Deeper typed-answer validation is Pydantic's (`ask_as`); the core checks
+  the top-level `type` and `required` keys only.
+- The `voice` extra is gone: a pip extra cannot select a Cargo feature, and
+  the binding has no device API. Audio is `bytes` in and out.
+- aarch64 wheels build in maturin-action's cross container; no QEMU step.
+- Async tools run on the loop that was running when the tool was created
+  (`asyncio.run_coroutine_threadsafe`), as §1 says; the blocking-call
+  refusal above turns the "loop blocked by the user's own sync call" case
+  from a silent hang into an immediate `RuntimeError`.
+

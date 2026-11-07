@@ -160,3 +160,36 @@ def test_sim_step_releases_gil_over_a_long_scenario():
         stop.set()
         t.join()
     assert ticks > 0
+
+
+def test_sim_is_safe_to_share_between_threads():
+    """`step` releases the GIL inside the runtime while `snapshot` on another
+    thread holds it: no lock is held across that boundary, so neither
+    deadlocks the interpreter."""
+    import threading
+
+    sim = adk.Conversation(SPEC).sim()
+    stop = threading.Event()
+    errors = []
+
+    def stepper():
+        try:
+            for _ in range(300):
+                sim.step({"set": {"key": "party_size", "value": 2}})
+        except Exception as e:  # pragma: no cover - reported below
+            errors.append(e)
+        finally:
+            stop.set()
+
+    def reader():
+        while not stop.is_set():
+            sim.snapshot()
+
+    threads = [threading.Thread(target=stepper), threading.Thread(target=reader)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert not any(t.is_alive() for t in threads), "a thread hung"
+    assert not errors
+

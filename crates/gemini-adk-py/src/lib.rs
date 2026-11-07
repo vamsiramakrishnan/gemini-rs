@@ -34,6 +34,13 @@ fn _gemini_adk(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<live::PyLiveEvents>()?;
     m.add_function(wrap_pyfunction!(live::connect, m)?)?;
     m.add_function(wrap_pyfunction!(live::scripted, m)?)?;
+    m.add_function(wrap_pyfunction!(live::connect_async, m)?)?;
+    m.add_function(wrap_pyfunction!(live::scripted_async, m)?)?;
+    m.add_function(wrap_pyfunction!(live::_shutdown, m)?)?;
+    // Open sessions are closed before the interpreter finalises, so no
+    // bridge task or awaitable touches Python after `Py_Finalize`.
+    py.import("atexit")?
+        .call_method1("register", (m.getattr("_shutdown")?,))?;
     m.add_class::<spec::PySessionSpec>()?;
     m.add_class::<spec::PyConversation>()?;
     m.add_class::<spec::PySim>()?;

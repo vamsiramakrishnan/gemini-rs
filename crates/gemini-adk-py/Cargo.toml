@@ -13,12 +13,6 @@ publish = false
 name = "_gemini_adk"
 crate-type = ["cdylib"]
 
-[features]
-default = []
-# Local microphone/speaker devices (`LiveSession.talk()`); pulls the system
-# audio stack, so it is the `gemini-adk[voice]` extra, off by default.
-voice = ["gemini-adk-fluent-rs/voice-io"]
-
 [dependencies]
 gemini-adk-fluent-rs = { path = "../gemini-adk-fluent-rs" }
 gemini-adk-rs = { path = "../gemini-adk-rs", default-features = false }

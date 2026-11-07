@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import pathlib
 import platform
 import statistics
 import subprocess
@@ -124,17 +125,13 @@ def bench_live_frames(frames_per_run: int = 1000) -> list[float]:
     return [s / frames_per_run for s in timed(run, repeat=20, warmup=2)]
 
 
+GALLERY_DOCUMENT = pathlib.Path(__file__).resolve().parents[2] / "apps" / "gemini-adk-web-rs" / "static" / "examples" / "flows" / "restaurant.json"
+
+
 def bench_spec_validate() -> list[float]:
-    spec = {
-        "name": "bench",
-        "skills": [
-            {"name": "booking", "stages": CONVERSATION["stages"], "require": ["done"]},
-        ],
-    }
-    try:
-        doc = adk.SessionSpec(spec)
-    except adk.SpecError:
-        doc = adk.SessionSpec({"name": "bench", "flow": {"steps": [{"id": "s1", "allow": ["book"]}]}})
+    """`SessionSpec.validate()` on the Studio gallery's restaurant document
+    (a skills document with tools, extraction and tests)."""
+    doc = adk.SessionSpec(json.loads(GALLERY_DOCUMENT.read_text()))
     return timed(lambda: doc.validate(), repeat=2000)
 
 
@@ -279,7 +276,7 @@ def main() -> None:
         ("Live audio frame, wire JSON to Python bytes (per frame)", "json.loads + b64decode (floor)", bench_json_frames()),
         ("Tool round trip: model call, Python tool, model call", "gemini_adk + MockLlm", bench_tool_round_trip()),
         ("Tool round trip: model call, Python tool, model call", "google-adk + scripted BaseLlm", bench_adk_tool_round_trip()),
-        ("SessionSpec.validate()", "gemini_adk", bench_spec_validate()),
+        ("SessionSpec.validate() (gallery restaurant document)", "gemini_adk", bench_spec_validate()),
         ("Conversation compile", "gemini_adk", bench_conversation_compile()),
         ("Scenario, 9 steps, offline", "gemini_adk", bench_scenario()),
         ("Sim.step (one state write)", "gemini_adk", bench_sim_step()),

@@ -9,7 +9,8 @@
 //! behind loses the oldest events for itself alone and is told so by a
 //! `lagged` event carrying the count.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 
 use gemini_adk_fluent_rs::live::LiveEvent;
 use gemini_adk_fluent_rs::prelude::*;
@@ -86,6 +87,62 @@ pub struct PyLiveSession {
     scripted: Option<gemini_genai_rs::transport::ReplayControl>,
     /// A fast-lane probe installed by `scripted(..., _probe=True)`.
     probe: Option<Arc<crate::testing::AudioProbe>>,
+    /// Set once the session is over (closed from Python, dropped, or the
+    /// server disconnected), so `events()` ends at once instead of waiting
+    /// for a `disconnected` event that was broadcast before it subscribed.
+    closed: Arc<AtomicBool>,
+}
+
+/// Every open session, so interpreter exit can close them: a bridge task or
+/// an `__anext__` future that outlives `Py_Finalize` cannot touch Python
+/// again.
+static OPEN_SESSIONS: Mutex<Vec<Weak<LiveHandle>>> = Mutex::new(Vec::new());
+
+fn register_open(handle: &Arc<LiveHandle>) {
+    if let Ok(mut open) = OPEN_SESSIONS.lock() {
+        open.retain(|w| w.strong_count() > 0);
+        open.push(Arc::downgrade(handle));
+    }
+}
+
+/// Close every open session; registered with `atexit` by the module
+/// initialiser, and callable from tests.
+#[pyfunction]
+pub fn _shutdown(py: Python<'_>) -> PyResult<()> {
+    let handles: Vec<Arc<LiveHandle>> = OPEN_SESSIONS
+        .lock()
+        .map(|open| open.iter().filter_map(Weak::upgrade).collect())
+        .unwrap_or_default();
+    if handles.is_empty() {
+        return Ok(());
+    }
+    let rt = runtime()?;
+    py.detach(|| {
+        rt.block_on(async move {
+            for handle in handles {
+                let _ =
+                    tokio::time::timeout(std::time::Duration::from_secs(2), handle.disconnect())
+                        .await;
+            }
+        })
+    });
+    Ok(())
+}
+
+impl Drop for PyLiveSession {
+    /// A session that goes out of scope disconnects on the runtime; the
+    /// drop itself never blocks the GIL thread.
+    fn drop(&mut self) {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let handle = self.handle.clone();
+        if let Ok(rt) = runtime() {
+            rt.spawn(async move {
+                let _ = handle.disconnect().await;
+            });
+        }
+    }
 }
 
 fn build_live(
@@ -127,16 +184,89 @@ pub fn connect(
 ) -> PyResult<PyLiveSession> {
     let live = build_live(instruction, tools, greeting, event_capacity, text_only)?;
     let handle = block_on(py, async move { live.connect_from_env().await })?.map_err(to_py_err)?;
+    let handle = Arc::new(handle);
+    register_open(&handle);
     Ok(PyLiveSession {
-        handle: Arc::new(handle),
+        handle,
         scripted: None,
         probe: None,
+        closed: Arc::new(AtomicBool::new(false)),
+    })
+}
+
+/// `await connect_async(...)`: `connect` for code on a running asyncio loop.
+#[pyfunction]
+#[pyo3(signature = (*, instruction=None, tools=None, greeting=None, event_capacity=None, text_only=false))]
+pub fn connect_async<'py>(
+    py: Python<'py>,
+    instruction: Option<String>,
+    tools: Option<Vec<Bound<'py, PyAny>>>,
+    greeting: Option<String>,
+    event_capacity: Option<usize>,
+    text_only: bool,
+) -> PyResult<Bound<'py, PyAny>> {
+    let live = build_live(instruction, tools, greeting, event_capacity, text_only)?;
+    future_into_py(py, async move {
+        let handle = live.connect_from_env().await.map_err(to_py_err)?;
+        let handle = Arc::new(handle);
+        register_open(&handle);
+        Ok(PyLiveSession {
+            handle,
+            scripted: None,
+            probe: None,
+            closed: Arc::new(AtomicBool::new(false)),
+        })
+    })
+}
+
+/// `await scripted_async(frames, ...)`: `scripted` for code on a running
+/// asyncio loop.
+#[pyfunction]
+#[pyo3(signature = (frames, *, instruction=None, tools=None, greeting=None, event_capacity=None, text_only=false, released=true))]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "every parameter is a keyword with a default"
+)]
+pub fn scripted_async<'py>(
+    py: Python<'py>,
+    frames: Vec<Bound<'py, PyAny>>,
+    instruction: Option<String>,
+    tools: Option<Vec<Bound<'py, PyAny>>>,
+    greeting: Option<String>,
+    event_capacity: Option<usize>,
+    text_only: bool,
+    released: bool,
+) -> PyResult<Bound<'py, PyAny>> {
+    let live = build_live(instruction, tools, greeting, event_capacity, text_only)?;
+    let mut server = ScriptedServer::new();
+    for frame in frames {
+        server = server.frame(to_json(&frame)?);
+    }
+    let (transport, control) = server.into_transport();
+    future_into_py(py, async move {
+        let handle = live
+            .connect_with_transport(transport)
+            .await
+            .map_err(to_py_err)?;
+        if released {
+            control.release();
+        }
+        let handle = Arc::new(handle);
+        register_open(&handle);
+        Ok(PyLiveSession {
+            handle,
+            scripted: Some(control),
+            probe: None,
+            closed: Arc::new(AtomicBool::new(false)),
+        })
     })
 }
 
 /// A Live session against a scripted server, for tests: `frames` are the
 /// server's messages (dicts) in order, played after `setupComplete`. No
-/// network, no credentials.
+/// network, no credentials. Events reach only the `events()` streams that
+/// exist when they are sent, so a test that must see the first frames
+/// passes `released=False`, subscribes, then calls `release()`.
 #[pyfunction]
 #[pyo3(signature = (frames, *, instruction=None, tools=None, greeting=None, event_capacity=None, text_only=false, released=true, _probe=false))]
 #[allow(
@@ -175,10 +305,13 @@ pub fn scripted(
     if released {
         control.release();
     }
+    let handle = Arc::new(handle);
+    register_open(&handle);
     Ok(PyLiveSession {
-        handle: Arc::new(handle),
+        handle,
         scripted: Some(control),
         probe,
+        closed: Arc::new(AtomicBool::new(false)),
     })
 }
 
@@ -234,11 +367,34 @@ impl PyLiveSession {
     fn events(&self, buffer: usize) -> PyResult<PyLiveEvents> {
         let mut source = self.handle.events();
         let (tx, rx) = tokio::sync::mpsc::channel::<PyLiveEvent>(buffer.max(1));
+        let closed = self.closed.clone();
+        let over = closed.load(Ordering::SeqCst)
+            || matches!(
+                self.handle.phase(),
+                gemini_genai_rs::session::SessionPhase::Disconnected
+            );
+        if over {
+            // Already over: the stream ends at once (the sender is dropped
+            // here, so the receiver reports the end on its first poll).
+            drop(tx);
+            return Ok(PyLiveEvents {
+                rx: Arc::new(tokio::sync::Mutex::new(rx)),
+            });
+        }
         runtime()?.spawn(async move {
             loop {
-                match source.recv().await {
+                let received = tokio::select! {
+                    received = source.recv() => received,
+                    // The Python side dropped its `LiveEvents`: stop at once
+                    // instead of on the next event.
+                    () = tx.closed() => break,
+                };
+                match received {
                     Ok(event) => {
                         let last = matches!(event, LiveEvent::Disconnected { .. });
+                        if last {
+                            closed.store(true, Ordering::SeqCst);
+                        }
                         if let Some(mapped) = map_event(event) {
                             if tx.send(mapped).await.is_err() {
                                 break;
@@ -256,7 +412,10 @@ impl PyLiveSession {
                             break;
                         }
                     }
-                    Err(RecvError::Closed) => break,
+                    Err(RecvError::Closed) => {
+                        closed.store(true, Ordering::SeqCst);
+                        break;
+                    }
                 }
             }
         });
@@ -286,12 +445,14 @@ impl PyLiveSession {
     /// Close the session.
     fn close(&self, py: Python<'_>) -> PyResult<()> {
         let handle = self.handle.clone();
+        self.closed.store(true, Ordering::SeqCst);
         close_outcome(block_on(py, async move { handle.disconnect().await })?)
     }
 
     /// `await session.close_async()`.
     fn close_async<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let handle = self.handle.clone();
+        self.closed.store(true, Ordering::SeqCst);
         future_into_py(py, async move { close_outcome(handle.disconnect().await) })
     }
 
@@ -302,6 +463,19 @@ impl PyLiveSession {
     #[pyo3(signature = (*_args))]
     fn __exit__(&self, py: Python<'_>, _args: &Bound<'_, pyo3::types::PyTuple>) -> PyResult<()> {
         self.close(py)
+    }
+
+    fn __aenter__(slf: Py<Self>, py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+        future_into_py(py, async move { Ok(slf) })
+    }
+
+    #[pyo3(signature = (*_args))]
+    fn __aexit__<'py>(
+        &self,
+        py: Python<'py>,
+        _args: &Bound<'py, pyo3::types::PyTuple>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        self.close_async(py)
     }
 }
 
@@ -358,8 +532,9 @@ impl PyLiveEvents {
         next.map(|event| live_event_to_py(py, event)).transpose()
     }
 
-    /// The next event, or `None` when `timeout` seconds pass or the stream
-    /// has ended (after the `disconnected` event).
+    /// The next event, or `None` once the stream has ended (after the
+    /// `disconnected` event). Raises `gemini_adk.TimeoutError` when
+    /// `timeout` seconds pass first.
     fn next_timeout<'py>(
         &self,
         py: Python<'py>,
@@ -368,11 +543,18 @@ impl PyLiveEvents {
         let rx = self.rx.clone();
         let wait = std::time::Duration::from_secs_f64(timeout.max(0.0));
         let next = block_on(py, async move {
-            tokio::time::timeout(wait, async { rx.lock().await.recv().await })
-                .await
-                .unwrap_or_default()
+            tokio::time::timeout(wait, async { rx.lock().await.recv().await }).await
         })?;
-        next.map(|event| live_event_to_py(py, event)).transpose()
+        match next {
+            Ok(next) => next.map(|event| live_event_to_py(py, event)).transpose(),
+            Err(_) => {
+                let class = crate::errors::timeout_error(py)?;
+                Err(PyErr::from_type(
+                    class.into_bound(py),
+                    format!("no event within {timeout} s"),
+                ))
+            }
+        }
     }
 
     fn __aiter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {

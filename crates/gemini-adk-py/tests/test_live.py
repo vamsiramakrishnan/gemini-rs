@@ -15,9 +15,12 @@ def drain(events, *, until="turn_complete", limit=10.0):
     out = []
     deadline = time.monotonic() + limit
     while time.monotonic() < deadline:
-        event = events.next_timeout(0.5)
-        if event is None:
+        try:
+            event = events.next_timeout(0.5)
+        except adk.TimeoutError:
             continue
+        if event is None:  # the stream ended
+            break
         out.append(event)
         if event["kind"] == until:
             break
@@ -85,9 +88,12 @@ def test_slow_consumer_does_not_stall_fast_lane(frames):
         lagged_events = 0
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
-            event = events.next_timeout(0.5)
-            if event is None:
+            try:
+                event = events.next_timeout(0.5)
+            except adk.TimeoutError:
                 continue
+            if event is None:
+                break
             if event["kind"] == "audio":
                 received += 1
                 time.sleep(0.002)
@@ -117,9 +123,12 @@ def test_lagged_event_counts_every_drop_in_order(frames):
         dropped = 0
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
-            event = events.next_timeout(0.5)
-            if event is None:
+            try:
+                event = events.next_timeout(0.5)
+            except adk.TimeoutError:
                 continue
+            if event is None:
+                break
             if event["kind"] == "audio":
                 seen.append(int.from_bytes(event["data"], "little"))
             elif event["kind"] == "lagged":
@@ -158,11 +167,14 @@ def test_events_after_close_end_the_iterator(frames):
     session.close()
     rest = list(events)  # ends after the final `disconnected` event
     assert rest[-1]["kind"] == "disconnected"
-    assert events.next_timeout(0.5) is None
+    assert events.next_timeout(0.5) is None  # ended, not timed out
+    # A stream opened after the close ends at once instead of waiting for
+    # a `disconnected` event that was broadcast before it subscribed.
+    assert list(session.events()) == []
 
 
 async def test_async_iteration_ends_after_close(frames):
-    session = adk.scripted([frames.turn_complete()])
+    session = await adk.scripted_async([frames.turn_complete()])
     events = session.events()
     await session.close_async()
     kinds = [e["kind"] async for e in events]
@@ -177,7 +189,7 @@ def test_send_after_close_is_session_closed(frames):
 
 
 async def test_async_iteration_and_async_sends(frames):
-    session = adk.scripted([frames.text("hi"), frames.turn_complete()], released=False)
+    session = await adk.scripted_async([frames.text("hi"), frames.turn_complete()], released=False)
     events = session.events()
     session.release()
     kinds = []
@@ -235,7 +247,7 @@ async def test_async_tool_is_cancelled_on_barge_in(frames):
         return "late"
 
     script = [frames.tool_call("c1", "slow", {"x": 1}), frames.interrupted(), frames.text("moving on"), frames.turn_complete()]
-    session = adk.scripted(script, tools=[slow], released=False)
+    session = await adk.scripted_async(script, tools=[slow], released=False)
     events = session.events()
     session.release()
     kinds = []
@@ -262,7 +274,7 @@ async def test_server_tool_cancellation_is_surfaced(frames):
         return "done"
 
     script = [frames.tool_call("c1", "quick", {}), frames.tool_call_cancellation("c1"), frames.turn_complete()]
-    session = adk.scripted(script, tools=[quick], released=False)
+    session = await adk.scripted_async(script, tools=[quick], released=False)
     events = session.events()
     session.release()
     cancelled = []
@@ -276,16 +288,46 @@ async def test_server_tool_cancellation_is_surfaced(frames):
 
 
 async def test_dropped_session_disconnects(frames):
-    """Letting a session go out of scope does not hang the interpreter or
-    the runtime: a later session works."""
-    session = adk.scripted([frames.turn_complete()])
+    """A session that goes out of scope is disconnected on the runtime: its
+    event stream ends with `disconnected`, and later sessions work."""
+    session = await adk.scripted_async([frames.turn_complete()], released=False)
     events = session.events()
+    session.release()
     del session
-    del events
-    await asyncio.sleep(0.05)
-    again = adk.scripted([frames.turn_complete()])
-    assert again.events().next_timeout(5.0) == {"kind": "turn_complete"}
+    kinds = []
+    async for event in events:
+        kinds.append(event["kind"])
+    assert kinds[-1] == "disconnected"
+    # Subscribe before the script plays: a broadcast event is only seen by
+    # the subscribers that exist when it is sent.
+    again = await adk.scripted_async([frames.turn_complete()], released=False)
+    events = again.events()
+    again.release()
+    assert await events.__anext__() == {"kind": "turn_complete"}
     await again.close_async()
+
+
+async def test_async_with_closes_the_session(frames):
+    async with await adk.scripted_async([frames.turn_complete()], released=False) as session:
+        events = session.events()
+        session.release()
+        assert (await events.__anext__())["kind"] == "turn_complete"
+    with pytest.raises(adk.SessionClosedError):
+        await session.send_text_async("after")
+
+
+def test_next_timeout_distinguishes_timeout_from_end(frames):
+    session = adk.scripted([frames.turn_complete()], released=False)
+    events = session.events()
+    with pytest.raises(adk.TimeoutError):
+        events.next_timeout(0.2)
+    with pytest.raises(TimeoutError):  # also the builtin
+        events.next_timeout(0.1)
+    session.release()
+    assert drain(events)[-1]["kind"] == "turn_complete"
+    session.close()
+    assert drain(events, until="disconnected")[-1]["kind"] == "disconnected"
+    assert events.next_timeout(0.1) is None
 
 
 def test_state_and_resume_handle_default(frames):
