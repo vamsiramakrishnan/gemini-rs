@@ -8,7 +8,7 @@ back to back in random order, and the comparison is the median of the
 per-pair difference (Python minus Rust) with a bootstrap 95% interval.
 Raw samples are in `live_api.json`.
 
-Run 2026-11-07 11:06 UTC; revision `caac7a8` plus nothing; Linux x86_64,
+Run 2026-11-07 11:06 UTC; revision `caac7a8`; Linux x86_64,
 4 vCPU cloud container; Python 3.13.18; gemini_adk 5.0.0 (release build);
 text model `gemini-flash-lite-latest`, temperature 0; Live model the SDK
 default (`gemini-2.5-flash-native-audio-latest`).
