@@ -143,6 +143,7 @@ mod tests {
             name: "rm_rf".into(),
             args: serde_json::json!({}),
             id: None,
+            thought_signature: None,
         };
 
         let result = plugin.before_tool(&call, &ctx).await;
@@ -166,6 +167,7 @@ mod tests {
             name: "get_weather".into(),
             args: serde_json::json!({}),
             id: None,
+            thought_signature: None,
         };
 
         let result = plugin.before_tool(&call, &ctx).await;

@@ -6,8 +6,9 @@ and offline simulation; `import gemini_adk` is the whole install. The
 package lives in `crates/gemini-adk-py`; its README is the reference for
 the surface and the threading contract. This page is the short version.
 
-> Experimental. The PyPI name is not final and no wheel is published yet;
-> build it locally with `maturin develop` (see the crate README).
+> Experimental: the Python API may change between minor releases. Install
+> it with `pip install gemini-adk` (Python 3.10+), or build it locally with
+> `maturin develop` (see the crate README).
 
 ## A text agent with a tool
 

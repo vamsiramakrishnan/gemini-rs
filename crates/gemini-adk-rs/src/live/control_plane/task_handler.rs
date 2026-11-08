@@ -773,6 +773,7 @@ mod tests {
                 name: name.into(),
                 args,
                 id: Some(format!("call-{name}")),
+                thought_signature: None,
             };
             self.lane
                 .calls(

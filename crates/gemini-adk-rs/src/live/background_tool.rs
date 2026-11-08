@@ -398,6 +398,7 @@ mod tests {
             name: name.to_string(),
             args: serde_json::json!({"query": "test"}),
             id: Some("fc_123".to_string()),
+            thought_signature: None,
         }
     }
 

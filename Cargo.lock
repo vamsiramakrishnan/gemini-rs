@@ -1345,7 +1345,7 @@ dependencies = [
 
 [[package]]
 name = "example-context-update-spike"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "gemini-adk-fluent-rs",
  "gemini-genai-rs",
@@ -1369,7 +1369,7 @@ dependencies = [
 
 [[package]]
 name = "example-quickstart"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "gemini-adk-fluent-rs",
  "schemars 0.8.22",
@@ -1380,7 +1380,7 @@ dependencies = [
 
 [[package]]
 name = "example-redteam-call"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "gemini-adk-fluent-rs",
  "gemini-adk-rs",
@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "example-session-bench"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1748,7 +1748,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "gemini-adk-fluent-rs",
  "gemini-memory-rs",
@@ -1760,7 +1760,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-api-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "dotenvy",
  "gemini-adk-server-rs",
@@ -1771,7 +1771,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-cli-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -1794,7 +1794,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-fluent-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "aes",
  "async-trait",
@@ -1832,7 +1832,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-macros-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "gemini-adk-rs",
@@ -1849,7 +1849,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1883,7 +1883,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-server-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -1923,7 +1923,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-adk-web-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -1949,7 +1949,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-genai-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1984,7 +1984,7 @@ dependencies = [
 
 [[package]]
 name = "gemini-memory-rs"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",

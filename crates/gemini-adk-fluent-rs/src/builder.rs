@@ -1184,6 +1184,7 @@ mod tests {
                                 name: self.tool_name.to_string(),
                                 args: serde_json::json!({"x": 1}),
                                 id: Some("call-1".into()),
+                                thought_signature: None,
                             },
                         }],
                     },

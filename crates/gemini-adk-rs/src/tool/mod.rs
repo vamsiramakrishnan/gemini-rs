@@ -266,6 +266,7 @@ mod tests {
             name: "test".to_string(),
             args: json!({}),
             id: Some("call-1".to_string()),
+            thought_signature: None,
         };
         let resp = ToolDispatcher::build_response(&call, Ok(json!({"ok": true})));
         assert_eq!(resp.name, "test");
@@ -278,6 +279,7 @@ mod tests {
             name: "test".to_string(),
             args: json!({}),
             id: Some("call-1".to_string()),
+            thought_signature: None,
         };
         let resp = ToolDispatcher::build_response(
             &call,

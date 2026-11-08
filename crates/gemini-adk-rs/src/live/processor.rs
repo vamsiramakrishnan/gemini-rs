@@ -1896,6 +1896,7 @@ mod tests {
                 name: "slow_search".to_string(),
                 args: serde_json::json!({"q": "test"}),
                 id: Some("fc_1".to_string()),
+                thought_signature: None,
             },
         ]));
 
@@ -2037,6 +2038,7 @@ mod tests {
                 name: "slow".to_string(),
                 args: serde_json::json!({}),
                 id: Some("fc_slow".to_string()),
+                thought_signature: None,
             },
         ]));
         tokio::time::sleep(Duration::from_millis(50)).await;

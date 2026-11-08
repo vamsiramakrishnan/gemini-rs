@@ -268,6 +268,7 @@ mod tests {
             name: name.to_string(),
             args: serde_json::json!({"key": "value"}),
             id: None,
+            thought_signature: None,
         }
     }
 

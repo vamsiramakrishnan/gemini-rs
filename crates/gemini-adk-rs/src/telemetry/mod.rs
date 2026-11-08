@@ -119,6 +119,7 @@ mod tests {
             name: "my_tool".to_string(),
             args: serde_json::json!({}),
             id: None,
+            thought_signature: None,
         };
         let result = serde_json::json!({"ok": true});
         let tool_err = ToolError::ExecutionFailed("boom".to_string());

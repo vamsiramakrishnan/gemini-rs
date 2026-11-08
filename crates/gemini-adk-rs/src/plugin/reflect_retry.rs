@@ -103,6 +103,7 @@ mod tests {
             name: "search".into(),
             args: serde_json::json!({"query": "test"}),
             id: None,
+            thought_signature: None,
         };
 
         let result = plugin
