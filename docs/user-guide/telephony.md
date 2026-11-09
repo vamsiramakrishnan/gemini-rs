@@ -194,6 +194,10 @@ peers against a bound agent:
 - a refused registration;
 - an extension method → 405 with its original CSeq method, then a normal
   incoming INVITE;
+- an accepted INVITE → ACK confirms the owning dialog → BYE terminates it;
+- CANCEL while ringing → 200 to CANCEL and 487 to INVITE; retransmitted
+  CANCEL gets its cached reply and an unmatched CANCEL gets 481;
+- shutdown ends an answered call, its media tasks and the pending call waiter;
 - malformed message framing → 400; invalid core headers never surface as
   calls; a UDP INVITE without Content-Length retains its SDP body;
 - an SRTP call where the caller's encrypted audio reaches the model, audio
