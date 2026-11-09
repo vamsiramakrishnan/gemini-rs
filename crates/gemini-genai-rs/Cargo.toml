@@ -121,7 +121,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optio
 
 # Metrics (optional)
 metrics = { version = "0.24", optional = true }
-metrics-exporter-prometheus = { version = "0.16", optional = true }
+metrics-exporter-prometheus = { version = "0.18", optional = true }
 
 # OpenTelemetry — shared (otel-base)
 #
