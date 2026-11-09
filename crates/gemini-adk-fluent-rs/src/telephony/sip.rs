@@ -143,7 +143,7 @@ impl SipAgent {
             .with_cancel_token(cancel.child_token())
             .with_transport_layer(transport_layer)
             .build();
-        // Endpoint::serve owns listener startup in rsipstack 0.7. Starting
+        // Endpoint::serve owns listener startup in rsipstack. Starting
         // listeners separately would race the endpoint's transport receiver.
         let inner = endpoint.inner.clone();
         tokio::spawn(async move {
@@ -172,7 +172,7 @@ impl SipAgent {
                 tx = self.incoming.recv() => tx?,
             };
             use rsipstack::rsip::{Method, StatusCode};
-            match tx.original.method {
+            match &tx.original.method {
                 Method::Invite => {
                     let offer = match sdp::parse_audio_offer(
                         String::from_utf8_lossy(&tx.original.body).as_ref(),
@@ -217,9 +217,16 @@ impl SipAgent {
                         .unwrap_or_default();
                     let _ = dialog.ringing(None, None);
                     // Responses (180/200/603) are queued events on the INVITE
-                    // transaction; pumping receive() is what puts them on the
-                    // wire and later delivers the ACK.
-                    tokio::spawn(async move { while tx.receive().await.is_some() {} });
+                    // transaction. The dialog's handler pumps them onto the
+                    // wire and processes ACK/CANCEL into dialog state changes.
+                    let mut handler = dialog.clone();
+                    let stop = self.cancel.clone();
+                    tokio::spawn(async move {
+                        tokio::select! {
+                            _ = stop.cancelled() => {}
+                            _ = handler.handle(&mut tx) => {}
+                        }
+                    });
                     return Some(IncomingCall {
                         dialog,
                         state_rx,
@@ -228,6 +235,7 @@ impl SipAgent {
                         local_ip: self.local_ip,
                         dialog_layer: self.dialog_layer.clone(),
                         filler: None,
+                        cancel: self.cancel.child_token(),
                     });
                 }
                 Method::Ack | Method::Bye | Method::Cancel | Method::Info | Method::Update => {
@@ -542,6 +550,7 @@ pub struct IncomingCall {
     local_ip: IpAddr,
     dialog_layer: Arc<DialogLayer>,
     filler: Option<FillerConfig>,
+    cancel: CancellationToken,
 }
 
 impl IncomingCall {
@@ -622,7 +631,7 @@ impl IncomingCall {
             .map_err(SipError::from)?;
         let _ = handle.state().set(bridge::KEY_CALLER, self.from.clone());
 
-        let cancel = CancellationToken::new();
+        let cancel = self.cancel;
         let media = rtp_media(
             handle,
             Arc::new(rtp_socket),
@@ -642,9 +651,14 @@ impl IncomingCall {
         let dialog_id = self.dialog.id();
         let dialog_layer = self.dialog_layer;
         let ended = tokio::spawn(async move {
-            while let Some(state) = state_rx.recv().await {
-                if let DialogState::Terminated(_, _) = state {
-                    break;
+            loop {
+                tokio::select! {
+                    _ = media_cancel.cancelled() => break,
+                    state = state_rx.recv() => {
+                        if matches!(state, None | Some(DialogState::Terminated(..))) {
+                            break;
+                        }
+                    }
                 }
             }
             media_cancel.cancel();
@@ -939,6 +953,12 @@ fn seed() -> u32 {
 }
 
 #[cfg(test)]
+mod lifecycle_tests;
+
+#[cfg(test)]
+mod migration_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1099,14 +1119,31 @@ mod tests {
                 break request;
             }
         };
-        for part in [
-            "username=\"alice\"",
-            "realm=\"test\"",
-            "nonce=\"n1\"",
-            "response=",
-        ] {
-            assert!(answered.contains(part), "missing {part} in {answered}");
-        }
+        use rsipstack::rsip::{DigestGenerator, HeadersExt as _, Method, Request};
+        let initial = Request::try_from(first.as_str()).unwrap();
+        let authenticated = Request::try_from(answered.as_str()).unwrap();
+        let auth = rsipstack::rsip::typed::Authorization::parse(
+            authenticated.authorization_header().unwrap().value(),
+        )
+        .unwrap();
+        assert_eq!(auth.username, "alice");
+        assert_eq!(auth.realm, "test");
+        assert_eq!(auth.nonce, "n1");
+        assert_eq!(auth.uri, authenticated.uri);
+        assert!(DigestGenerator::from(&auth, &password, &Method::Register).verify(&auth.response));
+        assert_eq!(
+            authenticated.cseq_header().unwrap().seq().unwrap(),
+            initial.cseq_header().unwrap().seq().unwrap() + 1
+        );
+        assert_eq!(
+            authenticated.call_id_header().unwrap().value(),
+            initial.call_id_header().unwrap().value()
+        );
+        assert_ne!(
+            authenticated.via_header().unwrap().value(),
+            initial.via_header().unwrap().value(),
+            "the authenticated retry uses a new transaction branch"
+        );
         assert!(
             !answered.contains(&password),
             "the password never goes on the wire"

@@ -192,9 +192,33 @@ peers against a bound agent:
   failure;
 - registration through a digest challenge, then removal;
 - a refused registration;
+- an extension method → 405 with its original CSeq method, then a normal
+  incoming INVITE;
+- an accepted INVITE → ACK confirms the owning dialog → BYE terminates it;
+- CANCEL while ringing → 200 to CANCEL and 487 to INVITE; retransmitted
+  CANCEL gets its cached reply and an unmatched CANCEL gets 481;
+- shutdown ends an answered call, its media tasks and the pending call waiter;
+- malformed message framing → 400; invalid core headers never surface as
+  calls; a UDP INVITE without Content-Length retains its SDP body;
 - an SRTP call where the caller's encrypted audio reaches the model, audio
   under a wrong key does not, and the model's audio comes back as SRTP
   under the answered key.
+
+With rsipstack 0.8, peers must send a valid Request-Line, Via, From/To and
+Contact syntax, a CSeq method matching the request, and at most one numeric
+Content-Length (the compact `l:` header counts too). A truncated body is
+rejected. Lengths count bytes. Peers or intermediaries that relied on lenient
+parsing need correcting; the agent does not rewrite malformed messages.
+`SipAgent::bind` currently serves UDP, where omitting Content-Length means
+the rest of the datagram is the body. The dependency also requires lengths
+on stream transports; that does not add TCP, TLS or WebSocket listeners to
+this agent.
+
+Run the model-free signalling and media regressions with:
+
+```bash
+cargo test -p gemini-adk-fluent-rs --no-default-features --features sip --lib telephony::sip:: --locked
+```
 
 ## Keypad entry, masking and recording
 

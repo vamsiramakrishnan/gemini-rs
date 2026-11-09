@@ -4743,9 +4743,9 @@ dependencies = [
 
 [[package]]
 name = "rsipstack"
-version = "0.7.14"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2cef88db50a798adedb435340dd81eae10763979fafc53d511bd871e7ba10d4"
+checksum = "3dcc376ebb665468973184c0b77815cdd50e42184c93f7b670b60d5b0471d0d6"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
