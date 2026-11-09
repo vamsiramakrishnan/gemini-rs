@@ -22,7 +22,7 @@ name = "gemini_adk_macros_rs"
 proc-macro = true
 
 [dependencies]
-syn = { version = "2", features = ["full"] }
+syn = { version = "3", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
 proc-macro-crate = "3"
