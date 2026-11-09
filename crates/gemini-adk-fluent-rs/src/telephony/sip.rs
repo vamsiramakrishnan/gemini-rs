@@ -217,9 +217,16 @@ impl SipAgent {
                         .unwrap_or_default();
                     let _ = dialog.ringing(None, None);
                     // Responses (180/200/603) are queued events on the INVITE
-                    // transaction; pumping receive() is what puts them on the
-                    // wire and later delivers the ACK.
-                    tokio::spawn(async move { while tx.receive().await.is_some() {} });
+                    // transaction. The dialog's handler pumps them onto the
+                    // wire and processes ACK/CANCEL into dialog state changes.
+                    let mut handler = dialog.clone();
+                    let stop = self.cancel.clone();
+                    tokio::spawn(async move {
+                        tokio::select! {
+                            _ = stop.cancelled() => {}
+                            _ = handler.handle(&mut tx) => {}
+                        }
+                    });
                     return Some(IncomingCall {
                         dialog,
                         state_rx,
@@ -228,6 +235,7 @@ impl SipAgent {
                         local_ip: self.local_ip,
                         dialog_layer: self.dialog_layer.clone(),
                         filler: None,
+                        cancel: self.cancel.child_token(),
                     });
                 }
                 Method::Ack | Method::Bye | Method::Cancel | Method::Info | Method::Update => {
@@ -542,6 +550,7 @@ pub struct IncomingCall {
     local_ip: IpAddr,
     dialog_layer: Arc<DialogLayer>,
     filler: Option<FillerConfig>,
+    cancel: CancellationToken,
 }
 
 impl IncomingCall {
@@ -622,7 +631,7 @@ impl IncomingCall {
             .map_err(SipError::from)?;
         let _ = handle.state().set(bridge::KEY_CALLER, self.from.clone());
 
-        let cancel = CancellationToken::new();
+        let cancel = self.cancel;
         let media = rtp_media(
             handle,
             Arc::new(rtp_socket),
@@ -642,9 +651,14 @@ impl IncomingCall {
         let dialog_id = self.dialog.id();
         let dialog_layer = self.dialog_layer;
         let ended = tokio::spawn(async move {
-            while let Some(state) = state_rx.recv().await {
-                if let DialogState::Terminated(_, _) = state {
-                    break;
+            loop {
+                tokio::select! {
+                    _ = media_cancel.cancelled() => break,
+                    state = state_rx.recv() => {
+                        if matches!(state, None | Some(DialogState::Terminated(..))) {
+                            break;
+                        }
+                    }
                 }
             }
             media_cancel.cancel();
@@ -937,6 +951,9 @@ fn seed() -> u32 {
         .unwrap_or(0);
     nanos ^ (std::process::id().rotate_left(16))
 }
+
+#[cfg(test)]
+mod lifecycle_tests;
 
 #[cfg(test)]
 mod migration_tests;
