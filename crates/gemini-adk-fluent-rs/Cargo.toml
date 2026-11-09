@@ -78,7 +78,7 @@ proptest = "1"
 # back, so a generator change that drops a step or guard fails there.
 syn = { version = "2", features = ["full"] }
 # ... and the generated `Cargo.toml`.
-toml = "0.9"
+toml = "1.1"
 # The end-to-end fast-lane benchmark (benches/fast_lane.rs).
 criterion = { version = "0.5", default-features = false }
 base64 = "0.22"
