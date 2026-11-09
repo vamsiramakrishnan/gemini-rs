@@ -143,7 +143,7 @@ impl SipAgent {
             .with_cancel_token(cancel.child_token())
             .with_transport_layer(transport_layer)
             .build();
-        // Endpoint::serve owns listener startup in rsipstack 0.7. Starting
+        // Endpoint::serve owns listener startup in rsipstack. Starting
         // listeners separately would race the endpoint's transport receiver.
         let inner = endpoint.inner.clone();
         tokio::spawn(async move {
@@ -172,7 +172,7 @@ impl SipAgent {
                 tx = self.incoming.recv() => tx?,
             };
             use rsipstack::rsip::{Method, StatusCode};
-            match tx.original.method {
+            match &tx.original.method {
                 Method::Invite => {
                     let offer = match sdp::parse_audio_offer(
                         String::from_utf8_lossy(&tx.original.body).as_ref(),
@@ -939,6 +939,9 @@ fn seed() -> u32 {
 }
 
 #[cfg(test)]
+mod migration_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1099,14 +1102,31 @@ mod tests {
                 break request;
             }
         };
-        for part in [
-            "username=\"alice\"",
-            "realm=\"test\"",
-            "nonce=\"n1\"",
-            "response=",
-        ] {
-            assert!(answered.contains(part), "missing {part} in {answered}");
-        }
+        use rsipstack::rsip::{DigestGenerator, HeadersExt as _, Method, Request};
+        let initial = Request::try_from(first.as_str()).unwrap();
+        let authenticated = Request::try_from(answered.as_str()).unwrap();
+        let auth = rsipstack::rsip::typed::Authorization::parse(
+            authenticated.authorization_header().unwrap().value(),
+        )
+        .unwrap();
+        assert_eq!(auth.username, "alice");
+        assert_eq!(auth.realm, "test");
+        assert_eq!(auth.nonce, "n1");
+        assert_eq!(auth.uri, authenticated.uri);
+        assert!(DigestGenerator::from(&auth, &password, &Method::Register).verify(&auth.response));
+        assert_eq!(
+            authenticated.cseq_header().unwrap().seq().unwrap(),
+            initial.cseq_header().unwrap().seq().unwrap() + 1
+        );
+        assert_eq!(
+            authenticated.call_id_header().unwrap().value(),
+            initial.call_id_header().unwrap().value()
+        );
+        assert_ne!(
+            authenticated.via_header().unwrap().value(),
+            initial.via_header().unwrap().value(),
+            "the authenticated retry uses a new transaction branch"
+        );
         assert!(
             !answered.contains(&password),
             "the password never goes on the wire"
