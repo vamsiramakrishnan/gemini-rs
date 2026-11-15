@@ -142,7 +142,7 @@ tracing-opentelemetry = { version = "0.34", optional = true }
 opentelemetry-otlp = { version = "0.33", features = ["grpc-tonic", "trace", "metrics"], optional = true }
 
 # OpenTelemetry — Google Cloud exporters (otel-gcp)
-opentelemetry-gcloud-trace = { version = "0.29", optional = true }
+opentelemetry-gcloud-trace = { version = "0.30", optional = true }
 # Google auth headers (ADC) and a TLS channel for OTLP metric export to the
 # Telemetry API; already in the graph through `opentelemetry-gcloud-trace`.
 gcloud-sdk = { version = "0.33", default-features = false, optional = true }
