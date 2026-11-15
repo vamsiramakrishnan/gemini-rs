@@ -41,7 +41,7 @@ schemars = "0.8"
 url = "2"
 # Bundle version ids (`spec::store`).
 sha2 = "0.11"
-parking_lot = "0.12"
+parking_lot = "0.13"
 tracing = "0.1"
 # Optional: HTTP tool bindings for spec-driven sessions (`http-tools`).
 reqwest = { version = "0.12", default-features = false, features = [
@@ -92,7 +92,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls-native-roots",
 ] }
-parking_lot = "0.12"
+parking_lot = "0.13"
 
 [features]
 # Bundles. `voice` is everything a microphone/speaker application wants;
