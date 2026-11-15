@@ -3800,9 +3800,9 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-gcloud-trace"
-version = "0.29.1"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09c153e06a1a064f356dd131267cd6fbac1238333936c414d6abd492adbc8043"
+checksum = "8f37db23181927b3c4bbe98bcd0d22fbb8d2f4bf4daa9900acb5dc09ed8905ee"
 dependencies = [
  "async-trait",
  "futures",
